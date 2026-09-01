@@ -72,3 +72,29 @@ func gitOutput(root string, args ...string) (string, error) {
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }
+
+// GitTrackedPaths returns the subset of rels that Git tracks at root, in the
+// order Git reports them. A declared artifact must not be tracked: vise
+// deletes artifacts before every run, and a probe that then fails would
+// leave a tracked file, and any uncommitted edits to it, deleted.
+func GitTrackedPaths(root string, rels []string) ([]string, error) {
+	if len(rels) == 0 {
+		return nil, nil
+	}
+	args := append([]string{"--literal-pathspecs", "ls-files", "-z", "--"}, rels...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("git ls-files: %s", strings.TrimSpace(stderr.String()))
+	}
+	var tracked []string
+	for _, entry := range bytes.Split(stdout.Bytes(), []byte{0}) {
+		if len(entry) > 0 {
+			tracked = append(tracked, filepath.ToSlash(string(entry)))
+		}
+	}
+	return tracked, nil
+}

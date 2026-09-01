@@ -49,6 +49,13 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 			return RunResult{HarnessError: err.Error()}
 		}
 	}
+	tracked, err := GitTrackedPaths(r.Root, probe.Files)
+	if err != nil {
+		return RunResult{HarnessError: err.Error()}
+	}
+	if len(tracked) > 0 {
+		return RunResult{HarnessError: fmt.Sprintf("declared artifact %q is tracked by git; artifacts must be gitignored build outputs because vise deletes them before every run", tracked[0])}
+	}
 	for _, rel := range probe.Files {
 		if err := ValidateArtifactPath(r.Root, rel); err != nil {
 			return RunResult{HarnessError: fmt.Sprintf("artifact %q: %v", rel, err)}

@@ -141,3 +141,16 @@ func TestRunnerReturnsWhenDetachedChildHoldsStdout(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 }
+
+func TestRunnerRefusesTrackedArtifactWithoutDeletingIt(t *testing.T) {
+	root := testGitRepo(t)
+	probe := Probe{ID: "artifact", Run: "printf regenerated > tracked.txt", Timeout: 5, Files: []string{"tracked.txt"}}
+	result := (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, false)
+	if !strings.Contains(result.HarnessError, `"tracked.txt" is tracked by git`) {
+		t.Fatalf("result = %#v", result)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "tracked.txt"))
+	if err != nil || string(data) != "original\n" {
+		t.Fatalf("tracked file was touched: %q, %v", data, err)
+	}
+}
