@@ -36,6 +36,8 @@ func TestLoadManifestRejectsUnknownAndDuplicateIDs(t *testing.T) {
 	}{
 		{"unknown", "[vise]\nversion=1\nunknown=true\n", "unknown vise.toml keys"},
 		{"duplicate", "[vise]\nversion=1\n[[probe]]\nid='x'\nrun='true'\n[[metric]]\nid='x'\nrun='printf 1'\n", "duplicate id"},
+		{"reserved probe id", "[vise]\nversion=1\n[[probe]]\nid='fingerprint'\nrun='true'\n", "reserved for harness failures"},
+		{"reserved metric id", "[vise]\nversion=1\n[[metric]]\nid='journal'\nrun='printf 1'\n", "reserved for harness failures"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
