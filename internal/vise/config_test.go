@@ -49,6 +49,28 @@ func TestLoadManifestRejectsUnknownAndDuplicateIDs(t *testing.T) {
 	}
 }
 
+func TestManifestRejectsReservedEnvironmentAndEvaluatorArtifacts(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"reserved-env", "[vise]\nversion=1\n[[probe]]\nid='x'\nrun='true'\nenv={TZ='local'}\n", "reserved variable TZ"},
+		{"git-artifact", "[vise]\nversion=1\n[[probe]]\nid='x'\nrun='true'\nfiles=['.git/index']\n", "Git metadata"},
+		{"lock-artifact", "[vise]\nversion=1\n[[probe]]\nid='x'\nrun='true'\nfiles=['vise.lock']\n", "evaluator state"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTestFile(t, root, "vise.toml", test.body)
+			_, _, err := LoadManifest(root)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestValidateRelativePathRejectsEscapesAndSymlinks(t *testing.T) {
 	root := t.TempDir()
 	if err := ValidateRelativePath(root, "../escape", false); err == nil {

@@ -17,6 +17,7 @@ type VerifyResult struct {
 	LockBytes     []byte
 	ManifestBytes []byte
 	Flaky         []string
+	CheckSet      []string
 	Commit        string
 	Dirty         bool
 }
@@ -67,6 +68,13 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	for _, probe := range selected {
 		probeIDs = append(probeIDs, probe.ID)
 	}
+	if opts.ProbeID == "" {
+		for _, metric := range manifest.Metrics {
+			probeIDs = append(probeIDs, metric.ID)
+		}
+	}
+	sort.Strings(probeIDs)
+	result.CheckSet = append([]string(nil), probeIDs...)
 
 	if opts.EnforceRerunLimit {
 		events, err := ReadJournal(root, 20)
@@ -108,7 +116,7 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	runner := Runner{Root: root, Manifest: manifest}
 	for _, probe := range selected {
 		expected := lock.Probes[probe.ID]
-		first := runner.RunProbe(probe, false)
+		first := runner.RunProbe(probe, true)
 		if first.HarnessError != "" {
 			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: first.HarnessError})
 			continue
@@ -116,7 +124,7 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 		if RunMatchesLock(first, expected) {
 			continue
 		}
-		second := runner.RunProbe(probe, false)
+		second := runner.RunProbe(probe, true)
 		if second.HarnessError != "" {
 			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: second.HarnessError})
 			continue
@@ -333,7 +341,7 @@ func JournalVerifyResult(root, command string, result VerifyResult) error {
 	if len(result.Flaky) > 0 {
 		event.Event = "flake"
 		event.Flaky = append([]string(nil), result.Flaky...)
-		event.Probes = append([]string(nil), result.Flaky...)
+		event.Probes = append([]string(nil), result.CheckSet...)
 	}
 	return AppendJournal(root, event)
 }

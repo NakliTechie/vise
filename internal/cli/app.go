@@ -1,14 +1,12 @@
 package cli
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -352,6 +350,3 @@ func printCommandHelp(w io.Writer, command string) {
 	}
 	printHelp(w)
 }
-
-var _ = bytes.Compare
-var _ = sort.Strings

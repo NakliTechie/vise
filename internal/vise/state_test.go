@@ -3,6 +3,7 @@ package vise
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,51 @@ func TestWriteGenerationRoundTripAndPrune(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".vise", "blobs", HashName(oldHash))); !os.IsNotExist(err) {
 		t.Fatalf("old blob not pruned: %v", err)
+	}
+}
+
+func TestTamperHashIgnoresOrphanBlobsAndChecksReferencedContent(t *testing.T) {
+	root := t.TempDir()
+	data := []byte("expected")
+	hash := HashBytes(data)
+	lock := Lockfile{V: 1, Fingerprint: Fingerprint{OS: "test", Arch: "test"}, Probes: map[string]ProbeLock{
+		"p": {RunHash: "sha256:run", RecordedCommit: "abc", Stdout: hash, Stderr: hash},
+	}}
+	lockBytes, err := CanonicalJSON(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteBlobs(root, map[string][]byte{hash: data, HashBytes([]byte("orphan")): []byte("orphan")}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := TamperHash(root, []byte("manifest"), lockBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".vise", "blobs", HashName(HashBytes([]byte("another orphan")))), []byte("another orphan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := TamperHash(root, []byte("manifest"), lockBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("orphan changed hash: %s != %s", first, second)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".vise", "blobs", HashName(hash)), []byte("corrupt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := TamperHash(root, []byte("manifest"), lockBytes); err == nil {
+		t.Fatal("expected corrupt blob rejection")
+	}
+}
+
+func TestFingerprintRejectsTrackedMutation(t *testing.T) {
+	root := testGitRepo(t)
+	manifest := testManifest(Probe{ID: "p", Run: "true", Timeout: 5})
+	manifest.Environment.Fingerprint = []string{"printf changed > tracked.txt; printf tool"}
+	if _, err := CaptureFingerprint(root, manifest); err == nil || !strings.Contains(err.Error(), "modified tracked files") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -75,6 +121,17 @@ func TestOutcomePrecedence(t *testing.T) {
 	outcome.AddFailure("harness", Failure{Class: "harness"})
 	outcome.Finalize()
 	if outcome.Exit != ExitHarness || outcome.Verdict != "indeterminate" || outcome.Next.Action != "fix_probe" {
+		t.Fatalf("outcome = %#v", outcome)
+	}
+}
+
+func TestOutcomeReplacesFailureWithoutDoubleCounting(t *testing.T) {
+	outcome := NewOutcome("verify")
+	outcome.Counts.Declared = 1
+	outcome.AddFailure("probe", Failure{Class: "harness"})
+	outcome.AddFailure("probe", Failure{Class: "behavior"})
+	outcome.Finalize()
+	if outcome.Counts.Harness != 0 || outcome.Counts.Behavior != 1 || outcome.Exit != ExitBehavior {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 }

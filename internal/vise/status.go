@@ -51,6 +51,11 @@ func BuildStatus(root string) StatusReport {
 	} else {
 		report.Manifest = StatusManifest{Present: true, Valid: true, Probes: len(manifest.Probes), Metrics: len(manifest.Metrics)}
 		report.State = "unrecorded"
+		if len(manifest.Probes) == 0 {
+			report.Next = Next{Action: "fix_probe", Detail: "declare at least one probe in vise.toml, commit the harness, then run vise record"}
+		} else {
+			report.Next = Next{Action: "record_first", Detail: "commit the harness, then run vise record"}
+		}
 	}
 
 	lock, lockBytes, lockErr := LoadLockfile(root)

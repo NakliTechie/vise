@@ -37,21 +37,26 @@ type Runner struct {
 }
 
 func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
-	for _, rel := range probe.Files {
-		if err := ValidateRelativePath(r.Root, rel, false); err != nil {
-			return RunResult{HarnessError: fmt.Sprintf("artifact %q: %v", rel, err)}
-		}
-		if err := os.RemoveAll(filepath.Join(r.Root, rel)); err != nil {
-			return RunResult{HarnessError: fmt.Sprintf("delete artifact %q: %v", rel, err)}
-		}
-	}
-
 	var before string
 	if checkTracked {
 		var err error
 		before, err = GitTrackedSnapshot(r.Root)
 		if err != nil {
 			return RunResult{HarnessError: err.Error()}
+		}
+	}
+	for _, rel := range probe.Files {
+		if err := ValidateArtifactPath(r.Root, rel); err != nil {
+			return RunResult{HarnessError: fmt.Sprintf("artifact %q: %v", rel, err)}
+		}
+		path := filepath.Join(r.Root, rel)
+		if info, err := os.Lstat(path); err == nil && info.IsDir() {
+			return RunResult{HarnessError: fmt.Sprintf("declared artifact %q is a directory; recursive deletion is refused", rel)}
+		} else if err != nil && !os.IsNotExist(err) {
+			return RunResult{HarnessError: fmt.Sprintf("inspect artifact %q: %v", rel, err)}
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return RunResult{HarnessError: fmt.Sprintf("delete artifact %q: %v", rel, err)}
 		}
 	}
 
@@ -61,6 +66,10 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 	}
 	result.Files = make(map[string][]byte, len(probe.Files))
 	for _, rel := range probe.Files {
+		if err := ValidateArtifactPath(r.Root, rel); err != nil {
+			result.HarnessError = fmt.Sprintf("artifact %q after probe: %v", rel, err)
+			return result
+		}
 		path := filepath.Join(r.Root, rel)
 		info, err := os.Lstat(path)
 		if err != nil {
@@ -92,6 +101,10 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 }
 
 func (r Runner) RunMetric(metric Metric) MetricResult {
+	before, err := GitTrackedSnapshot(r.Root)
+	if err != nil {
+		return MetricResult{HarnessError: err.Error()}
+	}
 	result := r.runShell(metric.ID, metric.Run, metric.Timeout, metric.Env)
 	if result.HarnessError != "" {
 		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: result.HarnessError}
@@ -120,6 +133,13 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 		if version == "" {
 			return MetricResult{Value: value, HarnessError: "metric version command returned empty output"}
 		}
+	}
+	after, err := GitTrackedSnapshot(r.Root)
+	if err != nil {
+		return MetricResult{Value: value, ToolVersion: version, HarnessError: err.Error()}
+	}
+	if before != after {
+		return MetricResult{Value: value, ToolVersion: version, HarnessError: "metric modified tracked files"}
 	}
 	return MetricResult{Value: value, ToolVersion: version, Stdout: result.Stdout, Stderr: result.Stderr}
 }

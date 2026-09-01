@@ -3,6 +3,7 @@ package vise
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -43,24 +44,25 @@ func TamperHash(root string, manifest, lock []byte) (string, error) {
 	h := sha256.New()
 	writeHashPart(h, "manifest", manifest)
 	writeHashPart(h, "lockfile", lock)
-	blobDir := filepath.Join(root, ".vise", "blobs")
-	entries, err := os.ReadDir(blobDir)
-	if err != nil && !os.IsNotExist(err) {
-		return "", err
+	var parsed Lockfile
+	if err := json.Unmarshal(lock, &parsed); err != nil {
+		return "", fmt.Errorf("parse lockfile for tamper hash: %w", err)
 	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			names = append(names, entry.Name())
-		}
+	refs := referencedHashes(parsed)
+	hashes := make([]string, 0, len(refs))
+	for hash := range refs {
+		hashes = append(hashes, hash)
 	}
-	sort.Strings(names)
-	for _, name := range names {
-		data, err := os.ReadFile(filepath.Join(blobDir, name))
+	sort.Strings(hashes)
+	for _, hash := range hashes {
+		data, err := os.ReadFile(filepath.Join(root, ".vise", "blobs", HashName(hash)))
 		if err != nil {
 			return "", err
 		}
-		writeHashPart(h, "blob:"+name, data)
+		if HashBytes(data) != hash {
+			return "", fmt.Errorf("blob %s failed its content hash", hash)
+		}
+		writeHashPart(h, "blob-index", []byte(hash))
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }

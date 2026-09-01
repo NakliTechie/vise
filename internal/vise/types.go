@@ -2,7 +2,6 @@ package vise
 
 import (
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strings"
 )
@@ -81,6 +80,9 @@ func NewOutcome(cmd string) Outcome {
 }
 
 func (o *Outcome) AddFailure(id string, f Failure) {
+	if prior, ok := o.Failures[id]; ok {
+		o.removeFailureCount(prior.Class)
+	}
 	o.Failures[id] = f
 	switch f.Class {
 	case "behavior":
@@ -91,6 +93,19 @@ func (o *Outcome) AddFailure(id string, f Failure) {
 		o.Counts.Harness++
 	case "metric":
 		o.Counts.Metric++
+	}
+}
+
+func (o *Outcome) removeFailureCount(class string) {
+	switch class {
+	case "behavior":
+		o.Counts.Behavior--
+	case "flake":
+		o.Counts.Flaky--
+	case "harness":
+		o.Counts.Harness--
+	case "metric":
+		o.Counts.Metric--
 	}
 }
 
@@ -172,7 +187,3 @@ func CanonicalJSON(v any) ([]byte, error) {
 }
 
 func IntPtr(v int) *int { return &v }
-
-func formatNumber(v float64) string {
-	return fmt.Sprintf("%g", v)
-}

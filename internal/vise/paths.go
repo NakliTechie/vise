@@ -38,6 +38,20 @@ func ValidateRelativePath(root, path string, mustExist bool) error {
 	return nil
 }
 
+func ValidateArtifactPath(root, path string) error {
+	if err := ValidateRelativePath(root, path, false); err != nil {
+		return err
+	}
+	clean := filepath.ToSlash(filepath.Clean(path))
+	if clean == ".git" || strings.HasPrefix(clean, ".git/") {
+		return fmt.Errorf("artifacts cannot target Git metadata")
+	}
+	if clean == ".vise" || strings.HasPrefix(clean, ".vise/") || clean == "vise.toml" || clean == "vise.lock" {
+		return fmt.Errorf("artifacts cannot target evaluator state")
+	}
+	return nil
+}
+
 func rejectSymlinkComponents(root, rel string) error {
 	current := root
 	for _, part := range strings.Split(filepath.Clean(rel), string(filepath.Separator)) {

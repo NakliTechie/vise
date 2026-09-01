@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -211,7 +210,6 @@ func ProbeLockFromRun(run RunResult) ProbeLock {
 
 func harnessOnly(cmd, id, detail string) Outcome {
 	outcome := NewOutcome(cmd)
-	outcome.Counts.Declared = 1
 	outcome.AddFailure(id, Failure{Class: "harness", Detail: detail})
 	outcome.Finalize()
 	return outcome
@@ -305,22 +303,4 @@ func DiffRuns(root string, expected ProbeLock, got RunResult) string {
 		}
 	}
 	return "observation differs"
-}
-
-func RecordArtifactPaths(manifest Manifest) []string {
-	paths := make([]string, 0)
-	for _, probe := range manifest.Probes {
-		paths = append(paths, probe.Files...)
-	}
-	sort.Strings(paths)
-	return paths
-}
-
-func CleanArtifacts(root string, manifest Manifest) error {
-	for _, rel := range RecordArtifactPaths(manifest) {
-		if err := os.RemoveAll(filepath.Join(root, rel)); err != nil {
-			return err
-		}
-	}
-	return nil
 }

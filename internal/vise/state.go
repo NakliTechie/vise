@@ -96,6 +96,10 @@ func CaptureFingerprint(root string, manifest Manifest) (Fingerprint, error) {
 	if len(manifest.Environment.Fingerprint) == 0 {
 		return fingerprint, nil
 	}
+	before, err := GitTrackedSnapshot(root)
+	if err != nil {
+		return Fingerprint{}, err
+	}
 	fingerprint.Env = make(map[string]string, len(manifest.Environment.Fingerprint))
 	runner := Runner{Root: root, Manifest: manifest}
 	for _, command := range manifest.Environment.Fingerprint {
@@ -107,6 +111,13 @@ func CaptureFingerprint(root string, manifest Manifest) (Fingerprint, error) {
 			return Fingerprint{}, fmt.Errorf("fingerprint %q exited %d: %s", command, result.Exit, strings.TrimSpace(string(result.Stderr)))
 		}
 		fingerprint.Env[command] = strings.TrimSpace(string(result.Stdout))
+	}
+	after, err := GitTrackedSnapshot(root)
+	if err != nil {
+		return Fingerprint{}, err
+	}
+	if before != after {
+		return Fingerprint{}, fmt.Errorf("environment fingerprint command modified tracked files")
 	}
 	return fingerprint, nil
 }
@@ -341,8 +352,23 @@ func ReadJournal(root string, limit int) ([]JournalEvent, error) {
 		return nil, err
 	}
 	defer file.Close()
+	const scanBytes int64 = 256 * 1024
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	offset := info.Size() - scanBytes
+	if offset < 0 {
+		offset = 0
+	}
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
+	}
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	if offset > 0 {
+		_ = scanner.Scan()
+	}
 	var events []JournalEvent
 	for scanner.Scan() {
 		var event JournalEvent

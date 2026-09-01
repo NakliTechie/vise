@@ -239,10 +239,10 @@ func TestInitStatusAndEmptyManifestRecordRemedy(t *testing.T) {
 	if err != nil || !strings.Contains(string(data), ".vise/journal.jsonl") {
 		t.Fatalf("gitignore: %v %q", err, data)
 	}
-	if exit, stdout, stderr := cliRun(t, root, "status"); exit != 0 || !strings.Contains(stdout, "UNRECORDED") || stderr != "" {
+	if exit, stdout, stderr := cliRun(t, root, "status"); exit != 0 || !strings.Contains(stdout, "UNRECORDED") || !strings.Contains(stdout, "declare at least one probe") || strings.Contains(stdout, "run vise init") || stderr != "" {
 		t.Fatalf("status: %d %q %q", exit, stdout, stderr)
 	}
-	if exit, _, stderr := cliRun(t, root, "record"); exit != 2 || !strings.Contains(stderr, "at least one") {
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 2 || !strings.Contains(stderr, "at least one") || !strings.Contains(stderr, "0/0") {
 		t.Fatalf("record empty: %d %q", exit, stderr)
 	}
 }

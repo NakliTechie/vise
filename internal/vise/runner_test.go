@@ -48,6 +48,19 @@ func TestRunnerRejectsMissingArtifact(t *testing.T) {
 	}
 }
 
+func TestRunnerRefusesDirectoryArtifactWithoutDeletingIt(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "out/keep.txt", "keep")
+	probe := Probe{ID: "directory", Run: "true", Timeout: 5, Files: []string{"out"}}
+	result := (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, false)
+	if !strings.Contains(result.HarnessError, "recursive deletion is refused") {
+		t.Fatalf("harness error = %q", result.HarnessError)
+	}
+	if _, err := os.Stat(filepath.Join(root, "out/keep.txt")); err != nil {
+		t.Fatalf("directory content was removed: %v", err)
+	}
+}
+
 func TestRunnerDetectsTrackedMutation(t *testing.T) {
 	root := testGitRepo(t)
 	probe := Probe{ID: "mutation", Run: "printf changed > tracked.txt", Timeout: 5}
@@ -90,6 +103,15 @@ func TestMetricParsingAndVersion(t *testing.T) {
 	metric := Metric{ID: "complexity", Run: "printf 12.5", Direction: "down", Enforce: "none", VersionCmd: "printf tool-1", Timeout: 5}
 	result := (Runner{Root: root, Manifest: testManifest(Probe{ID: "p", Run: "true", Timeout: 5})}).RunMetric(metric)
 	if result.HarnessError != "" || result.Value != 12.5 || result.ToolVersion != "tool-1" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestMetricDetectsTrackedMutation(t *testing.T) {
+	root := testGitRepo(t)
+	metric := Metric{ID: "mutation", Run: "printf changed > tracked.txt; printf 1", Direction: "down", Enforce: "none", Timeout: 5}
+	result := (Runner{Root: root, Manifest: testManifest(Probe{ID: "p", Run: "true", Timeout: 5})}).RunMetric(metric)
+	if result.HarnessError != "metric modified tracked files" {
 		t.Fatalf("result = %#v", result)
 	}
 }

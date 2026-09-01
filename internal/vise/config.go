@@ -60,6 +60,13 @@ type Proposals struct {
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
+var reservedEnv = map[string]bool{
+	"PATH": true, "HOME": true, "TZ": true, "LANG": true, "LC_ALL": true,
+	"VISE_SEED": true, "SOURCE_DATE_EPOCH": true, "VISE": true,
+	"PYTHONHASHSEED": true, "NO_COLOR": true, "TERM": true, "COLUMNS": true,
+	"CI": true, "VISE_TMP": true,
+}
+
 func LoadManifest(root string) (Manifest, []byte, error) {
 	path := filepath.Join(root, "vise.toml")
 	data, err := os.ReadFile(path)
@@ -142,10 +149,28 @@ func (m Manifest) Validate(root string) error {
 		if probe.Timeout < 1 || probe.Timeout > 86400 {
 			return fmt.Errorf("%s.timeout must be between 1 and 86400 seconds", where)
 		}
-		for _, path := range append(append([]string{}, probe.Deps...), probe.Files...) {
+		for _, path := range probe.Deps {
 			if err := ValidateRelativePath(root, path, false); err != nil {
 				return fmt.Errorf("%s path %q: %w", where, path, err)
 			}
+		}
+		seenPaths := make(map[string]string)
+		for _, path := range probe.Deps {
+			clean := filepath.ToSlash(filepath.Clean(path))
+			if prior, ok := seenPaths[clean]; ok {
+				return fmt.Errorf("%s path %q duplicates %s", where, path, prior)
+			}
+			seenPaths[clean] = "deps"
+		}
+		for _, path := range probe.Files {
+			if err := ValidateArtifactPath(root, path); err != nil {
+				return fmt.Errorf("%s artifact %q: %w", where, path, err)
+			}
+			clean := filepath.ToSlash(filepath.Clean(path))
+			if prior, ok := seenPaths[clean]; ok {
+				return fmt.Errorf("%s artifact %q duplicates %s", where, path, prior)
+			}
+			seenPaths[clean] = "files"
 		}
 		if err := validateEnv(probe.Env, where); err != nil {
 			return err
@@ -190,6 +215,9 @@ func validateEnv(values map[string]string, where string) error {
 	for key := range values {
 		if key == "" || strings.ContainsAny(key, "=\x00") {
 			return fmt.Errorf("%s.env contains invalid key %q", where, key)
+		}
+		if reservedEnv[key] {
+			return fmt.Errorf("%s.env cannot override reserved variable %s", where, key)
 		}
 	}
 	return nil
