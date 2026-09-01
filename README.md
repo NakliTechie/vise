@@ -10,11 +10,15 @@ Unverified LLM refactoring fails roughly 60% of the time; the same refactoring g
 
 ## What vise is
 
-Three commands, one contract:
+A tower of five abstractions, each legible to an agent on its own: **probe** (one deterministic observation) → **lockfile** (frozen truth) → **gate** (one bit, typed) → **journal** (the campaign's trajectory) → **status** (the whole situation in one bounded read). The driver's loop: perceive with `status`, cut with your own tools, be judged by `gate`, accrete through the journal and the metric ratchet. Built agent-first: typed exit codes (one per distinct next action), `--json` everywhere, every failure naming its remedy, output bounded by divergence rather than repo size, every write crash-safe. See SPEC.md §0 for the doctrine.
+
+The core commands:
 
 - **`vise record`** — freeze the current behavior: run the project's declared probes (commands, entry points, HTTP calls, rendered output) under determinism stubs (clock, RNG, network, locale) and write the results to a **behavior lockfile** (`vise.lock` — golden outputs, hashed and diffable).
 - **`vise verify`** — replay every probe against the current working tree and diff against the lockfile. Output is **agent-legible**: exact probe, expected vs got, minimal diff — written for a model to act on, not a human to squint at.
 - **`vise gate`** — `verify` with a hard exit code and a one-line verdict. The thing a refactor loop calls between every micro-step; the thing a CI job calls before merge.
+
+Around them: **`vise status`** (the session-opening perception act), **`vise run <probe>`** (debug one probe raw), **`vise init`** (draft a manifest deterministically from repo facts), and **metric probes** (cyclomatic complexity et al. as tracked deltas — the gate holds behavior constant while the metrics prove the refactor actually improved something, with an opt-in ratchet locking in the best value seen).
 
 The refactor loop it enables, for any agent:
 
