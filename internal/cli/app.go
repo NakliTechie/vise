@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 
 	"github.com/NakliTechie/vise/internal/vise"
@@ -16,12 +18,31 @@ import (
 const Version = "0.3.0-dev"
 
 func Main(args []string, stdout, stderr io.Writer) int {
+	stopProbeOnSignal()
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(stderr, "vise: determine current directory: %v\n", err)
 		return vise.ExitHarness
 	}
 	return Run(args, cwd, stdout, stderr)
+}
+
+// stopProbeOnSignal makes SIGINT and SIGTERM kill the running probe's process
+// group before vise exits. Probes run in their own group, so the terminal's
+// Ctrl-C reaches vise alone; without this the probe would keep running and
+// writing declared artifacts after vise was gone.
+func stopProbeOnSignal() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-signals
+		vise.KillActiveProbeGroup()
+		code := 128
+		if number, ok := sig.(syscall.Signal); ok {
+			code += int(number)
+		}
+		os.Exit(code)
+	}()
 }
 
 func Run(args []string, cwd string, stdout, stderr io.Writer) int {

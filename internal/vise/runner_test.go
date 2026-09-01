@@ -154,3 +154,48 @@ func TestRunnerRefusesTrackedArtifactWithoutDeletingIt(t *testing.T) {
 		t.Fatalf("tracked file was touched: %q, %v", data, err)
 	}
 }
+
+func TestKillActiveProbeGroupStopsTheRunningProbe(t *testing.T) {
+	root := testGitRepo(t)
+	probe := Probe{ID: "interrupted", Run: "sleep 20 & echo $! > child.pid; wait", Timeout: 30}
+	results := make(chan RunResult, 1)
+	go func() { results <- (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, false) }()
+	pidPath := filepath.Join(root, "child.pid")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(pidPath); err == nil && activeProbeGroup.Load() != 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("probe did not start")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	KillActiveProbeGroup()
+	select {
+	case result := <-results:
+		if result.TimedOut || result.Exit == 0 {
+			t.Fatalf("result = %#v", result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunProbe did not return after the group was killed")
+	}
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("child %d survived the group kill", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if activeProbeGroup.Load() != 0 {
+		t.Fatal("active group was not cleared")
+	}
+}

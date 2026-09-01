@@ -177,6 +177,8 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 	if err := cmd.Start(); err != nil {
 		return RunResult{HarnessError: fmt.Sprintf("launch probe: %v", err)}
 	}
+	setActiveProbeGroup(cmd.Process.Pid)
+	defer setActiveProbeGroup(0)
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
