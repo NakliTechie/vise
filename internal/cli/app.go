@@ -202,7 +202,11 @@ func runVerify(args []string, root string, jsonMode, gate bool, stdout, stderr i
 	}
 	result := vise.Verify(root, manifest, manifestBytes, vise.VerifyOptions{ProbeID: *probeID, EnforceRerunLimit: true})
 	result.Outcome.Cmd = name
-	if (gate || len(result.Flaky) > 0) && !result.RerunRefused {
+	// Every judged run is journaled, verify and gate alike, so a green verify
+	// ends a flake chain the same way a green gate does. A refusal is not a
+	// judgment and is never journaled, and neither is an outcome that stopped
+	// before the tamper hash (it carries no lock and judged nothing).
+	if !result.RerunRefused && result.Outcome.Lock != "" {
 		if result.Commit != "" {
 			if err := vise.JournalVerifyResult(root, name, result); err != nil {
 				result.Outcome.AddFailure("journal", vise.Failure{Class: "harness", Detail: err.Error()})

@@ -501,6 +501,11 @@ func ConsecutiveFlakes(events []JournalEvent, commit, lock string, probes []stri
 	wantKey := strings.Join(want, "\x00")
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
+		if event.Lock == "" {
+			// Written before any lock existed or by a run that judged nothing;
+			// it neither counts nor bounds a chain.
+			continue
+		}
 		if event.Commit != commit || event.Lock != lock || event.Event == "record" {
 			return count, true
 		}

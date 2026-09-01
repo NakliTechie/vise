@@ -541,3 +541,44 @@ func TestEmptyManifestNeverGatesGreen(t *testing.T) {
 		t.Fatalf("empty manifest status must not say ready: %d %s", exit, stdout)
 	}
 }
+
+func TestGreenVerifyEndsAFlakeChainAndHarnessStopsReportPassZero(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf stable")
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 0 {
+		t.Fatalf("record: %d %s", exit, stderr)
+	}
+	flaky := "#!/bin/sh\nif [ -f .toggle ]; then rm .toggle; printf b; else touch .toggle; printf a; fi"
+	cliWrite(t, root, "probe.sh", flaky)
+	if exit, _, _ := cliRun(t, root, "verify", "--json"); exit != 3 {
+		t.Fatalf("first flaky verify: %d", exit)
+	}
+	cliWrite(t, root, "probe.sh", "#!/bin/sh\nprintf stable")
+	os.Remove(filepath.Join(root, ".toggle"))
+	if exit, _, _ := cliRun(t, root, "verify", "--json"); exit != 0 {
+		t.Fatalf("green verify: %d", exit)
+	}
+	cliWrite(t, root, "probe.sh", flaky)
+	if exit, _, _ := cliRun(t, root, "verify", "--json"); exit != 3 {
+		t.Fatalf("flaky verify after a green one must be the first of a new chain: %d", exit)
+	}
+	if exit, _, _ := cliRun(t, root, "verify", "--json"); exit != 3 {
+		t.Fatalf("second flaky verify: %d", exit)
+	}
+	// A verify that stops before judging (unknown probe) carries no lock and
+	// must neither end the chain nor be journaled as a boundary.
+	if exit, _, _ := cliRun(t, root, "verify", "--probe", "bogus", "--json"); exit != 2 {
+		t.Fatalf("bogus probe verify: %d", exit)
+	}
+	if exit, _, _ := cliRun(t, root, "verify", "--json"); exit != 2 {
+		t.Fatalf("third flaky verify must be refused: %d", exit)
+	}
+
+	// A fingerprint failure stops judgment before any probe runs: pass is 0.
+	cliWrite(t, root, "vise.toml", strings.Replace(basicManifest(""), `seed = "1729"`, `seed = "7"`, 1))
+	exit, stdout, _ := cliRun(t, root, "verify", "--json")
+	value := parseCLIJSON(t, stdout)
+	counts := value["counts"].(map[string]any)
+	if exit != 2 || counts["pass"] != 0.0 || counts["declared"] != 1.0 {
+		t.Fatalf("harness stop counts: exit=%d counts=%#v", exit, counts)
+	}
+}

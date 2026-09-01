@@ -169,6 +169,7 @@ func TestConsecutiveFlakesIgnoresTransparentEvents(t *testing.T) {
 		{"other commit ends the scan", []JournalEvent{flake("p"), {Event: "flake", Commit: "d", Lock: "l", Probes: []string{"p"}}, flake("p")}, 1, true},
 		{"other lock ends the scan", []JournalEvent{flake("p"), {Event: "record", Commit: "c", Lock: "m"}, flake("p")}, 1, true},
 		{"empty journal is unbounded with zero flakes", nil, 0, false},
+		{"lock-less event is transparent", []JournalEvent{flake("p"), flake("p"), {Event: "verify", Commit: "c", Verdict: "indeterminate"}}, 2, false},
 		{"green verdict for another probe set is transparent", []JournalEvent{flake("p"), {Event: "gate", Commit: "c", Lock: "l", Verdict: "green", Probes: []string{"q"}}, flake("p")}, 2, false},
 		{"green verdict for a superset is a boundary", []JournalEvent{flake("p"), {Event: "verify", Commit: "c", Lock: "l", Verdict: "green", Probes: []string{"p", "q"}}, flake("p")}, 1, true},
 	}

@@ -44,3 +44,16 @@ func TestRenderStatusBoundsDriftLines(t *testing.T) {
 		t.Fatalf("status = %q", text)
 	}
 }
+
+func TestRenderStatusEscapesJournalAndLockFields(t *testing.T) {
+	report := vise.StatusReport{
+		State:   "ready",
+		Lock:    vise.StatusLock{Present: true, Valid: true, Hash: "sha256:\x1b[2Jabc", RecordedCommits: []string{"\x1b[31mred"}},
+		Journal: []vise.JournalEvent{{Event: "gate", Commit: "\x1b[2J", Verdict: "green"}},
+	}
+	var output bytes.Buffer
+	renderStatus(&output, report)
+	if strings.Contains(output.String(), "\x1b") {
+		t.Fatalf("control byte reached the terminal: %q", output.String())
+	}
+}

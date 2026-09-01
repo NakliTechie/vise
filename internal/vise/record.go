@@ -83,6 +83,7 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 	}
 	if result.Outcome.Counts.Harness > 0 {
 		result.Outcome.Finalize()
+		result.Outcome.Counts.Pass = 0 // a baseline needs both passes; none was frozen
 		return result
 	}
 
@@ -113,6 +114,7 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 	}
 	if result.Outcome.Counts.Harness > 0 || result.Outcome.Counts.Flaky > 0 {
 		result.Outcome.Finalize()
+		result.Outcome.Counts.Pass = 0 // a baseline needs both passes; none was frozen
 		if result.Outcome.Counts.Harness == 0 {
 			result.Outcome.Next = Next{Action: "fix_probe", Detail: "make the named probes deterministic (normalize timestamps, ordering, temp paths, seeds), then rerun vise record"}
 		}

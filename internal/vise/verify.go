@@ -122,6 +122,8 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 		if _, ok := outcome.Failures["fingerprint"]; ok {
 			outcome.Next = Next{Action: "human", Detail: "restore the recorded toolchain or ask an operator to re-record on this machine"}
 		}
+		// No probe ran, so nothing passed; the count must not imply otherwise.
+		outcome.Counts.Pass = 0
 		result.Outcome = outcome
 		return result
 	}
