@@ -90,7 +90,7 @@ Unverified LLM refactoring fails roughly 60% of the time; the same refactoring g
 
 ## What vise is
 
-A tower of five abstractions, each legible to an agent on its own: **probe** (one deterministic observation) → **lockfile** (frozen truth) → **gate** (one bit, typed) → **journal** (the campaign's trajectory) → **status** (the whole situation in one bounded read). The driver's loop: perceive with `status`, cut with your own tools, be judged by `gate`, accrete through the journal and the metric ratchet. Built agent-first: typed exit codes (one per distinct next action), `--json` everywhere, every failure naming its remedy, output bounded by divergence rather than repo size, every write crash-safe. See SPEC.md §0 for the doctrine.
+A tower of five abstractions, each legible to an agent on its own: **probe** (one deterministic observation) → **lockfile** (frozen truth) → **gate** (one bit, typed) → **journal** (the campaign's trajectory) → **status** (the whole situation in one bounded read). The driver's loop: perceive with `status`, cut with your own tools, be judged by `gate`, accrete through the journal and the metric deltas. Built agent-first: typed exit codes (one per distinct next action), `--json` everywhere, every failure naming its remedy, output bounded by divergence rather than repo size, every write crash-safe. See SPEC.md §0 for the doctrine.
 
 The core commands:
 
