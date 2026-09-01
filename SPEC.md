@@ -45,6 +45,17 @@ timeout = 30                  # seconds; timeout = probe failure, never a hang
 id = "convert-fixture"
 run = "./mytool convert fixtures/in.csv"
 files = ["out/result.json"]  # artifacts to hash after the run, in addition to stdout/stderr/exit
+
+[[service]]                   # optional: a long-lived process shared by the probes that declare it
+id = "web"
+run = "bin/rails server -p $VISE_PORT -e test"   # $VISE_PORT: a free port vise picks and exports
+ready = "curl -sf http://127.0.0.1:$VISE_PORT/up" # polled until exit 0 (within timeout) before dependent probes run
+timeout = 60
+
+[[probe]]
+id = "home-page"
+service = "web"               # vise boots the service once, runs all its probes, tears it down
+run = "curl -s http://127.0.0.1:$VISE_PORT/ | ./strip-nonce"  # the probe owns normalizing nondeterminism (CSRF nonces, asset digests)
 ```
 
 ### 2.1 Metric probes — the quality half of the loop
@@ -127,6 +138,7 @@ The single perception act (§0.1). Renders: wired or not (manifest present, vali
 
 ### `vise record`
 Freeze current behavior. Runs every probe twice (the determinism self-test), writes `vise.lock` + blobs atomically. Fails without writing if any probe is flaky, errors, or times out — a lockfile is never partially written.
+- **Requires a clean working tree** (exit 2 otherwise): frozen truth must correspond to a commit someone can return to. `--allow-dirty` overrides for deliberate cases and journals the event with `"dirty": true` — the escape hatch exists, silently dirty truth does not.
 - `--probe <id>` — re-record one probe (still self-tested).
 - Exit: 0 recorded · 2 probe error · 3 determinism self-test failed.
 
@@ -189,6 +201,6 @@ How the loop actually drives vise, in the three harness shapes that matter here:
 ## 8. Non-goals (v0)
 
 - No transform engine, no model calls, no code edits — ever (README: the net, never the refactorer).
-- No probe types beyond shell commands (HTTP/DOM/browser probes are Parked — the shell probe can shell out to `curl`/Playwright today). Metric probes (§2.1) are in scope for v0 — they reuse the same run-and-record machinery.
+- No probe types beyond shell commands (HTTP/DOM/browser probes are Parked — the shell probe can shell out to `curl`/Playwright today). Metric probes (§2.1) are in scope for v0; **services (§2) land with the Rails dogfood** — the vertical ships shell probes first, services before the first server-shaped target.
 - No `vise map` yet — a deterministic structural map (tree-sitter/SCIP-class symbol + import inventory) whose diff evidences *what the refactor did* and catches incomplete transformations. v1, after the vertical proves the loop.
 - No parallel probe execution, no caching, no daemon. Boring and sequential until the vertical works.
