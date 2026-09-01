@@ -36,6 +36,10 @@ type Runner struct {
 	Manifest Manifest
 }
 
+// pipeCloseDelay bounds how long a finished or killed probe may keep its
+// output pipes open through a process it left behind.
+const pipeCloseDelay = time.Second
+
 func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 	var before string
 	if checkTracked {
@@ -44,6 +48,13 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 		if err != nil {
 			return RunResult{HarnessError: err.Error()}
 		}
+	}
+	tracked, err := GitTrackedPaths(r.Root, probe.Files)
+	if err != nil {
+		return RunResult{HarnessError: err.Error()}
+	}
+	if len(tracked) > 0 {
+		return RunResult{HarnessError: fmt.Sprintf("declared artifact %q is tracked by git; artifacts must be gitignored build outputs because vise deletes them before every run", tracked[0])}
 	}
 	for _, rel := range probe.Files {
 		if err := ValidateArtifactPath(r.Root, rel); err != nil {
@@ -145,7 +156,14 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 }
 
 func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[string]string) RunResult {
-	tmp, err := os.MkdirTemp("", "vise-"+sanitizeTempName(id)+"-")
+	// VISE_TMP lives under .vise/tmp inside the repository: init ignores it,
+	// the dirty-tree check skips it, and it is wiped after every run, so a
+	// crash leaves residue where the operator expects state, not in /tmp.
+	scratchRoot, err := stateScratchDir(r.Root)
+	if err != nil {
+		return RunResult{HarnessError: fmt.Sprintf("create VISE_TMP: %v", err)}
+	}
+	tmp, err := os.MkdirTemp(scratchRoot, sanitizeTempName(id)+"-")
 	if err != nil {
 		return RunResult{HarnessError: fmt.Sprintf("create VISE_TMP: %v", err)}
 	}
@@ -155,12 +173,19 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 	cmd.Dir = r.Root
 	cmd.Env = r.sanitizedEnv(tmp, extra)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Wait blocks until every holder of the stdout/stderr pipes exits. A probe
+	// that leaves a detached process (setsid, a daemon, a preloader) holding
+	// them would otherwise hang vise past its timeout. WaitDelay closes the
+	// pipes shortly after the shell exits or the timeout kill lands.
+	cmd.WaitDelay = pipeCloseDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		return RunResult{HarnessError: fmt.Sprintf("launch probe: %v", err)}
 	}
+	setActiveProbeGroup(cmd.Process.Pid)
+	defer setActiveProbeGroup(0)
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -175,10 +200,20 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		waitErr = <-done
 	}
+	// The shell has exited (or been killed). Anything it left behind in the
+	// process group — a redirected background child, a pipe holder — must not
+	// outlive the run: it could keep writing artifacts or tracked files after
+	// the tracked-tree check, or hold the next run's state.
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 
 	result := RunResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), TimedOut: timedOut}
 	if timedOut {
 		result.HarnessError = fmt.Sprintf("probe timed out after %ds", timeoutSeconds)
+		return result
+	}
+	if errors.Is(waitErr, exec.ErrWaitDelay) {
+		result.Exit = cmd.ProcessState.ExitCode()
+		result.HarnessError = "probe exited but left a background process holding its stdout or stderr; redirect that process to /dev/null or wait for it inside the probe"
 		return result
 	}
 	if waitErr == nil {

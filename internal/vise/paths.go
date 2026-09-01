@@ -108,3 +108,18 @@ func rejectExistingSymlinkOrSpecial(path string) error {
 	}
 	return nil
 }
+
+// stateScratchDir returns root/.vise/tmp, creating .vise and tmp as real
+// directories. A symlink at either level is refused: scratch and staging
+// files must stay inside the repository.
+func stateScratchDir(root string) (string, error) {
+	stateDir := filepath.Join(root, ".vise")
+	if err := ensureDirectory(stateDir, 0o755); err != nil {
+		return "", err
+	}
+	scratch := filepath.Join(stateDir, "tmp")
+	if err := ensureDirectory(scratch, 0o755); err != nil {
+		return "", err
+	}
+	return scratch, nil
+}

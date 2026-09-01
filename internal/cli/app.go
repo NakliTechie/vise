@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 
 	"github.com/NakliTechie/vise/internal/vise"
@@ -16,12 +18,31 @@ import (
 const Version = "0.3.0-dev"
 
 func Main(args []string, stdout, stderr io.Writer) int {
+	stopProbeOnSignal()
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(stderr, "vise: determine current directory: %v\n", err)
 		return vise.ExitHarness
 	}
 	return Run(args, cwd, stdout, stderr)
+}
+
+// stopProbeOnSignal makes SIGINT and SIGTERM kill the running probe's process
+// group before vise exits. Probes run in their own group, so the terminal's
+// Ctrl-C reaches vise alone; without this the probe would keep running and
+// writing declared artifacts after vise was gone.
+func stopProbeOnSignal() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-signals
+		vise.KillActiveProbeGroup()
+		code := 128
+		if number, ok := sig.(syscall.Signal); ok {
+			code += int(number)
+		}
+		os.Exit(code)
+	}()
 }
 
 func Run(args []string, cwd string, stdout, stderr io.Writer) int {
@@ -181,7 +202,11 @@ func runVerify(args []string, root string, jsonMode, gate bool, stdout, stderr i
 	}
 	result := vise.Verify(root, manifest, manifestBytes, vise.VerifyOptions{ProbeID: *probeID, EnforceRerunLimit: true})
 	result.Outcome.Cmd = name
-	if gate || len(result.Flaky) > 0 {
+	// Every judged run is journaled, verify and gate alike, so a green verify
+	// ends a flake chain the same way a green gate does. A refusal is not a
+	// judgment and is never journaled, and neither is an outcome that stopped
+	// before the tamper hash (it carries no lock and judged nothing).
+	if !result.RerunRefused && result.Outcome.Lock != "" {
 		if result.Commit != "" {
 			if err := vise.JournalVerifyResult(root, name, result); err != nil {
 				result.Outcome.AddFailure("journal", vise.Failure{Class: "harness", Detail: err.Error()})
@@ -218,7 +243,10 @@ func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Write
 		return renderSimpleError("run", fmt.Sprintf("unknown probe %q", args[0]), jsonMode, stdout, stderr)
 	}
 	result := (vise.Runner{Root: root, Manifest: manifest}).RunProbe(probe, false)
-	if result.HarnessError != "" {
+	// run mirrors the probe's own exit. A launch failure is the probe's exit 127 and
+	// passes through; a timeout, a refused artifact, or a lingering pipe holder
+	// has no probe exit to mirror and stays a harness error.
+	if result.HarnessError != "" && !(result.Exit == 127 && !result.TimedOut) {
 		return renderSimpleError("run", result.HarnessError, jsonMode, stdout, stderr)
 	}
 	if jsonMode {

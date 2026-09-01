@@ -1,6 +1,7 @@
 package vise
 
 import (
+	"fmt"
 	"os"
 	"sort"
 )
@@ -22,6 +23,10 @@ type StatusLock struct {
 	RecordedCommits  []string `json:"recorded_commits,omitempty"`
 	Hash             string   `json:"hash,omitempty"`
 	Error            string   `json:"error,omitempty"`
+	// Drift lists every way vise.toml and vise.lock disagree without running a
+	// probe: missing or extra ids, changed probe definitions, changed
+	// dependency hashes, missing blobs. Non-empty drift means gate will refuse.
+	Drift []string `json:"drift,omitempty"`
 }
 
 type StatusReport struct {
@@ -102,16 +107,31 @@ func BuildStatus(root string) StatusReport {
 				report.Lock.Error = err.Error()
 				report.Next = Next{Action: "fix_probe", Detail: "restore a valid vise.lock and referenced blobs"}
 			}
+			report.Lock.Drift = baselineDrift(root, manifest, lock)
+			if len(report.Lock.Drift) > 0 && report.State == "ready" {
+				report.State = "baseline-drift"
+				report.Next = Next{Action: "human", Detail: "vise.toml and vise.lock disagree (" + report.Lock.Drift[0] + "); restore the manifest or ask an operator to re-record"}
+			}
+			if report.State == "ready" {
+				if refused, detail := nextGateRefused(root, manifest, report.Lock.Hash); refused {
+					report.State = "rerun-refused"
+					report.Next = Next{Action: "human", Detail: "the next gate is refused (" + detail + "); commit, re-record, or change the manifest"}
+				}
+			}
+			if len(manifest.Probes) == 0 && report.State != "harness-error" {
+				// A lock beside a manifest with no probes judges nothing; gate
+				// refuses it, so status must not promise proceed.
+				report.State = "harness-error"
+				report.Next = Next{Action: "fix_probe", Detail: "manifest declares no [[probe]]; declare at least one probe in vise.toml and record a baseline"}
+			}
 		}
 	}
 
+	// proposals.toml is agent-writable and judges nothing, so a malformed file
+	// is reported but never changes the state or the next action.
 	proposals, err := LoadProposals(root)
 	if err != nil {
 		report.ProposalError = err.Error()
-		if report.State != "harness-error" {
-			report.State = "harness-error"
-			report.Next = Next{Action: "fix_probe", Detail: "repair .vise/proposals.toml"}
-		}
 	} else {
 		report.PendingProposals = len(proposals.Probes)
 	}
@@ -123,4 +143,54 @@ func BuildStatus(root string) StatusReport {
 		report.Journal = journal
 	}
 	return report
+}
+
+// baselineDrift runs verify's static manifest-versus-lock checks (no probe
+// executes) and returns one "id: detail" line per disagreement, sorted by id.
+func baselineDrift(root string, manifest Manifest, lock Lockfile) []string {
+	outcome := NewOutcome("status")
+	validateProbeSet(&outcome, manifest, lock)
+	validateMetricSet(&outcome, manifest, lock)
+	for _, probe := range manifest.Probes {
+		validateProbeEntry(root, &outcome, probe, lock)
+	}
+	for _, probe := range manifest.Probes {
+		if _, exists := outcome.Failures[probe.ID]; exists {
+			continue
+		}
+		if tracked, err := GitTrackedPaths(root, probe.Files); err == nil && len(tracked) > 0 {
+			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: fmt.Sprintf("declared artifact %q is tracked by git; the next run will refuse it", tracked[0])})
+		}
+	}
+	if len(outcome.Failures) == 0 {
+		return nil
+	}
+	drift := make([]string, 0, len(outcome.Failures))
+	for _, id := range sortedKeys(outcome.Failures) {
+		drift = append(drift, id+": "+outcome.Failures[id].Detail)
+	}
+	return drift
+}
+
+// nextGateRefused asks the rerun limit whether a full gate at HEAD would be
+// refused right now. Errors read as "not refused": status must stay bounded
+// and exit 0, and gate itself reports the failure with its remedy.
+func nextGateRefused(root string, manifest Manifest, lockHash string) (bool, string) {
+	commit, err := GitHead(root)
+	if err != nil {
+		return false, ""
+	}
+	ids := make([]string, 0, len(manifest.Probes)+len(manifest.Metrics))
+	for _, probe := range manifest.Probes {
+		ids = append(ids, probe.ID)
+	}
+	for _, metric := range manifest.Metrics {
+		ids = append(ids, metric.ID)
+	}
+	sort.Strings(ids)
+	refused, detail, err := RerunLimitReached(root, commit, lockHash, ids)
+	if err != nil {
+		return false, ""
+	}
+	return refused, detail
 }

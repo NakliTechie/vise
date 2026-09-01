@@ -60,6 +60,17 @@ type Proposals struct {
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
+// reservedIDs are keys vise itself writes into the failures map for harness
+// conditions and command-level errors; a probe or metric with one of these
+// ids would be indistinguishable from the harness failure of the same name.
+var reservedIDs = map[string]bool{
+	"fingerprint": true, "journal": true, "git": true, "probe": true, "manifest": true,
+	"vise.lock": true, "tamper-hash": true, "rerun-limit": true, "persistence": true,
+	"operator-review": true, "working-tree": true,
+	"vise": true, "init": true, "record": true, "verify": true, "gate": true, "run": true,
+	"status": true, "version": true, "internal": true,
+}
+
 var reservedEnv = map[string]bool{
 	"PATH": true, "HOME": true, "TZ": true, "LANG": true, "LC_ALL": true,
 	"VISE_SEED": true, "SOURCE_DATE_EPOCH": true, "VISE": true,
@@ -207,6 +218,9 @@ func (m Manifest) Validate(root string) error {
 func validateID(id, where string) error {
 	if !idPattern.MatchString(id) {
 		return fmt.Errorf("%s.id %q must match %s", where, id, idPattern.String())
+	}
+	if reservedIDs[id] {
+		return fmt.Errorf("%s.id %q is reserved for harness failures; choose another id", where, id)
 	}
 	return nil
 }

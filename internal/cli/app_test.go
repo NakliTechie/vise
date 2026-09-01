@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -125,7 +126,11 @@ func TestExpectedNonzeroExitIsBehavior(t *testing.T) {
 }
 
 func TestFlakeIsIndeterminateAndThirdRerunRefused(t *testing.T) {
-	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf stable")
+	root := cliRepo(t, basicManifest(`
+[[probe]]
+id = "steady"
+run = "printf steady"
+`), "#!/bin/sh\nprintf stable")
 	if exit, _, stderr := cliRun(t, root, "record"); exit != 0 {
 		t.Fatalf("record: %d %s", exit, stderr)
 	}
@@ -137,10 +142,53 @@ func TestFlakeIsIndeterminateAndThirdRerunRefused(t *testing.T) {
 			t.Fatalf("attempt %d: exit=%d value=%#v", attempt, exit, value)
 		}
 	}
-	exit, stdout, _ := cliRun(t, root, "gate", "--json")
+	for attempt := 3; attempt <= 5; attempt++ {
+		exit, stdout, _ := cliRun(t, root, "gate", "--json")
+		value := parseCLIJSON(t, stdout)
+		if exit != 2 || value["next"].(map[string]any)["action"] != "human" {
+			t.Fatalf("attempt %d: refusal must persist, got exit=%d value=%#v", attempt, exit, value)
+		}
+	}
+	// A single-probe verify is a different probe set: it gets its own two
+	// reruns, and its flakes neither reset nor extend the full-set chain.
+	for attempt := 1; attempt <= 2; attempt++ {
+		exit, stdout, _ := cliRun(t, root, "verify", "--probe", "behavior", "--json")
+		value := parseCLIJSON(t, stdout)
+		if exit != 3 || value["verdict"] != "indeterminate" {
+			t.Fatalf("single-probe attempt %d: exit=%d value=%#v", attempt, exit, value)
+		}
+	}
+	exit, stdout, _ := cliRun(t, root, "verify", "--probe", "behavior", "--json")
 	value := parseCLIJSON(t, stdout)
 	if exit != 2 || value["next"].(map[string]any)["action"] != "human" {
-		t.Fatalf("third: exit=%d value=%#v", exit, value)
+		t.Fatalf("single-probe third: exit=%d value=%#v", exit, value)
+	}
+	exit, stdout, _ = cliRun(t, root, "gate", "--json")
+	value = parseCLIJSON(t, stdout)
+	if exit != 2 || value["next"].(map[string]any)["action"] != "human" {
+		t.Fatalf("gate after single-probe flakes must stay refused: exit=%d value=%#v", exit, value)
+	}
+	// A green verdict for a different probe set is not a boundary for the
+	// full-set chain either.
+	if exit, _, _ := cliRun(t, root, "gate", "--probe", "steady", "--json"); exit != 0 {
+		t.Fatalf("single stable probe gate: exit=%d", exit)
+	}
+	exit, stdout, _ = cliRun(t, root, "gate", "--json")
+	value = parseCLIJSON(t, stdout)
+	if exit != 2 || value["next"].(map[string]any)["action"] != "human" {
+		t.Fatalf("gate after a green single-probe verify must stay refused: exit=%d value=%#v", exit, value)
+	}
+	if exit, stdout, _ := cliRun(t, root, "status", "--json"); exit != 0 || !strings.Contains(stdout, `"state":"rerun-refused"`) {
+		t.Fatalf("status must report the refusal: %d %s", exit, stdout)
+	}
+	events, err := core.ReadJournal(root, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Event == "gate" && event.Verdict == "indeterminate" && len(event.Flaky) == 0 {
+			t.Fatalf("rerun refusal was journaled: %#v", event)
+		}
 	}
 }
 
@@ -178,6 +226,27 @@ deps = ["fixture.txt"]
 	}
 }
 
+func TestStubChangeIsEnvironmentDriftNotBehavior(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf '%s' \"$VISE_SEED\"")
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 0 {
+		t.Fatalf("record: %d %s", exit, stderr)
+	}
+	cliWrite(t, root, "vise.toml", strings.Replace(basicManifest(""), `seed = "1729"`, `seed = "42"`, 1))
+	exit, stdout, _ := cliRun(t, root, "gate", "--json")
+	value := parseCLIJSON(t, stdout)
+	failures, _ := value["failures"].(map[string]any)
+	fingerprint, _ := failures["fingerprint"].(map[string]any)
+	if exit != 2 || value["next"].(map[string]any)["action"] != "human" || fingerprint == nil || !strings.Contains(fingerprint["detail"].(string), "[stubs]") {
+		t.Fatalf("stub change: exit=%d value=%#v", exit, value)
+	}
+	if _, behavior := failures["behavior"]; behavior {
+		t.Fatalf("stub change was classed as a probe failure: %#v", failures)
+	}
+	if exit, stdout, _ := cliRun(t, root, "status", "--json"); exit != 0 || !strings.Contains(stdout, `"state":"environment-drift"`) {
+		t.Fatalf("status: %d %s", exit, stdout)
+	}
+}
+
 func TestMetricNoRegress(t *testing.T) {
 	manifest := basicManifest(`
 [[metric]]
@@ -199,6 +268,13 @@ version_cmd = "printf analyzer-1"
 	value := parseCLIJSON(t, stdout)
 	if exit != 5 || value["verdict"] != "red" {
 		t.Fatalf("metric: %d %#v", exit, value)
+	}
+	counts := value["counts"].(map[string]any)
+	if counts["declared"] != 2.0 || counts["pass"] != 1.0 || counts["metric"] != 1.0 {
+		t.Fatalf("metric counts must include the metric in the denominator: %#v", counts)
+	}
+	if _, text, _ := cliRun(t, root, "gate"); !strings.Contains(text, "GATE RED [metric] — 1/2: complexity") {
+		t.Fatalf("gate line = %q", text)
 	}
 }
 
@@ -435,5 +511,74 @@ func TestRecordIsByteReproducibleOnSameHead(t *testing.T) {
 	}
 	if !bytes.Equal(first, second) {
 		t.Fatalf("lockfile bytes changed:\nfirst=%s\nsecond=%s", first, second)
+	}
+}
+
+func TestRunMirrorsLaunchFailureExit(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nexec definitely-not-a-command-xyz")
+	exit, _, stderr := cliRun(t, root, "run", "behavior")
+	if exit != 127 || !strings.Contains(stderr, "not found") {
+		t.Fatalf("run: exit=%d stderr=%q", exit, stderr)
+	}
+	exit, stdout, _ := cliRun(t, root, "run", "behavior", "--json")
+	if value := parseCLIJSON(t, stdout); exit != 127 || value["exit"] != 127.0 {
+		t.Fatalf("run --json: exit=%d value=%#v", exit, value)
+	}
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 2 || !strings.Contains(stderr, "exit 127") {
+		t.Fatalf("record must still refuse a launch failure: exit=%d stderr=%q", exit, stderr)
+	}
+}
+
+func TestEmptyManifestNeverGatesGreen(t *testing.T) {
+	root := cliRepo(t, "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n", "")
+	cliWrite(t, root, "vise.lock", "{\n  \"v\": 1,\n  \"fingerprint\": {\"os\": \""+runtime.GOOS+"\", \"arch\": \""+runtime.GOARCH+"\", \"stubs\": {\"tz\": \"UTC\", \"lang\": \"C\", \"seed\": \"1729\", \"network\": \"declared-off\"}},\n  \"probes\": {}\n}\n")
+	exit, stdout, _ := cliRun(t, root, "gate", "--json")
+	value := parseCLIJSON(t, stdout)
+	if exit != 2 || value["verdict"] == "green" || value["next"].(map[string]any)["action"] != "fix_probe" {
+		t.Fatalf("empty manifest gate: exit=%d value=%#v", exit, value)
+	}
+	if exit, stdout, _ := cliRun(t, root, "status", "--json"); exit != 0 || strings.Contains(stdout, `"state":"ready"`) || !strings.Contains(stdout, `"action":"fix_probe"`) {
+		t.Fatalf("empty manifest status must not say ready: %d %s", exit, stdout)
+	}
+}
+
+func TestGreenVerifyEndsAFlakeChainAndHarnessStopsReportPassZero(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf stable")
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 0 {
+		t.Fatalf("record: %d %s", exit, stderr)
+	}
+	flaky := "#!/bin/sh\nif [ -f .toggle ]; then rm .toggle; printf b; else touch .toggle; printf a; fi"
+	cliWrite(t, root, "probe.sh", flaky)
+	if exit, _, _ := cliRun(t, root, "verify", "--json"); exit != 3 {
+		t.Fatalf("first flaky verify: %d", exit)
+	}
+	cliWrite(t, root, "probe.sh", "#!/bin/sh\nprintf stable")
+	os.Remove(filepath.Join(root, ".toggle"))
+	if exit, _, _ := cliRun(t, root, "verify", "--json"); exit != 0 {
+		t.Fatalf("green verify: %d", exit)
+	}
+	cliWrite(t, root, "probe.sh", flaky)
+	if exit, _, _ := cliRun(t, root, "verify", "--json"); exit != 3 {
+		t.Fatalf("flaky verify after a green one must be the first of a new chain: %d", exit)
+	}
+	if exit, _, _ := cliRun(t, root, "verify", "--json"); exit != 3 {
+		t.Fatalf("second flaky verify: %d", exit)
+	}
+	// A verify that stops before judging (unknown probe) carries no lock and
+	// must neither end the chain nor be journaled as a boundary.
+	if exit, _, _ := cliRun(t, root, "verify", "--probe", "bogus", "--json"); exit != 2 {
+		t.Fatalf("bogus probe verify: %d", exit)
+	}
+	if exit, _, _ := cliRun(t, root, "verify", "--json"); exit != 2 {
+		t.Fatalf("third flaky verify must be refused: %d", exit)
+	}
+
+	// A fingerprint failure stops judgment before any probe runs: pass is 0.
+	cliWrite(t, root, "vise.toml", strings.Replace(basicManifest(""), `seed = "1729"`, `seed = "7"`, 1))
+	exit, stdout, _ := cliRun(t, root, "verify", "--json")
+	value := parseCLIJSON(t, stdout)
+	counts := value["counts"].(map[string]any)
+	if exit != 2 || counts["pass"] != 0.0 || counts["declared"] != 1.0 {
+		t.Fatalf("harness stop counts: exit=%d counts=%#v", exit, counts)
 	}
 }

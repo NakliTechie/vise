@@ -61,6 +61,10 @@ func renderGate(w io.Writer, outcome vise.Outcome, quiet bool) {
 	}
 }
 
+// maxDriftLines keeps the human status bounded when many probes drift; the
+// JSON report carries the full list.
+const maxDriftLines = 5
+
 func renderStatus(w io.Writer, report vise.StatusReport) {
 	fmt.Fprintln(w, "VISE STATUS — "+strings.ToUpper(report.State))
 	if report.Manifest.Present {
@@ -69,7 +73,7 @@ func renderStatus(w io.Writer, report vise.StatusReport) {
 		fmt.Fprintln(w, "manifest: missing")
 	}
 	if report.Manifest.Error != "" {
-		fmt.Fprintln(w, "manifest error: "+report.Manifest.Error)
+		fmt.Fprintln(w, "manifest error: "+terminalSafe(report.Manifest.Error, false))
 	}
 	if report.Lock.Present {
 		fmt.Fprintf(w, "lockfile: valid=%t · probes=%d · metrics=%d\n", report.Lock.Valid, report.Lock.Probes, report.Lock.Metrics)
@@ -80,17 +84,24 @@ func renderStatus(w io.Writer, report vise.StatusReport) {
 		fmt.Fprintf(w, "fingerprint: match=%t\n", *report.Lock.FingerprintMatch)
 	}
 	if len(report.Lock.RecordedCommits) > 0 {
-		fmt.Fprintln(w, "recorded commits: "+strings.Join(report.Lock.RecordedCommits, ", "))
+		fmt.Fprintln(w, "recorded commits: "+terminalSafe(strings.Join(report.Lock.RecordedCommits, ", "), false))
 	}
 	if report.Lock.Hash != "" {
-		fmt.Fprintln(w, "lock: "+report.Lock.Hash)
+		fmt.Fprintln(w, "lock: "+terminalSafe(report.Lock.Hash, false))
 	}
 	if report.Lock.Error != "" {
-		fmt.Fprintln(w, "lock error: "+report.Lock.Error)
+		fmt.Fprintln(w, "lock error: "+terminalSafe(report.Lock.Error, false))
+	}
+	for i, line := range report.Lock.Drift {
+		if i == maxDriftLines {
+			fmt.Fprintf(w, "drift: … %d more (see --json)\n", len(report.Lock.Drift)-maxDriftLines)
+			break
+		}
+		fmt.Fprintln(w, "drift: "+terminalSafe(line, false))
 	}
 	fmt.Fprintf(w, "pending proposals: %d\n", report.PendingProposals)
 	if report.ProposalError != "" {
-		fmt.Fprintln(w, "proposal error: "+report.ProposalError)
+		fmt.Fprintln(w, "proposal error: "+terminalSafe(report.ProposalError, false))
 	}
 	if len(report.Journal) == 0 {
 		fmt.Fprintln(w, "journal: empty")
@@ -112,7 +123,7 @@ func renderStatus(w io.Writer, report vise.StatusReport) {
 				}
 				details = append(details, "metrics="+strings.Join(pairs, ","))
 			}
-			fmt.Fprintln(w, "journal: "+strings.Join(details, " · "))
+			fmt.Fprintln(w, "journal: "+terminalSafe(strings.Join(details, " · "), false))
 		}
 	}
 	fmt.Fprintf(w, "next: %s — %s\n", report.Next.Action, terminalSafe(report.Next.Detail, false))

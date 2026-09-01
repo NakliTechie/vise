@@ -25,7 +25,7 @@ Three tiers of handling, in order of preference:
 - **Spring preloader is a false-green machine**: it serves stale code after edits — probes must run with `DISABLE_SPRING=1` (recommend it in the manifest for any Rails repo).
 - Database state *is* behavior: a probe that reads the DB must own its setup (`db:reset` + deterministic seed inside `run`, or transactional fixtures). Auto-increment IDs and `created_at` in output → normalize or seed fixed.
 - Parallel test runners randomize ordering — pin `--seed` where the framework supports it.
-- Boot logs interleave on stdout → the `[[service]]` `ready` pattern exists so probes hit HTTP, not boot output.
+- Boot logs interleave on stdout → the `[[service]]` `ready` pattern is designed for this (parked for v1, SPEC §2); until it lands, a shell probe must start the server, wait for readiness, and hit HTTP itself, never boot output.
 
 **JavaScript / Node**
 - `Math.random`/`Date.now` → the app wires `VISE_SEED`/`SOURCE_DATE_EPOCH` at its stub seam (`VISE=1` gates it).

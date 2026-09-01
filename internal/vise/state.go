@@ -16,9 +16,13 @@ import (
 )
 
 type Fingerprint struct {
-	OS   string            `json:"os"`
-	Arch string            `json:"arch"`
-	Env  map[string]string `json:"env,omitempty"`
+	OS   string `json:"os"`
+	Arch string `json:"arch"`
+	// Stubs are the manifest's [stubs] values in force when the baseline was
+	// recorded. They shape every probe's environment, so a change is
+	// environment drift (harness class), never a behavior change.
+	Stubs StubSettings      `json:"stubs"`
+	Env   map[string]string `json:"env,omitempty"`
 }
 
 type ProbeLock struct {
@@ -96,7 +100,7 @@ func (l *StateLock) Close() error {
 }
 
 func CaptureFingerprint(root string, manifest Manifest) (Fingerprint, error) {
-	fingerprint := Fingerprint{OS: runtime.GOOS, Arch: runtime.GOARCH}
+	fingerprint := Fingerprint{OS: runtime.GOOS, Arch: runtime.GOARCH, Stubs: manifest.Stubs}
 	if len(manifest.Environment.Fingerprint) == 0 {
 		return fingerprint, nil
 	}
@@ -127,15 +131,27 @@ func CaptureFingerprint(root string, manifest Manifest) (Fingerprint, error) {
 }
 
 func FingerprintEqual(a, b Fingerprint) bool {
-	if a.OS != b.OS || a.Arch != b.Arch || len(a.Env) != len(b.Env) {
-		return false
+	return FingerprintMismatch(a, b) == ""
+}
+
+// FingerprintMismatch names the first way current differs from recorded, or
+// returns "" when the two fingerprints match.
+func FingerprintMismatch(current, recorded Fingerprint) string {
+	if current.OS != recorded.OS || current.Arch != recorded.Arch {
+		return fmt.Sprintf("platform %s/%s differs from the recorded %s/%s", current.OS, current.Arch, recorded.OS, recorded.Arch)
 	}
-	for key, value := range a.Env {
-		if b.Env[key] != value {
-			return false
+	if current.Stubs != recorded.Stubs {
+		return "manifest [stubs] differ from the recorded baseline"
+	}
+	if len(current.Env) != len(recorded.Env) {
+		return "the set of fingerprint commands differs from the recorded baseline"
+	}
+	for _, key := range sortedKeys(current.Env) {
+		if recorded.Env[key] != current.Env[key] {
+			return fmt.Sprintf("fingerprint %q output differs from the recorded baseline", key)
 		}
 	}
-	return true
+	return ""
 }
 
 func LoadLockfile(root string) (Lockfile, []byte, error) {
@@ -199,7 +215,7 @@ func WriteGeneration(root string, lock Lockfile, blobs map[string][]byte) ([]byt
 	if err != nil {
 		return nil, fmt.Errorf("encode vise.lock: %w", err)
 	}
-	if err := atomicWrite(filepath.Join(root, "vise.lock"), data, 0o644); err != nil {
+	if err := atomicWrite(root, filepath.Join(root, "vise.lock"), data, 0o644); err != nil {
 		return nil, fmt.Errorf("write vise.lock: %w", err)
 	}
 	if err := pruneBlobs(blobDir, referencedHashes(lock)); err != nil {
@@ -231,19 +247,26 @@ func WriteBlobs(root string, blobs map[string][]byte) error {
 		} else if !os.IsNotExist(err) {
 			return err
 		}
-		if err := atomicWrite(path, data, 0o644); err != nil {
+		if err := atomicWrite(root, path, data, 0o644); err != nil {
 			return fmt.Errorf("write blob %s: %w", hash, err)
 		}
 	}
 	return nil
 }
 
-func atomicWrite(path string, data []byte, mode os.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+// atomicWrite stages the new content under root/.vise/tmp (ignored by init,
+// skipped by the dirty-tree check) and renames it over path, so a crash
+// leaves the old file intact and any residue where state is expected, never
+// an untracked stray beside vise.lock.
+func atomicWrite(root, path string, data []byte, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".vise-write-*")
+	staging, err := stateScratchDir(root)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(staging, "write-*")
 	if err != nil {
 		return err
 	}
@@ -267,7 +290,7 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	if err := os.Rename(tmpName, path); err != nil {
 		return err
 	}
-	dirHandle, err := os.Open(dir)
+	dirHandle, err := os.Open(filepath.Dir(path))
 	if err == nil {
 		_ = dirHandle.Sync()
 		_ = dirHandle.Close()
@@ -380,73 +403,180 @@ func AppendJournal(root string, event JournalEvent) error {
 	if err != nil {
 		return err
 	}
-	file, err := os.OpenFile(journalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	file, err := os.OpenFile(journalPath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
+	// An interrupted append can leave a torn final line without a newline.
+	// Drop that fragment before writing so the journal never carries a
+	// malformed interior line.
+	if err := truncateTornTail(file); err != nil {
+		return err
+	}
 	if _, err := file.Write(append(data, '\n')); err != nil {
 		return err
 	}
 	return file.Sync()
 }
 
+// ReadJournal returns the last limit events from the bounded journal tail.
+// A limit of zero or less returns every event the tail holds.
 func ReadJournal(root string, limit int) ([]JournalEvent, error) {
+	events, _, err := readJournalTail(root)
+	if err != nil {
+		return nil, err
+	}
+	if limit > 0 && len(events) > limit {
+		events = events[len(events)-limit:]
+	}
+	return events, nil
+}
+
+// readJournalTail scans at most the final 256 KiB of the journal. truncated
+// reports whether older events exist beyond the scanned window.
+func readJournalTail(root string) (events []JournalEvent, truncated bool, err error) {
 	path := filepath.Join(root, ".vise", "journal.jsonl")
 	if err := rejectExistingSymlinkOrSpecial(path); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	file, err := os.Open(path)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer file.Close()
 	const scanBytes int64 = 256 * 1024
 	info, err := file.Stat()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	offset := info.Size() - scanBytes
 	if offset < 0 {
 		offset = 0
 	}
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	if offset > 0 {
+		truncated = true
 		_ = scanner.Scan()
 	}
-	var events []JournalEvent
+	var lines [][]byte
 	for scanner.Scan() {
+		lines = append(lines, append([]byte(nil), scanner.Bytes()...))
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, false, err
+	}
+	for i, line := range lines {
 		var event JournalEvent
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			return nil, fmt.Errorf("parse journal: %w", err)
+		if err := json.Unmarshal(line, &event); err != nil {
+			if i == len(lines)-1 {
+				// A torn final line is what an interrupted append leaves behind;
+				// the next append starts a fresh line, so the tail stays readable.
+				break
+			}
+			return nil, false, fmt.Errorf("parse journal: %w", err)
 		}
 		events = append(events, event)
-		if len(events) > limit {
-			events = events[len(events)-limit:]
-		}
 	}
-	return events, scanner.Err()
+	return events, truncated, nil
 }
 
-func ConsecutiveFlakes(events []JournalEvent, commit, lock string, probes []string) int {
+// ConsecutiveFlakes counts flake events for this probe set since the last
+// chain boundary: a record, a judged verdict (green or red) whose probe set
+// covers this one, or any event at another commit or lock. Events for other probe sets, and indeterminate
+// events that judged nothing, are transparent: they neither count nor reset
+// the chain, so a rerun refusal or a single-probe verify cannot buy more
+// reruns. bounded reports whether a boundary was reached inside events; when
+// it is false the count is only a lower bound on the true chain.
+func ConsecutiveFlakes(events []JournalEvent, commit, lock string, probes []string) (count int, bounded bool) {
 	want := append([]string(nil), probes...)
 	sort.Strings(want)
-	count := 0
+	wantKey := strings.Join(want, "\x00")
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
-		got := append([]string(nil), event.Probes...)
-		sort.Strings(got)
-		if event.Event != "flake" || event.Commit != commit || event.Lock != lock || strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-			break
+		if event.Lock == "" {
+			// Written before any lock existed or by a run that judged nothing;
+			// it neither counts nor bounds a chain.
+			continue
 		}
-		count++
+		if event.Commit != commit || event.Lock != lock || event.Event == "record" {
+			return count, true
+		}
+		if event.Event == "flake" {
+			got := append([]string(nil), event.Probes...)
+			sort.Strings(got)
+			if strings.Join(got, "\x00") == wantKey {
+				count++
+			}
+			continue
+		}
+		if (event.Verdict == "green" || event.Verdict == "red") && setCovers(event.Probes, want) {
+			return count, true
+		}
 	}
-	return count
+	return count, false
+}
+
+// setCovers reports whether a judged event's probe set contains every wanted
+// id. An event recorded without a probe set (older journals) counts as
+// covering everything.
+func setCovers(got, want []string) bool {
+	if len(got) == 0 {
+		return true
+	}
+	seen := make(map[string]bool, len(got))
+	for _, id := range got {
+		seen[id] = true
+	}
+	for _, id := range want {
+		if !seen[id] {
+			return false
+		}
+	}
+	return true
+}
+
+// truncateTornTail removes a trailing partial line (no final newline) from
+// the journal, which is what an interrupted append leaves behind.
+func truncateTornTail(file *os.File) error {
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	size := info.Size()
+	if size == 0 {
+		return nil
+	}
+	const window int64 = 1024 * 1024
+	start := size - window
+	if start < 0 {
+		start = 0
+	}
+	tail := make([]byte, size-start)
+	if _, err := file.ReadAt(tail, start); err != nil && err != io.EOF {
+		return err
+	}
+	if tail[len(tail)-1] == '\n' {
+		return nil
+	}
+	cut := bytes.LastIndexByte(tail, '\n')
+	fragment := tail[cut+1:]
+	var event JournalEvent
+	if json.Unmarshal(fragment, &event) == nil {
+		// A complete record that only lost its newline: keep it, terminate it.
+		_, err := file.Write([]byte{'\n'})
+		return err
+	}
+	keep := start
+	if cut >= 0 {
+		keep = start + int64(cut) + 1
+	}
+	return file.Truncate(keep)
 }

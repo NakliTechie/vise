@@ -10,6 +10,10 @@ VERIFY_GOCACHE=$VERIFY_BASE/go-build
 VERIFY_GOMODCACHE=$VERIFY_BASE/go-mod
 VERIFY_TOOLCHAIN=go$(awk '$1 == "go" { print $2; exit }' "$VISE_ROOT/go.mod")
 
+# Every build, test, and fixture step below is relative to the checkout, not
+# to wherever the caller happened to be.
+cd -- "$VISE_ROOT" || { printf 'verify: cannot enter %s\n' "$VISE_ROOT" >&2; exit 2; }
+
 summary() {
   printf 'VISE_VERIFY {"feature":"%s","status":"%s"}\n' "$1" "$2"
 }
@@ -56,6 +60,19 @@ doctor() {
   summary doctor pass
 }
 
+# Each invocation gets its own fixture root under the checkout-derived base
+# and removes it on exit, so concurrent runs from one checkout never touch
+# each other's fixtures and nothing accumulates across runs.
+start_run() {
+  # Residue from the earlier per-checkout layout, swept once.
+  rm -rf "$VERIFY_BASE/fixtures"
+  for leftover in "$VERIFY_BASE"/orientation.*; do
+    test -e "$leftover" && rm -rf "$leftover"
+  done
+  VERIFY_RUN=$(mktemp -d "$VERIFY_BASE/run.XXXXXX")
+  trap 'rm -rf "$VERIFY_RUN"' EXIT
+}
+
 build_binary() {
   mkdir -p "$VERIFY_BASE" "$VERIFY_GOCACHE" "$VERIFY_GOMODCACHE"
   if ! env GOTOOLCHAIN="$VERIFY_TOOLCHAIN" GOCACHE="$VERIFY_GOCACHE" GOMODCACHE="$VERIFY_GOMODCACHE" go build -trimpath -o "$VERIFY_BIN" ./cmd/vise; then
@@ -65,8 +82,7 @@ build_binary() {
 
 new_repo() {
   feature=$1
-  mkdir -p "$VERIFY_BASE/fixtures"
-  repo=$(mktemp -d "$VERIFY_BASE/fixtures/$feature.XXXXXX")
+  repo=$(mktemp -d "$VERIFY_RUN/$feature.XXXXXX")
   git -C "$repo" init -q
   git -C "$repo" config user.email verify@example.invalid
   git -C "$repo" config user.name "vise verify"
@@ -112,7 +128,7 @@ expect_vise_json_exit() {
 verify_orientation() {
   "$VERIFY_BIN" --help | grep -q 'deterministic behavior locks' || fail orientation "help omitted the product description"
   "$VERIFY_BIN" version --json | grep -q '"version":"0.3.0-dev"' || fail orientation "version JSON is missing"
-  outside=$(mktemp -d "$VERIFY_BASE/orientation.XXXXXX")
+  outside=$(mktemp -d "$VERIFY_RUN/orientation.XXXXXX")
   (cd "$outside" && "$VERIFY_BIN" status --json) | grep -q '"state":"no-git"' || fail orientation "status outside Git did not explain the missing repository"
   summary orientation pass
 }
@@ -234,8 +250,7 @@ EOF
 }
 
 verify_dogfood() {
-  mkdir -p "$VERIFY_BASE/fixtures"
-  repo=$(mktemp -d "$VERIFY_BASE/fixtures/dogfood.XXXXXX")
+  repo=$(mktemp -d "$VERIFY_RUN/dogfood.XXXXXX")
   git clone -q "$VISE_ROOT" "$repo"
   git -C "$repo" config user.email verify@example.invalid
   git -C "$repo" config user.name "vise verify"
@@ -306,6 +321,7 @@ case "${1:-}" in
   verify)
     doctor >/dev/null
     build_binary
+    start_run
     if test "$#" -eq 2; then
       run_feature "$2"
     elif test "$#" -eq 1; then

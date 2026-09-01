@@ -20,6 +20,9 @@ type VerifyResult struct {
 	CheckSet      []string
 	Commit        string
 	Dirty         bool
+	// RerunRefused marks a verify that never ran because the rerun limit
+	// blocked it; such a result is not a judgment and must not be journaled.
+	RerunRefused bool
 }
 
 func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOptions) VerifyResult {
@@ -28,7 +31,7 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	lock, lockBytes, err := LoadLockfile(root)
 	if os.IsNotExist(err) {
 		outcome.Exit = ExitNotInitialized
-		outcome.Counts.Declared = len(manifest.Probes)
+		outcome.Counts.Declared = len(manifest.Probes) + len(manifest.Metrics)
 		outcome.Finalize()
 		result.Outcome = outcome
 		return result
@@ -58,6 +61,12 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	result.Commit = commit
 	result.Dirty = dirty
 
+	if len(manifest.Probes) == 0 {
+		// Green requires every declared probe to pass; with none declared there
+		// is nothing to judge, and a 0/0 green would be a verdict without a judge.
+		result.Outcome = harnessWithNext("verify", "manifest", "manifest declares no [[probe]]; nothing can be judged", "fix_probe", "declare at least one probe in vise.toml and record a baseline")
+		return result
+	}
 	selected, selectionFailure := selectedProbes(manifest, opts.ProbeID)
 	if selectionFailure != nil {
 		result.Outcome = harnessOnly("verify", "probe", selectionFailure.Error())
@@ -69,6 +78,9 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 		probeIDs = append(probeIDs, probe.ID)
 	}
 	if opts.ProbeID == "" {
+		// Metrics are judged checks too: they count in the denominator so a
+		// failing metric lowers pass instead of hiding behind the probe count.
+		outcome.Counts.Declared += len(manifest.Metrics)
 		for _, metric := range manifest.Metrics {
 			probeIDs = append(probeIDs, metric.ID)
 		}
@@ -77,15 +89,16 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	result.CheckSet = append([]string(nil), probeIDs...)
 
 	if opts.EnforceRerunLimit {
-		events, err := ReadJournal(root, 20)
+		refused, detail, err := RerunLimitReached(root, commit, lockHash, probeIDs)
 		if err != nil {
 			result.Outcome = harnessOnly("verify", "journal", err.Error())
 			return result
 		}
-		if ConsecutiveFlakes(events, commit, lockHash, probeIDs) >= 2 {
-			blocked := harnessOnly("verify", "rerun-limit", "second consecutive rerun already consumed for this commit, lock, and probe set")
+		if refused {
+			blocked := harnessOnly("verify", "rerun-limit", detail)
 			blocked.Next = Next{Action: "human", Detail: "operator intervention is required before another rerun"}
 			result.Outcome = blocked
+			result.RerunRefused = true
 			return result
 		}
 	}
@@ -93,8 +106,8 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	fingerprint, err := CaptureFingerprint(root, manifest)
 	if err != nil {
 		outcome.AddFailure("fingerprint", Failure{Class: "harness", Detail: err.Error()})
-	} else if !FingerprintEqual(fingerprint, lock.Fingerprint) {
-		outcome.AddFailure("fingerprint", Failure{Class: "harness", Detail: "environment differs from recording"})
+	} else if mismatch := FingerprintMismatch(fingerprint, lock.Fingerprint); mismatch != "" {
+		outcome.AddFailure("fingerprint", Failure{Class: "harness", Detail: "environment differs from recording: " + mismatch})
 	}
 
 	if opts.ProbeID == "" {
@@ -109,6 +122,8 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 		if _, ok := outcome.Failures["fingerprint"]; ok {
 			outcome.Next = Next{Action: "human", Detail: "restore the recorded toolchain or ask an operator to re-record on this machine"}
 		}
+		// No probe ran, so nothing passed; the count must not imply otherwise.
+		outcome.Counts.Pass = 0
 		result.Outcome = outcome
 		return result
 	}
@@ -338,10 +353,30 @@ func JournalVerifyResult(root, command string, result VerifyResult) error {
 			event.Metrics[id] = metric.Now
 		}
 	}
+	if len(result.CheckSet) > 0 {
+		event.Probes = append([]string(nil), result.CheckSet...)
+	}
 	if len(result.Flaky) > 0 {
 		event.Event = "flake"
 		event.Flaky = append([]string(nil), result.Flaky...)
-		event.Probes = append([]string(nil), result.CheckSet...)
 	}
 	return AppendJournal(root, event)
+}
+
+// RerunLimitReached reports whether the next judged run for this commit,
+// lock, and probe set would be refused, and why. Both verify and status use
+// it so the perception act never promises a gate that would be refused.
+func RerunLimitReached(root, commit, lockHash string, probeIDs []string) (bool, string, error) {
+	events, truncated, err := readJournalTail(root)
+	if err != nil {
+		return false, "", err
+	}
+	flakes, bounded := ConsecutiveFlakes(events, commit, lockHash, probeIDs)
+	switch {
+	case flakes >= 2:
+		return true, "second consecutive rerun already consumed for this commit, lock, and probe set", nil
+	case truncated && !bounded:
+		return true, "journal tail holds only unjudged events for this commit and lock; the rerun chain cannot be bounded", nil
+	}
+	return false, "", nil
 }

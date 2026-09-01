@@ -51,7 +51,7 @@ func InitRepository(root string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if err := atomicWrite(manifestPath, []byte(StubManifest), 0o644); err != nil {
+	if err := atomicWrite(root, manifestPath, []byte(StubManifest), 0o644); err != nil {
 		return err
 	}
 	if err := updateGitignore(root); err != nil {
@@ -84,5 +84,5 @@ func updateGitignore(root string) error {
 		text += "\n"
 	}
 	text += strings.Join(additions, "\n") + "\n"
-	return atomicWrite(path, []byte(text), 0o644)
+	return atomicWrite(root, path, []byte(text), 0o644)
 }
