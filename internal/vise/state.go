@@ -482,8 +482,8 @@ func readJournalTail(root string) (events []JournalEvent, truncated bool, err er
 }
 
 // ConsecutiveFlakes counts flake events for this probe set since the last
-// chain boundary: a record, a judged verdict (green or red), or any event at
-// another commit or lock. Events for other probe sets, and indeterminate
+// chain boundary: a record, a judged verdict (green or red) whose probe set
+// covers this one, or any event at another commit or lock. Events for other probe sets, and indeterminate
 // events that judged nothing, are transparent: they neither count nor reset
 // the chain, so a rerun refusal or a single-probe verify cannot buy more
 // reruns. bounded reports whether a boundary was reached inside events; when
@@ -505,11 +505,30 @@ func ConsecutiveFlakes(events []JournalEvent, commit, lock string, probes []stri
 			}
 			continue
 		}
-		if event.Verdict == "green" || event.Verdict == "red" {
+		if (event.Verdict == "green" || event.Verdict == "red") && setCovers(event.Probes, want) {
 			return count, true
 		}
 	}
 	return count, false
+}
+
+// setCovers reports whether a judged event's probe set contains every wanted
+// id. An event recorded without a probe set (older journals) counts as
+// covering everything.
+func setCovers(got, want []string) bool {
+	if len(got) == 0 {
+		return true
+	}
+	seen := make(map[string]bool, len(got))
+	for _, id := range got {
+		seen[id] = true
+	}
+	for _, id := range want {
+		if !seen[id] {
+			return false
+		}
+	}
+	return true
 }
 
 // truncateTornTail removes a trailing partial line (no final newline) from

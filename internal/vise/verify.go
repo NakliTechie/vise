@@ -83,17 +83,12 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	result.CheckSet = append([]string(nil), probeIDs...)
 
 	if opts.EnforceRerunLimit {
-		events, truncated, err := readJournalTail(root)
+		refused, detail, err := RerunLimitReached(root, commit, lockHash, probeIDs)
 		if err != nil {
 			result.Outcome = harnessOnly("verify", "journal", err.Error())
 			return result
 		}
-		flakes, bounded := ConsecutiveFlakes(events, commit, lockHash, probeIDs)
-		if flakes >= 2 || (truncated && !bounded) {
-			detail := "second consecutive rerun already consumed for this commit, lock, and probe set"
-			if flakes < 2 {
-				detail = "journal tail holds only unjudged events for this commit and lock; the rerun chain cannot be bounded"
-			}
+		if refused {
 			blocked := harnessOnly("verify", "rerun-limit", detail)
 			blocked.Next = Next{Action: "human", Detail: "operator intervention is required before another rerun"}
 			result.Outcome = blocked
@@ -350,10 +345,30 @@ func JournalVerifyResult(root, command string, result VerifyResult) error {
 			event.Metrics[id] = metric.Now
 		}
 	}
+	if len(result.CheckSet) > 0 {
+		event.Probes = append([]string(nil), result.CheckSet...)
+	}
 	if len(result.Flaky) > 0 {
 		event.Event = "flake"
 		event.Flaky = append([]string(nil), result.Flaky...)
-		event.Probes = append([]string(nil), result.CheckSet...)
 	}
 	return AppendJournal(root, event)
+}
+
+// RerunLimitReached reports whether the next judged run for this commit,
+// lock, and probe set would be refused, and why. Both verify and status use
+// it so the perception act never promises a gate that would be refused.
+func RerunLimitReached(root, commit, lockHash string, probeIDs []string) (bool, string, error) {
+	events, truncated, err := readJournalTail(root)
+	if err != nil {
+		return false, "", err
+	}
+	flakes, bounded := ConsecutiveFlakes(events, commit, lockHash, probeIDs)
+	switch {
+	case flakes >= 2:
+		return true, "second consecutive rerun already consumed for this commit, lock, and probe set", nil
+	case truncated && !bounded:
+		return true, "journal tail holds only unjudged events for this commit and lock; the rerun chain cannot be bounded", nil
+	}
+	return false, "", nil
 }

@@ -61,6 +61,10 @@ func renderGate(w io.Writer, outcome vise.Outcome, quiet bool) {
 	}
 }
 
+// maxDriftLines keeps the human status bounded when many probes drift; the
+// JSON report carries the full list.
+const maxDriftLines = 5
+
 func renderStatus(w io.Writer, report vise.StatusReport) {
 	fmt.Fprintln(w, "VISE STATUS — "+strings.ToUpper(report.State))
 	if report.Manifest.Present {
@@ -88,7 +92,11 @@ func renderStatus(w io.Writer, report vise.StatusReport) {
 	if report.Lock.Error != "" {
 		fmt.Fprintln(w, "lock error: "+report.Lock.Error)
 	}
-	for _, line := range report.Lock.Drift {
+	for i, line := range report.Lock.Drift {
+		if i == maxDriftLines {
+			fmt.Fprintf(w, "drift: … %d more (see --json)\n", len(report.Lock.Drift)-maxDriftLines)
+			break
+		}
 		fmt.Fprintln(w, "drift: "+terminalSafe(line, false))
 	}
 	fmt.Fprintf(w, "pending proposals: %d\n", report.PendingProposals)
