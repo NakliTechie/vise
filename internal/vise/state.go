@@ -16,9 +16,13 @@ import (
 )
 
 type Fingerprint struct {
-	OS   string            `json:"os"`
-	Arch string            `json:"arch"`
-	Env  map[string]string `json:"env,omitempty"`
+	OS   string `json:"os"`
+	Arch string `json:"arch"`
+	// Stubs are the manifest's [stubs] values in force when the baseline was
+	// recorded. They shape every probe's environment, so a change is
+	// environment drift (harness class), never a behavior change.
+	Stubs StubSettings      `json:"stubs"`
+	Env   map[string]string `json:"env,omitempty"`
 }
 
 type ProbeLock struct {
@@ -96,7 +100,7 @@ func (l *StateLock) Close() error {
 }
 
 func CaptureFingerprint(root string, manifest Manifest) (Fingerprint, error) {
-	fingerprint := Fingerprint{OS: runtime.GOOS, Arch: runtime.GOARCH}
+	fingerprint := Fingerprint{OS: runtime.GOOS, Arch: runtime.GOARCH, Stubs: manifest.Stubs}
 	if len(manifest.Environment.Fingerprint) == 0 {
 		return fingerprint, nil
 	}
@@ -127,15 +131,27 @@ func CaptureFingerprint(root string, manifest Manifest) (Fingerprint, error) {
 }
 
 func FingerprintEqual(a, b Fingerprint) bool {
-	if a.OS != b.OS || a.Arch != b.Arch || len(a.Env) != len(b.Env) {
-		return false
+	return FingerprintMismatch(a, b) == ""
+}
+
+// FingerprintMismatch names the first way current differs from recorded, or
+// returns "" when the two fingerprints match.
+func FingerprintMismatch(current, recorded Fingerprint) string {
+	if current.OS != recorded.OS || current.Arch != recorded.Arch {
+		return fmt.Sprintf("platform %s/%s differs from the recorded %s/%s", current.OS, current.Arch, recorded.OS, recorded.Arch)
 	}
-	for key, value := range a.Env {
-		if b.Env[key] != value {
-			return false
+	if current.Stubs != recorded.Stubs {
+		return "manifest [stubs] differ from the recorded baseline"
+	}
+	if len(current.Env) != len(recorded.Env) {
+		return "the set of fingerprint commands differs from the recorded baseline"
+	}
+	for _, key := range sortedKeys(current.Env) {
+		if recorded.Env[key] != current.Env[key] {
+			return fmt.Sprintf("fingerprint %q output differs from the recorded baseline", key)
 		}
 	}
-	return true
+	return ""
 }
 
 func LoadLockfile(root string) (Lockfile, []byte, error) {

@@ -212,6 +212,27 @@ deps = ["fixture.txt"]
 	}
 }
 
+func TestStubChangeIsEnvironmentDriftNotBehavior(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf '%s' \"$VISE_SEED\"")
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 0 {
+		t.Fatalf("record: %d %s", exit, stderr)
+	}
+	cliWrite(t, root, "vise.toml", strings.Replace(basicManifest(""), `seed = "1729"`, `seed = "42"`, 1))
+	exit, stdout, _ := cliRun(t, root, "gate", "--json")
+	value := parseCLIJSON(t, stdout)
+	failures, _ := value["failures"].(map[string]any)
+	fingerprint, _ := failures["fingerprint"].(map[string]any)
+	if exit != 2 || value["next"].(map[string]any)["action"] != "human" || fingerprint == nil || !strings.Contains(fingerprint["detail"].(string), "[stubs]") {
+		t.Fatalf("stub change: exit=%d value=%#v", exit, value)
+	}
+	if _, behavior := failures["behavior"]; behavior {
+		t.Fatalf("stub change was classed as a probe failure: %#v", failures)
+	}
+	if exit, stdout, _ := cliRun(t, root, "status", "--json"); exit != 0 || !strings.Contains(stdout, `"state":"environment-drift"`) {
+		t.Fatalf("status: %d %s", exit, stdout)
+	}
+}
+
 func TestMetricNoRegress(t *testing.T) {
 	manifest := basicManifest(`
 [[metric]]

@@ -102,8 +102,8 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	fingerprint, err := CaptureFingerprint(root, manifest)
 	if err != nil {
 		outcome.AddFailure("fingerprint", Failure{Class: "harness", Detail: err.Error()})
-	} else if !FingerprintEqual(fingerprint, lock.Fingerprint) {
-		outcome.AddFailure("fingerprint", Failure{Class: "harness", Detail: "environment differs from recording"})
+	} else if mismatch := FingerprintMismatch(fingerprint, lock.Fingerprint); mismatch != "" {
+		outcome.AddFailure("fingerprint", Failure{Class: "harness", Detail: "environment differs from recording: " + mismatch})
 	}
 
 	if opts.ProbeID == "" {
