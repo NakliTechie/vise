@@ -1,0 +1,281 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+VISE_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+CHECKOUT_ID=$(printf '%s' "$VISE_ROOT" | cksum | awk '{print $1}')
+VERIFY_BASE=${TMPDIR:-/tmp}/vise-verify-$CHECKOUT_ID
+VERIFY_BIN=$VERIFY_BASE/vise
+VERIFY_GOCACHE=$VERIFY_BASE/go-build
+VERIFY_GOMODCACHE=$VERIFY_BASE/go-mod
+
+summary() {
+  printf 'VISE_VERIFY {"feature":"%s","status":"%s"}\n' "$1" "$2"
+}
+
+fail() {
+  printf 'verify: %s\n' "$2" >&2
+  summary "$1" fail >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  scripts/verify doctor
+  scripts/verify verify <feature>
+  scripts/verify verify
+
+Features:
+  orientation       Help, version, JSON, and status outside Git
+  initialization    First-run init, unrecorded status, and empty-manifest remedy
+  baseline          Record, status, raw run, verify, gate, artifacts, and dependencies
+  failure-modes     Behavior diff, dependency drift, flake, and rerun refusal
+  metrics           Metric baseline and no-regress enforcement
+  internal-checks   Go unit/integration tests and vet
+EOF
+}
+
+doctor() {
+  command -v go >/dev/null 2>&1 || fail doctor "Go is missing; install Go 1.25 or newer"
+  command -v git >/dev/null 2>&1 || fail doctor "Git is missing; install Git before running the harness"
+  command -v sh >/dev/null 2>&1 || fail doctor "A POSIX shell is missing"
+  test -f "$VISE_ROOT/go.mod" || fail doctor "go.mod is missing from $VISE_ROOT"
+  git -C "$VISE_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail doctor "$VISE_ROOT is not a Git work tree"
+  if test -f "$VISE_ROOT/.git"; then
+    printf 'checkout: linked worktree\n'
+  else
+    printf 'checkout: primary worktree\n'
+  fi
+  printf 'root: %s\n' "$VISE_ROOT"
+  printf 'isolated state: %s\n' "$VERIFY_BASE"
+  printf 'go: %s\n' "$(go version)"
+  summary doctor pass
+}
+
+build_binary() {
+  mkdir -p "$VERIFY_BASE" "$VERIFY_GOCACHE" "$VERIFY_GOMODCACHE"
+  if ! env GOCACHE="$VERIFY_GOCACHE" GOMODCACHE="$VERIFY_GOMODCACHE" go build -trimpath -o "$VERIFY_BIN" ./cmd/vise; then
+    fail build "Go build failed; inspect dependency access and compiler diagnostics above"
+  fi
+}
+
+new_repo() {
+  feature=$1
+  mkdir -p "$VERIFY_BASE/fixtures"
+  repo=$(mktemp -d "$VERIFY_BASE/fixtures/$feature.XXXXXX")
+  git -C "$repo" init -q
+  git -C "$repo" config user.email verify@example.invalid
+  git -C "$repo" config user.name "vise verify"
+  printf '%s\n' '.vise/journal.jsonl' '.vise/run.lock' '.vise/tmp/' '.toggle' > "$repo/.gitignore"
+  printf '%s\n' "$repo"
+}
+
+commit_fixture() {
+  repo=$1
+  git -C "$repo" add .
+  git -C "$repo" commit -qm fixture
+}
+
+expect_exit() {
+  want=$1
+  shift
+  set +e
+  "$@"
+  got=$?
+  set -e
+  if test "$got" -ne "$want"; then
+    fail runtime "expected exit $want, got $got from: $*"
+  fi
+}
+
+expect_vise_json_exit() {
+  feature=$1
+  want=$2
+  needle=$3
+  repo=$4
+  shift 4
+  set +e
+  output=$(cd "$repo" && "$VERIFY_BIN" "$@" --json)
+  got=$?
+  set -e
+  if test "$got" -ne "$want"; then
+    printf '%s\n' "$output" >&2
+    fail "$feature" "expected vise exit $want, got $got from: $*"
+  fi
+  printf '%s\n' "$output" | grep -q "$needle" || fail "$feature" "vise JSON omitted $needle for: $*"
+}
+
+verify_orientation() {
+  "$VERIFY_BIN" --help | grep -q 'deterministic behavior locks' || fail orientation "help omitted the product description"
+  "$VERIFY_BIN" version --json | grep -q '"version":"0.3.0-dev"' || fail orientation "version JSON is missing"
+  outside=$(mktemp -d "$VERIFY_BASE/orientation.XXXXXX")
+  (cd "$outside" && "$VERIFY_BIN" status --json) | grep -q '"state":"no-git"' || fail orientation "status outside Git did not explain the missing repository"
+  summary orientation pass
+}
+
+verify_initialization() {
+  repo=$(new_repo initialization)
+  (cd "$repo" && "$VERIFY_BIN" init --json) > "$repo/init.json"
+  grep -q '"cmd":"init"' "$repo/init.json" || fail initialization "init did not emit its JSON contract"
+  test -f "$repo/vise.toml" || fail initialization "init did not create vise.toml"
+  grep -q '.vise/journal.jsonl' "$repo/.gitignore" || fail initialization "init did not wire journal state into .gitignore"
+  (cd "$repo" && "$VERIFY_BIN" status --json) | grep -q '"state":"unrecorded"' || fail initialization "cold status did not report an unrecorded manifest"
+  expect_exit 2 sh -c "cd '$repo' && '$VERIFY_BIN' record --json >/dev/null"
+  summary initialization pass
+}
+
+write_baseline_fixture() {
+  repo=$1
+  cat > "$repo/vise.toml" <<'EOF'
+[vise]
+version = 1
+
+[stubs]
+tz = "UTC"
+lang = "C"
+seed = "1729"
+network = "declared-off"
+
+[env]
+fingerprint = ["git --version"]
+
+[[probe]]
+id = "behavior"
+run = "./probe.sh"
+timeout = 5
+deps = ["fixture.txt"]
+files = ["out/result.txt"]
+EOF
+  cat > "$repo/probe.sh" <<'EOF'
+#!/bin/sh
+set -eu
+mkdir -p out
+value=$(cat fixture.txt)
+printf 'value=%s\n' "$value"
+printf '%s' "$value" > out/result.txt
+EOF
+  chmod +x "$repo/probe.sh"
+  printf 'alpha\n' > "$repo/fixture.txt"
+}
+
+verify_baseline() {
+  repo=$(new_repo baseline)
+  write_baseline_fixture "$repo"
+  commit_fixture "$repo"
+  (cd "$repo" && "$VERIFY_BIN" record --json) | grep -q '"verdict":"green"' || fail baseline "record did not create a baseline"
+  test -f "$repo/vise.lock" || fail baseline "record did not create vise.lock"
+  (cd "$repo" && "$VERIFY_BIN" status --json) | grep -q '"state":"ready"' || fail baseline "status did not report a ready baseline"
+  (cd "$repo" && "$VERIFY_BIN" run behavior) | grep -q 'value=alpha' || fail baseline "raw probe run returned the wrong output"
+  (cd "$repo" && "$VERIFY_BIN" verify --json) | grep -q '"verdict":"green"' || fail baseline "verify rejected unchanged behavior"
+  (cd "$repo" && "$VERIFY_BIN" gate --quiet) | grep -q 'GATE GREEN' || fail baseline "gate did not emit the green verdict"
+  test "$(cat "$repo/out/result.txt")" = alpha || fail baseline "declared artifact was not captured"
+  summary baseline pass
+}
+
+verify_failure_modes() {
+  repo=$(new_repo failures)
+  write_baseline_fixture "$repo"
+  commit_fixture "$repo"
+  (cd "$repo" && "$VERIFY_BIN" record --json) >/dev/null
+
+  sed "s/printf 'value=/printf 'changed=/" "$repo/probe.sh" > "$repo/probe.next"
+  mv "$repo/probe.next" "$repo/probe.sh"
+  chmod +x "$repo/probe.sh"
+  expect_vise_json_exit failure-modes 1 '"verdict":"red"' "$repo" gate
+  git -C "$repo" checkout -- probe.sh
+
+  printf 'beta\n' > "$repo/fixture.txt"
+  expect_vise_json_exit failure-modes 2 '"action":"fix_probe"' "$repo" verify
+  git -C "$repo" checkout -- fixture.txt
+
+  cat > "$repo/probe.sh" <<'EOF'
+#!/bin/sh
+set -eu
+mkdir -p out
+value=$(cat fixture.txt)
+if test -f .toggle; then rm .toggle; suffix=b; else touch .toggle; suffix=a; fi
+printf 'value=%s-%s\n' "$value" "$suffix"
+printf '%s-%s' "$value" "$suffix" > out/result.txt
+EOF
+  chmod +x "$repo/probe.sh"
+  expect_vise_json_exit failure-modes 3 '"verdict":"indeterminate"' "$repo" gate
+  expect_vise_json_exit failure-modes 3 '"verdict":"indeterminate"' "$repo" gate
+  expect_vise_json_exit failure-modes 2 '"action":"human"' "$repo" gate
+  summary failure-modes pass
+}
+
+verify_metrics() {
+  repo=$(new_repo metrics)
+  cat > "$repo/vise.toml" <<'EOF'
+[vise]
+version = 1
+[stubs]
+network = "declared-off"
+[[probe]]
+id = "behavior"
+run = "printf stable"
+[[metric]]
+id = "complexity"
+run = "cat metric.txt"
+direction = "down"
+enforce = "no-regress"
+version_cmd = "printf analyzer-1"
+EOF
+  printf '10\n' > "$repo/metric.txt"
+  commit_fixture "$repo"
+  (cd "$repo" && "$VERIFY_BIN" record --json) >/dev/null
+  printf '12\n' > "$repo/metric.txt"
+  expect_vise_json_exit metrics 5 '"metric"' "$repo" gate
+  summary metrics pass
+}
+
+verify_internal_checks() {
+  if ! env GOCACHE="$VERIFY_GOCACHE" GOMODCACHE="$VERIFY_GOMODCACHE" go test ./...; then
+    fail internal-checks "Go tests failed"
+  fi
+  if ! env GOCACHE="$VERIFY_GOCACHE" GOMODCACHE="$VERIFY_GOMODCACHE" go vet ./...; then
+    fail internal-checks "go vet failed"
+  fi
+  summary internal-checks pass
+}
+
+run_feature() {
+  case "$1" in
+    orientation) verify_orientation ;;
+    initialization) verify_initialization ;;
+    baseline) verify_baseline ;;
+    failure-modes) verify_failure_modes ;;
+    metrics) verify_metrics ;;
+    internal-checks) verify_internal_checks ;;
+    *) fail "$1" "unknown feature; run scripts/verify --help" ;;
+  esac
+}
+
+case "${1:-}" in
+  doctor)
+    test "$#" -eq 1 || fail doctor "doctor accepts no additional arguments"
+    doctor
+    ;;
+  verify)
+    doctor >/dev/null
+    build_binary
+    if test "$#" -eq 2; then
+      run_feature "$2"
+    elif test "$#" -eq 1; then
+      for feature in orientation initialization baseline failure-modes metrics internal-checks; do
+        run_feature "$feature"
+      done
+      summary full pass
+    else
+      fail verify "usage: scripts/verify verify [feature]"
+    fi
+    ;;
+  --help|-h|help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
