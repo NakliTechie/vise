@@ -40,7 +40,7 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		return result
 	}
 
-	oldLock, oldBytes, oldErr := LoadLockfile(root)
+	oldLock, _, oldErr := LoadLockfile(root)
 	hasOld := oldErr == nil
 	if oldErr != nil && !os.IsNotExist(oldErr) {
 		result.Outcome = harnessOnly("record", "vise.lock", oldErr.Error())
@@ -183,12 +183,10 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		return result
 	}
 
-	result.Outcome.Counts.Pass = len(manifest.Probes)
 	result.Outcome.Lock = lockHash
 	result.Outcome.Finalize()
 	result.Lockfile = lock
 	result.LockBytes = lockBytes
-	_ = oldBytes
 	return result
 }
 
