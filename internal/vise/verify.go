@@ -61,6 +61,12 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	result.Commit = commit
 	result.Dirty = dirty
 
+	if len(manifest.Probes) == 0 {
+		// Green requires every declared probe to pass; with none declared there
+		// is nothing to judge, and a 0/0 green would be a verdict without a judge.
+		result.Outcome = harnessWithNext("verify", "manifest", "manifest declares no [[probe]]; nothing can be judged", "fix_probe", "declare at least one probe in vise.toml and record a baseline")
+		return result
+	}
 	selected, selectionFailure := selectedProbes(manifest, opts.ProbeID)
 	if selectionFailure != nil {
 		result.Outcome = harnessOnly("verify", "probe", selectionFailure.Error())

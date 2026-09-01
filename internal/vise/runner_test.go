@@ -219,3 +219,18 @@ func TestProbeScratchLivesUnderViseTmpAndIsWiped(t *testing.T) {
 		t.Fatalf("scratch made the tree dirty: dirty=%t err=%v", dirty, err)
 	}
 }
+
+func TestRunnerKillsLeftoverGroupMembersAfterTheShellExits(t *testing.T) {
+	root := testGitRepo(t)
+	// A redirected background child keeps no pipe open, so Wait returns as
+	// soon as the shell exits; the child must still not survive the run.
+	probe := Probe{ID: "leftover", Run: "(sleep 1; printf late > late.txt) >/dev/null 2>&1 & printf done", Timeout: 10}
+	result := (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, true)
+	if result.HarnessError != "" || string(result.Stdout) != "done" {
+		t.Fatalf("result = %#v", result)
+	}
+	time.Sleep(1500 * time.Millisecond)
+	if _, err := os.Stat(filepath.Join(root, "late.txt")); !os.IsNotExist(err) {
+		t.Fatalf("background child outlived the run and wrote late.txt: %v", err)
+	}
+}

@@ -81,7 +81,15 @@ func GitTrackedPaths(root string, rels []string) ([]string, error) {
 	if len(rels) == 0 {
 		return nil, nil
 	}
-	args := append([]string{"--literal-pathspecs", "ls-files", "-z", "--"}, rels...)
+	// Match literally but case-insensitively: on a case-insensitive filesystem
+	// (APFS, NTFS) a declared "tracked.txt" would delete a tracked
+	// "Tracked.txt". Over-refusing a case variant on a case-sensitive
+	// filesystem is the safe side.
+	args := make([]string, 0, len(rels)+3)
+	args = append(args, "ls-files", "-z", "--")
+	for _, rel := range rels {
+		args = append(args, ":(literal,icase)"+rel)
+	}
 	cmd := exec.Command("git", args...)
 	cmd.Dir = root
 	var stdout, stderr bytes.Buffer

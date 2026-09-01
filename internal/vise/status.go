@@ -1,6 +1,7 @@
 package vise
 
 import (
+	"fmt"
 	"os"
 	"sort"
 )
@@ -117,6 +118,12 @@ func BuildStatus(root string) StatusReport {
 					report.Next = Next{Action: "human", Detail: "the next gate is refused (" + detail + "); commit, re-record, or change the manifest"}
 				}
 			}
+			if len(manifest.Probes) == 0 && report.State != "harness-error" {
+				// A lock beside a manifest with no probes judges nothing; gate
+				// refuses it, so status must not promise proceed.
+				report.State = "harness-error"
+				report.Next = Next{Action: "fix_probe", Detail: "manifest declares no [[probe]]; declare at least one probe in vise.toml and record a baseline"}
+			}
 		}
 	}
 
@@ -146,6 +153,14 @@ func baselineDrift(root string, manifest Manifest, lock Lockfile) []string {
 	validateMetricSet(&outcome, manifest, lock)
 	for _, probe := range manifest.Probes {
 		validateProbeEntry(root, &outcome, probe, lock)
+	}
+	for _, probe := range manifest.Probes {
+		if _, exists := outcome.Failures[probe.ID]; exists {
+			continue
+		}
+		if tracked, err := GitTrackedPaths(root, probe.Files); err == nil && len(tracked) > 0 {
+			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: fmt.Sprintf("declared artifact %q is tracked by git; the next run will refuse it", tracked[0])})
+		}
 	}
 	if len(outcome.Failures) == 0 {
 		return nil

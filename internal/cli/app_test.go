@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -525,5 +526,18 @@ func TestRunMirrorsLaunchFailureExit(t *testing.T) {
 	}
 	if exit, _, stderr := cliRun(t, root, "record"); exit != 2 || !strings.Contains(stderr, "exit 127") {
 		t.Fatalf("record must still refuse a launch failure: exit=%d stderr=%q", exit, stderr)
+	}
+}
+
+func TestEmptyManifestNeverGatesGreen(t *testing.T) {
+	root := cliRepo(t, "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n", "")
+	cliWrite(t, root, "vise.lock", "{\n  \"v\": 1,\n  \"fingerprint\": {\"os\": \""+runtime.GOOS+"\", \"arch\": \""+runtime.GOARCH+"\", \"stubs\": {\"tz\": \"UTC\", \"lang\": \"C\", \"seed\": \"1729\", \"network\": \"declared-off\"}},\n  \"probes\": {}\n}\n")
+	exit, stdout, _ := cliRun(t, root, "gate", "--json")
+	value := parseCLIJSON(t, stdout)
+	if exit != 2 || value["verdict"] == "green" || value["next"].(map[string]any)["action"] != "fix_probe" {
+		t.Fatalf("empty manifest gate: exit=%d value=%#v", exit, value)
+	}
+	if exit, stdout, _ := cliRun(t, root, "status", "--json"); exit != 0 || strings.Contains(stdout, `"state":"ready"`) || !strings.Contains(stdout, `"action":"fix_probe"`) {
+		t.Fatalf("empty manifest status must not say ready: %d %s", exit, stdout)
 	}
 }

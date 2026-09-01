@@ -200,6 +200,11 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		waitErr = <-done
 	}
+	// The shell has exited (or been killed). Anything it left behind in the
+	// process group — a redirected background child, a pipe holder — must not
+	// outlive the run: it could keep writing artifacts or tracked files after
+	// the tracked-tree check, or hold the next run's state.
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 
 	result := RunResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), TimedOut: timedOut}
 	if timedOut {
