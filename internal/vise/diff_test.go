@@ -1,6 +1,9 @@
 package vise
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFirstDiffMarksContextLinesAsContext(t *testing.T) {
 	expected := []byte("one\ntwo\nthree\nfour\n")
@@ -11,5 +14,15 @@ func TestFirstDiffMarksContextLinesAsContext(t *testing.T) {
 	}
 	if diff := FirstDiff("stdout", expected, expected); diff != "" {
 		t.Fatalf("equal inputs produced %q", diff)
+	}
+}
+
+func TestFirstDiffShowsTrailingNewlineChange(t *testing.T) {
+	diff := FirstDiff("stdout", []byte("a\n"), []byte("a"))
+	if diff == "" || !strings.Contains(diff, "+\\ No newline at end of file") || !strings.Contains(diff, " a\n") {
+		t.Fatalf("diff = %q", diff)
+	}
+	if diff := FirstDiff("stdout", []byte("a"), []byte("a\n")); !strings.Contains(diff, "-\\ No newline at end of file") {
+		t.Fatalf("diff = %q", diff)
 	}
 }

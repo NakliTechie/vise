@@ -59,12 +59,20 @@ func bytePreview(data []byte) string {
 	return fmt.Sprintf("%s… (%d bytes total)", strconv.QuoteToASCII(string(data[:limit])), len(data))
 }
 
+// noNewlineMarker is the line shown for a side whose data does not end in a
+// newline, so a change in the trailing newline alone still renders a diff.
+const noNewlineMarker = "\\ No newline at end of file"
+
 // splitLines splits on newlines without producing a phantom empty last line
-// for input that ends in a newline.
+// for input that ends in a newline; input that does not end in one gets the
+// marker line appended instead.
 func splitLines(data []byte) []string {
 	lines := strings.Split(string(data), "\n")
 	if len(lines) > 1 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
+		return lines[:len(lines)-1]
+	}
+	if len(data) > 0 {
+		lines = append(lines, noNewlineMarker)
 	}
 	return lines
 }

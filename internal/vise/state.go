@@ -262,8 +262,8 @@ func atomicWrite(root, path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	staging := filepath.Join(root, ".vise", "tmp")
-	if err := os.MkdirAll(staging, 0o755); err != nil {
+	staging, err := stateScratchDir(root)
+	if err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(staging, "write-*")
@@ -562,6 +562,13 @@ func truncateTornTail(file *os.File) error {
 		return nil
 	}
 	cut := bytes.LastIndexByte(tail, '\n')
+	fragment := tail[cut+1:]
+	var event JournalEvent
+	if json.Unmarshal(fragment, &event) == nil {
+		// A complete record that only lost its newline: keep it, terminate it.
+		_, err := file.Write([]byte{'\n'})
+		return err
+	}
 	keep := start
 	if cut >= 0 {
 		keep = start + int64(cut) + 1

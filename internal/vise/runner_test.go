@@ -234,3 +234,22 @@ func TestRunnerKillsLeftoverGroupMembersAfterTheShellExits(t *testing.T) {
 		t.Fatalf("background child outlived the run and wrote late.txt: %v", err)
 	}
 }
+
+func TestProbeScratchRefusesSymlinkedTmp(t *testing.T) {
+	root := testGitRepo(t)
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".vise"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, ".vise", "tmp")); err != nil {
+		t.Fatal(err)
+	}
+	probe := Probe{ID: "escape", Run: "printf '%s' \"$VISE_TMP\"", Timeout: 5}
+	result := (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, false)
+	if !strings.Contains(result.HarnessError, "real directory") {
+		t.Fatalf("result = %#v", result)
+	}
+	if err := atomicWrite(root, filepath.Join(root, "vise.lock"), []byte("x"), 0o644); err == nil || !strings.Contains(err.Error(), "real directory") {
+		t.Fatalf("atomicWrite through a symlinked staging dir: %v", err)
+	}
+}

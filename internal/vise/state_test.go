@@ -423,3 +423,22 @@ func TestAtomicWriteStagesUnderViseTmp(t *testing.T) {
 		t.Fatalf("staging residue after a clean write: %v %v", leftovers, err)
 	}
 }
+
+func TestAppendJournalKeepsCompleteUnterminatedFinalRecord(t *testing.T) {
+	root := t.TempDir()
+	if err := AppendJournal(root, JournalEvent{Event: "gate", Commit: "c", Verdict: "green"}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, ".vise", "journal.jsonl")
+	data := mustRead(t, path)
+	if err := os.WriteFile(path, append(data, []byte(`{"e":"gate","commit":"c","verdict":"red"}`)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendJournal(root, JournalEvent{Event: "gate", Commit: "c", Verdict: "green"}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := ReadJournal(root, 5)
+	if err != nil || len(events) != 3 || events[1].Verdict != "red" {
+		t.Fatalf("events=%#v err=%v", events, err)
+	}
+}
