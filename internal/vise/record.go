@@ -96,7 +96,7 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 			result.Outcome.AddFailure(probe.ID, Failure{
 				Class:  "flake",
 				Detail: "record self-test diverged across two full-suite passes",
-				Diff:   DiffRuns(root, ProbeLockFromRun(firstProbes[probe.ID]), run),
+				Diff:   DiffRunResults(firstProbes[probe.ID], run),
 			})
 		}
 	}
@@ -113,6 +113,9 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 	}
 	if result.Outcome.Counts.Harness > 0 || result.Outcome.Counts.Flaky > 0 {
 		result.Outcome.Finalize()
+		if result.Outcome.Counts.Harness == 0 {
+			result.Outcome.Next = Next{Action: "fix_probe", Detail: "make the named probes deterministic (normalize timestamps, ordering, temp paths, seeds), then rerun vise record"}
+		}
 		return result
 	}
 
@@ -201,14 +204,6 @@ func RunResultsEqual(a, b RunResult) bool {
 	return true
 }
 
-func ProbeLockFromRun(run RunResult) ProbeLock {
-	entry := ProbeLock{Exit: run.Exit, Stdout: HashBytes(run.Stdout), Stderr: HashBytes(run.Stderr), Files: make(map[string]string)}
-	for path, data := range run.Files {
-		entry.Files[path] = HashBytes(data)
-	}
-	return entry
-}
-
 func harnessOnly(cmd, id, detail string) Outcome {
 	outcome := NewOutcome(cmd)
 	outcome.AddFailure(id, Failure{Class: "harness", Detail: detail})
@@ -248,6 +243,18 @@ func LockfileDiff(root string, oldLock, newLock Lockfile) string {
 			if oldProbe.Exit != newProbe.Exit {
 				fmt.Fprintf(&b, "%s exit: %d -> %d\n", id, oldProbe.Exit, newProbe.Exit)
 			}
+			depPaths := make(map[string]bool)
+			for path := range oldProbe.Deps {
+				depPaths[path] = true
+			}
+			for path := range newProbe.Deps {
+				depPaths[path] = true
+			}
+			for _, path := range sortedKeys(depPaths) {
+				if oldProbe.Deps[path] != newProbe.Deps[path] {
+					fmt.Fprintf(&b, "%s dep %s: %s -> %s\n", id, path, hashOrNone(oldProbe.Deps[path]), hashOrNone(newProbe.Deps[path]))
+				}
+			}
 			appendBlobDiff(&b, root, id+"/stdout", oldProbe.Stdout, oldProbe.StdoutLarge, newProbe.Stdout, newProbe.StdoutLarge)
 			appendBlobDiff(&b, root, id+"/stderr", oldProbe.Stderr, oldProbe.StderrLarge, newProbe.Stderr, newProbe.StderrLarge)
 			paths := make(map[string]bool)
@@ -259,6 +266,33 @@ func LockfileDiff(root string, oldLock, newLock Lockfile) string {
 			}
 			for _, path := range sortedKeys(paths) {
 				appendBlobDiff(&b, root, id+"/"+path, oldProbe.Files[path], oldProbe.FilesLarge[path], newProbe.Files[path], newProbe.FilesLarge[path])
+			}
+		}
+	}
+	if mismatch := FingerprintMismatch(newLock.Fingerprint, oldLock.Fingerprint); mismatch != "" {
+		fmt.Fprintf(&b, "fingerprint: %s\n", mismatch)
+	}
+	metricIDs := make(map[string]bool)
+	for id := range oldLock.Metrics {
+		metricIDs[id] = true
+	}
+	for id := range newLock.Metrics {
+		metricIDs[id] = true
+	}
+	for _, id := range sortedKeys(metricIDs) {
+		oldMetric, oldOK := oldLock.Metrics[id]
+		newMetric, newOK := newLock.Metrics[id]
+		switch {
+		case !oldOK:
+			fmt.Fprintf(&b, "+ metric %s\n", id)
+		case !newOK:
+			fmt.Fprintf(&b, "- metric %s\n", id)
+		default:
+			if oldMetric.Value != newMetric.Value {
+				fmt.Fprintf(&b, "%s value: %g -> %g\n", id, oldMetric.Value, newMetric.Value)
+			}
+			if oldMetric.ToolVersion != newMetric.ToolVersion {
+				fmt.Fprintf(&b, "%s tool_version: %q -> %q\n", id, oldMetric.ToolVersion, newMetric.ToolVersion)
 			}
 		}
 	}
@@ -275,7 +309,7 @@ func appendBlobDiff(b *strings.Builder, root, label, oldHash string, oldLarge bo
 	oldData, oldAvailable, _ := BlobData(root, oldHash, oldLarge)
 	newData, newAvailable, _ := BlobData(root, newHash, newLarge)
 	if oldAvailable && newAvailable {
-		fmt.Fprintln(b, FullByteDiff(label, oldData, newData))
+		fmt.Fprintln(b, FirstDiff(label, oldData, newData))
 		return
 	}
 	fmt.Fprintf(b, "%s hash: %s -> %s\n", label, oldHash, newHash)
@@ -310,4 +344,39 @@ func DiffRuns(root string, expected ProbeLock, got RunResult) string {
 		}
 	}
 	return "observation differs"
+}
+
+// DiffRunResults explains the first divergence between two observations of
+// the same probe that are both still in memory, such as the two record
+// passes. Nothing here touches the blob store.
+func DiffRunResults(first, second RunResult) string {
+	if first.Exit != second.Exit {
+		return fmt.Sprintf("exit: first pass %d, second pass %d", first.Exit, second.Exit)
+	}
+	if diff := FirstDiff("stdout", first.Stdout, second.Stdout); diff != "" {
+		return diff
+	}
+	if diff := FirstDiff("stderr", first.Stderr, second.Stderr); diff != "" {
+		return diff
+	}
+	paths := make(map[string]bool, len(first.Files))
+	for path := range first.Files {
+		paths[path] = true
+	}
+	for path := range second.Files {
+		paths[path] = true
+	}
+	for _, path := range sortedKeys(paths) {
+		if diff := FirstDiff("file/"+path, first.Files[path], second.Files[path]); diff != "" {
+			return diff
+		}
+	}
+	return "observation differs"
+}
+
+func hashOrNone(hash string) string {
+	if hash == "" {
+		return "(none)"
+	}
+	return hash
 }
