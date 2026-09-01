@@ -36,6 +36,10 @@ type Runner struct {
 	Manifest Manifest
 }
 
+// pipeCloseDelay bounds how long a finished or killed probe may keep its
+// output pipes open through a process it left behind.
+const pipeCloseDelay = time.Second
+
 func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 	var before string
 	if checkTracked {
@@ -155,6 +159,11 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 	cmd.Dir = r.Root
 	cmd.Env = r.sanitizedEnv(tmp, extra)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Wait blocks until every holder of the stdout/stderr pipes exits. A probe
+	// that leaves a detached process (setsid, a daemon, a preloader) holding
+	// them would otherwise hang vise past its timeout. WaitDelay closes the
+	// pipes shortly after the shell exits or the timeout kill lands.
+	cmd.WaitDelay = pipeCloseDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -179,6 +188,11 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 	result := RunResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), TimedOut: timedOut}
 	if timedOut {
 		result.HarnessError = fmt.Sprintf("probe timed out after %ds", timeoutSeconds)
+		return result
+	}
+	if errors.Is(waitErr, exec.ErrWaitDelay) {
+		result.Exit = cmd.ProcessState.ExitCode()
+		result.HarnessError = "probe exited but left a background process holding its stdout or stderr; redirect that process to /dev/null or wait for it inside the probe"
 		return result
 	}
 	if waitErr == nil {

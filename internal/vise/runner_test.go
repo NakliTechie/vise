@@ -115,3 +115,29 @@ func TestMetricDetectsTrackedMutation(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 }
+
+func TestRunnerReturnsWhenDetachedChildHoldsStdout(t *testing.T) {
+	root := testGitRepo(t)
+	// perl leaves the process group via setsid, so the timeout kill cannot
+	// reach it, and it inherits the probe's stdout pipe.
+	detached := "perl -MPOSIX -e 'POSIX::setsid(); sleep 6' & printf started"
+	probe := Probe{ID: "detached", Run: detached, Timeout: 30}
+	start := time.Now()
+	result := (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, false)
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Fatalf("probe took %v; vise waited on the detached child", elapsed)
+	}
+	if result.TimedOut || !strings.Contains(result.HarnessError, "background process") || string(result.Stdout) != "started" {
+		t.Fatalf("result = %#v", result)
+	}
+
+	probe = Probe{ID: "detached-timeout", Run: "perl -MPOSIX -e 'POSIX::setsid(); sleep 6' & sleep 30", Timeout: 1}
+	start = time.Now()
+	result = (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, false)
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Fatalf("timed-out probe took %v; vise waited on the detached child", elapsed)
+	}
+	if !result.TimedOut || !strings.Contains(result.HarnessError, "timed out") {
+		t.Fatalf("result = %#v", result)
+	}
+}
