@@ -22,6 +22,10 @@ type StatusLock struct {
 	RecordedCommits  []string `json:"recorded_commits,omitempty"`
 	Hash             string   `json:"hash,omitempty"`
 	Error            string   `json:"error,omitempty"`
+	// Drift lists every way vise.toml and vise.lock disagree without running a
+	// probe: missing or extra ids, changed probe definitions, changed
+	// dependency hashes, missing blobs. Non-empty drift means gate will refuse.
+	Drift []string `json:"drift,omitempty"`
 }
 
 type StatusReport struct {
@@ -102,6 +106,11 @@ func BuildStatus(root string) StatusReport {
 				report.Lock.Error = err.Error()
 				report.Next = Next{Action: "fix_probe", Detail: "restore a valid vise.lock and referenced blobs"}
 			}
+			report.Lock.Drift = baselineDrift(root, manifest, lock)
+			if len(report.Lock.Drift) > 0 && report.State == "ready" {
+				report.State = "baseline-drift"
+				report.Next = Next{Action: "human", Detail: "vise.toml and vise.lock disagree (" + report.Lock.Drift[0] + "); restore the manifest or ask an operator to re-record"}
+			}
 		}
 	}
 
@@ -123,4 +132,23 @@ func BuildStatus(root string) StatusReport {
 		report.Journal = journal
 	}
 	return report
+}
+
+// baselineDrift runs verify's static manifest-versus-lock checks (no probe
+// executes) and returns one "id: detail" line per disagreement, sorted by id.
+func baselineDrift(root string, manifest Manifest, lock Lockfile) []string {
+	outcome := NewOutcome("status")
+	validateProbeSet(&outcome, manifest, lock)
+	validateMetricSet(&outcome, manifest, lock)
+	for _, probe := range manifest.Probes {
+		validateProbeEntry(root, &outcome, probe, lock)
+	}
+	if len(outcome.Failures) == 0 {
+		return nil
+	}
+	drift := make([]string, 0, len(outcome.Failures))
+	for _, id := range sortedKeys(outcome.Failures) {
+		drift = append(drift, id+": "+outcome.Failures[id].Detail)
+	}
+	return drift
 }

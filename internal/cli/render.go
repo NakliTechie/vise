@@ -88,6 +88,9 @@ func renderStatus(w io.Writer, report vise.StatusReport) {
 	if report.Lock.Error != "" {
 		fmt.Fprintln(w, "lock error: "+report.Lock.Error)
 	}
+	for _, line := range report.Lock.Drift {
+		fmt.Fprintln(w, "drift: "+terminalSafe(line, false))
+	}
 	fmt.Fprintf(w, "pending proposals: %d\n", report.PendingProposals)
 	if report.ProposalError != "" {
 		fmt.Fprintln(w, "proposal error: "+report.ProposalError)
