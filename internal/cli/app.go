@@ -181,7 +181,7 @@ func runVerify(args []string, root string, jsonMode, gate bool, stdout, stderr i
 	}
 	result := vise.Verify(root, manifest, manifestBytes, vise.VerifyOptions{ProbeID: *probeID, EnforceRerunLimit: true})
 	result.Outcome.Cmd = name
-	if gate || len(result.Flaky) > 0 {
+	if (gate || len(result.Flaky) > 0) && !result.RerunRefused {
 		if result.Commit != "" {
 			if err := vise.JournalVerifyResult(root, name, result); err != nil {
 				result.Outcome.AddFailure("journal", vise.Failure{Class: "harness", Detail: err.Error()})

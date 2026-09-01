@@ -125,7 +125,11 @@ func TestExpectedNonzeroExitIsBehavior(t *testing.T) {
 }
 
 func TestFlakeIsIndeterminateAndThirdRerunRefused(t *testing.T) {
-	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf stable")
+	root := cliRepo(t, basicManifest(`
+[[probe]]
+id = "steady"
+run = "printf steady"
+`), "#!/bin/sh\nprintf stable")
 	if exit, _, stderr := cliRun(t, root, "record"); exit != 0 {
 		t.Fatalf("record: %d %s", exit, stderr)
 	}
@@ -137,10 +141,40 @@ func TestFlakeIsIndeterminateAndThirdRerunRefused(t *testing.T) {
 			t.Fatalf("attempt %d: exit=%d value=%#v", attempt, exit, value)
 		}
 	}
-	exit, stdout, _ := cliRun(t, root, "gate", "--json")
+	for attempt := 3; attempt <= 5; attempt++ {
+		exit, stdout, _ := cliRun(t, root, "gate", "--json")
+		value := parseCLIJSON(t, stdout)
+		if exit != 2 || value["next"].(map[string]any)["action"] != "human" {
+			t.Fatalf("attempt %d: refusal must persist, got exit=%d value=%#v", attempt, exit, value)
+		}
+	}
+	// A single-probe verify is a different probe set: it gets its own two
+	// reruns, and its flakes neither reset nor extend the full-set chain.
+	for attempt := 1; attempt <= 2; attempt++ {
+		exit, stdout, _ := cliRun(t, root, "verify", "--probe", "behavior", "--json")
+		value := parseCLIJSON(t, stdout)
+		if exit != 3 || value["verdict"] != "indeterminate" {
+			t.Fatalf("single-probe attempt %d: exit=%d value=%#v", attempt, exit, value)
+		}
+	}
+	exit, stdout, _ := cliRun(t, root, "verify", "--probe", "behavior", "--json")
 	value := parseCLIJSON(t, stdout)
 	if exit != 2 || value["next"].(map[string]any)["action"] != "human" {
-		t.Fatalf("third: exit=%d value=%#v", exit, value)
+		t.Fatalf("single-probe third: exit=%d value=%#v", exit, value)
+	}
+	exit, stdout, _ = cliRun(t, root, "gate", "--json")
+	value = parseCLIJSON(t, stdout)
+	if exit != 2 || value["next"].(map[string]any)["action"] != "human" {
+		t.Fatalf("gate after single-probe flakes must stay refused: exit=%d value=%#v", exit, value)
+	}
+	events, err := core.ReadJournal(root, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Event == "gate" && event.Verdict == "indeterminate" && len(event.Flaky) == 0 {
+			t.Fatalf("rerun refusal was journaled: %#v", event)
+		}
 	}
 }
 

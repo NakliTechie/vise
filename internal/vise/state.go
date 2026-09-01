@@ -391,62 +391,89 @@ func AppendJournal(root string, event JournalEvent) error {
 	return file.Sync()
 }
 
+// ReadJournal returns the last limit events from the bounded journal tail.
+// A limit of zero or less returns every event the tail holds.
 func ReadJournal(root string, limit int) ([]JournalEvent, error) {
+	events, _, err := readJournalTail(root)
+	if err != nil {
+		return nil, err
+	}
+	if limit > 0 && len(events) > limit {
+		events = events[len(events)-limit:]
+	}
+	return events, nil
+}
+
+// readJournalTail scans at most the final 256 KiB of the journal. truncated
+// reports whether older events exist beyond the scanned window.
+func readJournalTail(root string) (events []JournalEvent, truncated bool, err error) {
 	path := filepath.Join(root, ".vise", "journal.jsonl")
 	if err := rejectExistingSymlinkOrSpecial(path); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	file, err := os.Open(path)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer file.Close()
 	const scanBytes int64 = 256 * 1024
 	info, err := file.Stat()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	offset := info.Size() - scanBytes
 	if offset < 0 {
 		offset = 0
 	}
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	if offset > 0 {
+		truncated = true
 		_ = scanner.Scan()
 	}
-	var events []JournalEvent
 	for scanner.Scan() {
 		var event JournalEvent
 		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			return nil, fmt.Errorf("parse journal: %w", err)
+			return nil, false, fmt.Errorf("parse journal: %w", err)
 		}
 		events = append(events, event)
-		if len(events) > limit {
-			events = events[len(events)-limit:]
-		}
 	}
-	return events, scanner.Err()
+	return events, truncated, scanner.Err()
 }
 
-func ConsecutiveFlakes(events []JournalEvent, commit, lock string, probes []string) int {
+// ConsecutiveFlakes counts flake events for this probe set since the last
+// chain boundary: a record, a judged verdict (green or red), or any event at
+// another commit or lock. Events for other probe sets, and indeterminate
+// events that judged nothing, are transparent: they neither count nor reset
+// the chain, so a rerun refusal or a single-probe verify cannot buy more
+// reruns. bounded reports whether a boundary was reached inside events; when
+// it is false the count is only a lower bound on the true chain.
+func ConsecutiveFlakes(events []JournalEvent, commit, lock string, probes []string) (count int, bounded bool) {
 	want := append([]string(nil), probes...)
 	sort.Strings(want)
-	count := 0
+	wantKey := strings.Join(want, "\x00")
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
-		got := append([]string(nil), event.Probes...)
-		sort.Strings(got)
-		if event.Event != "flake" || event.Commit != commit || event.Lock != lock || strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-			break
+		if event.Commit != commit || event.Lock != lock || event.Event == "record" {
+			return count, true
 		}
-		count++
+		if event.Event == "flake" {
+			got := append([]string(nil), event.Probes...)
+			sort.Strings(got)
+			if strings.Join(got, "\x00") == wantKey {
+				count++
+			}
+			continue
+		}
+		if event.Verdict == "green" || event.Verdict == "red" {
+			return count, true
+		}
 	}
-	return count
+	return count, false
 }

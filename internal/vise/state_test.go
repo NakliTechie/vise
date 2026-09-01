@@ -1,6 +1,8 @@
 package vise
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -143,8 +145,63 @@ func TestJournalTailAndConsecutiveFlakes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 5 || ConsecutiveFlakes(events, "c", "l", []string{"p"}) != 2 {
-		t.Fatalf("events = %#v", events)
+	count, bounded := ConsecutiveFlakes(events, "c", "l", []string{"p"})
+	if len(events) != 5 || count != 2 || bounded {
+		t.Fatalf("events = %#v count=%d bounded=%t", events, count, bounded)
+	}
+}
+
+func TestConsecutiveFlakesIgnoresTransparentEvents(t *testing.T) {
+	flake := func(probes ...string) JournalEvent {
+		return JournalEvent{Event: "flake", Commit: "c", Lock: "l", Verdict: "indeterminate", Probes: probes}
+	}
+	tests := []struct {
+		name    string
+		events  []JournalEvent
+		want    int
+		bounded bool
+	}{
+		{"refusal between flakes is transparent", []JournalEvent{flake("p"), flake("p"), {Event: "gate", Commit: "c", Lock: "l", Verdict: "indeterminate"}}, 2, false},
+		{"other probe set is transparent", []JournalEvent{flake("p"), flake("p"), flake("q")}, 2, false},
+		{"green verdict resets", []JournalEvent{flake("p"), {Event: "gate", Commit: "c", Lock: "l", Verdict: "green"}, flake("p")}, 1, true},
+		{"red verdict resets", []JournalEvent{flake("p"), {Event: "verify", Commit: "c", Lock: "l", Verdict: "red"}}, 0, true},
+		{"record at the same lock is a boundary", []JournalEvent{flake("p"), {Event: "record", Commit: "c", Lock: "l"}, flake("p")}, 1, true},
+		{"other commit ends the scan", []JournalEvent{flake("p"), {Event: "flake", Commit: "d", Lock: "l", Probes: []string{"p"}}, flake("p")}, 1, true},
+		{"other lock ends the scan", []JournalEvent{flake("p"), {Event: "record", Commit: "c", Lock: "m"}, flake("p")}, 1, true},
+		{"empty journal is unbounded with zero flakes", nil, 0, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, bounded := ConsecutiveFlakes(test.events, "c", "l", []string{"p"})
+			if got != test.want || bounded != test.bounded {
+				t.Fatalf("got %d bounded=%t, want %d bounded=%t", got, bounded, test.want, test.bounded)
+			}
+		})
+	}
+}
+
+func TestVerifyRefusesWhenTruncatedJournalHasNoBoundary(t *testing.T) {
+	root := t.TempDir()
+	// Fill more than the 256 KiB scan window with unjudged single-probe flakes
+	// at one commit and lock, so no chain boundary survives inside the tail.
+	line, err := json.Marshal(JournalEvent{Event: "flake", At: "2026-01-01T00:00:00Z", Commit: "c", Lock: "l", Verdict: "indeterminate", Flaky: []string{"q"}, Probes: []string{"q"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := bytes.Repeat(append(line, '\n'), 2200)
+	if err := os.MkdirAll(filepath.Join(root, ".vise"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".vise", "journal.jsonl"), journal, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	events, truncated, err := readJournalTail(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, bounded := ConsecutiveFlakes(events, "c", "l", []string{"p", "q"})
+	if !truncated || bounded || count != 0 {
+		t.Fatalf("truncated=%t bounded=%t count=%d", truncated, bounded, count)
 	}
 }
 

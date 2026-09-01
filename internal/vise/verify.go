@@ -20,6 +20,9 @@ type VerifyResult struct {
 	CheckSet      []string
 	Commit        string
 	Dirty         bool
+	// RerunRefused marks a verify that never ran because the rerun limit
+	// blocked it; such a result is not a judgment and must not be journaled.
+	RerunRefused bool
 }
 
 func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOptions) VerifyResult {
@@ -77,15 +80,21 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	result.CheckSet = append([]string(nil), probeIDs...)
 
 	if opts.EnforceRerunLimit {
-		events, err := ReadJournal(root, 20)
+		events, truncated, err := readJournalTail(root)
 		if err != nil {
 			result.Outcome = harnessOnly("verify", "journal", err.Error())
 			return result
 		}
-		if ConsecutiveFlakes(events, commit, lockHash, probeIDs) >= 2 {
-			blocked := harnessOnly("verify", "rerun-limit", "second consecutive rerun already consumed for this commit, lock, and probe set")
+		flakes, bounded := ConsecutiveFlakes(events, commit, lockHash, probeIDs)
+		if flakes >= 2 || (truncated && !bounded) {
+			detail := "second consecutive rerun already consumed for this commit, lock, and probe set"
+			if flakes < 2 {
+				detail = "journal tail holds only unjudged events for this commit and lock; the rerun chain cannot be bounded"
+			}
+			blocked := harnessOnly("verify", "rerun-limit", detail)
 			blocked.Next = Next{Action: "human", Detail: "operator intervention is required before another rerun"}
 			result.Outcome = blocked
+			result.RerunRefused = true
 			return result
 		}
 	}
