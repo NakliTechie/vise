@@ -21,7 +21,7 @@ Three tiers of handling, in order of preference:
 ## Per-runtime
 
 **Ruby / Rails** (the dogfood class)
-- Nonces & digests: CSRF tokens, asset fingerprints, `SECRET_KEY_BASE`-derived output → probe-owned normalization (the SPEC §2 example).
+- Nonces & digests: CSRF tokens, asset fingerprints, `SECRET_KEY_BASE`-derived output → probe-owned normalization (the SPEC §2 example). Same tier handles **`$VISE_PORT` leaking into recorded bytes** (absolute URLs in a served page): strip or fix the port in the probe pipeline.
 - **Spring preloader is a false-green machine**: it serves stale code after edits — probes must run with `DISABLE_SPRING=1` (recommend it in the manifest for any Rails repo).
 - Database state *is* behavior: a probe that reads the DB must own its setup (`db:reset` + deterministic seed inside `run`, or transactional fixtures). Auto-increment IDs and `created_at` in output → normalize or seed fixed.
 - Parallel test runners randomize ordering — pin `--seed` where the framework supports it.

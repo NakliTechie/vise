@@ -14,11 +14,11 @@ A tower of five abstractions, each legible to an agent on its own: **probe** (on
 
 The core commands:
 
-- **`vise record`** — freeze the current behavior: run the project's declared probes (commands, entry points, HTTP calls, rendered output) under determinism stubs (clock, RNG, network, locale) and write the results to a **behavior lockfile** (`vise.lock` — golden outputs, hashed and diffable).
+- **`vise record`** — freeze the current behavior: run the project's declared probes (commands, entry points, HTTP calls, rendered output) under a pinned deterministic environment (fixed epoch, locale/tty pins, an environment fingerprint, plus seeded-RNG and no-network *conventions the app honors*) and write the results to a **behavior lockfile** (`vise.lock` — golden outputs, hashed and diffable). Recording runs everything twice — a flaky probe fails the freeze loudly instead of producing a lockfile that lies.
 - **`vise verify`** — replay every probe against the current working tree and diff against the lockfile. Output is **agent-legible**: exact probe, expected vs got, minimal diff — written for a model to act on, not a human to squint at.
 - **`vise gate`** — `verify` with a hard exit code and a one-line verdict. The thing a refactor loop calls between every micro-step; the thing a CI job calls before merge.
 
-Around them: **`vise status`** (the session-opening perception act), **`vise run <probe>`** (debug one probe raw), **`vise init`** (draft a manifest deterministically from repo facts), and **metric probes** (cyclomatic complexity et al. as tracked deltas — the gate holds behavior constant while the metrics prove the refactor actually improved something, with an opt-in ratchet locking in the best value seen).
+Around them: **`vise status`** (the session-opening perception act), **`vise run <probe>`** (debug one probe raw), **`vise init`** (write a stub manifest + gitignore wiring), and **metric probes** (cyclomatic complexity et al. as tracked deltas — the gate holds behavior constant while the metrics prove the refactor actually improved something). The gate is **fail-closed**: a flaky probe makes the verdict *indeterminate*, never green — an agent cannot eject a judge by making it flaky.
 
 The refactor loop it enables, for any agent:
 

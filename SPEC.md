@@ -1,28 +1,28 @@
-# vise — v0 specification
+# vise — v0.3 specification
 
-Status: DRAFT (2026-09-01). The contract below is the product; the implementation serves it.
+Status: DRAFT (2026-09-01), post two-family cold review (plan/2026-09-01-review-{claude,codex}.md). The contract below is the product; the implementation serves it. Changes from v0.2: fail-closed verdict model, flake decision table, journal made local, environment fingerprint, probe lifecycle pinned, crash-safety ordering, blobs committed, exit-expectation table, dependency closure, ergonomics fixes, scope trim.
 
 ## 0. Design doctrine — built for the agent in the driver's seat
 
 vise's primary user is a coding agent mid-loop: context-poor, liable to be killed mid-turn, prone to circling on long campaigns and to rationalizing its own failures. Every interface decision below serves that user. The doctrine, in order of force:
 
-1. **One perception act.** `vise status` renders the entire situation — wiring, lockfile freshness, last verdict, metric trajectory, journal tail — in one bounded read. An agent's first move in any session is `status`; it never reconstructs state by exploring.
-2. **Machine-decidable, not merely machine-readable.** Every command supports `--json`; every outcome carries a typed **class** and a `next` field naming the remedy. The agent branches on exit code and class — it never parses prose to decide.
-3. **Typed verdicts = typed next actions.** The exit-code vocabulary is shared by all commands, one code per *distinct next action*: `0` proceed · `1` behavior diff → revert · `2` harness broken → fix manifest/probe, not code · `3` nondeterminism → quarantine the probe, don't chase ghosts · `4` not initialized → record first · `5` metric regression (under `no-regress`) → the change "worked" but made things worse. Conflating any two would force the agent to investigate what the tool already knows.
-4. **Bounded output, always.** Context is the agent's scarcest resource. Green is one line. Red shows first divergence + counts, never dumps. Blobs stay on disk; the transcript gets hashes and minimal diffs. No command's output grows with repo size — only with divergence.
-5. **Every failure names its remedy.** The error message is the documentation, delivered at the moment of need: what happened · what it means · the exact next command. No manual required mid-loop.
-6. **Crash-safe by contract.** Agents die mid-turn. Every write is atomic (temp + rename); an interrupted command leaves either the old state or the new state, never a hybrid. Every command is idempotent to re-run.
-7. **The tool is the campaign's memory.** The journal (§6) is an append-only JSONL event log keyed to commit SHAs — the anti-circling device. `status` renders it as a trajectory ("14 green gates, complexity 148→131, 2 reds reverted"), so a resuming agent reads the arc, not the history.
-8. **Accretive by mechanism, not intention.** Progress locks in mechanically: the **ratchet** (§2.1) makes the best-seen metric the new floor; **every escaped defect becomes a probe** (a behavior change that slipped past the gate is a coverage gap — the fix is a probe, recorded before the bug is fixed); the journal makes each session smarter than the last.
-9. **A tower, not a toolbox.** Five layers, each consuming only the one below, each independently legible: **probe** (atomic observation) → **lockfile** (frozen truth) → **gate** (one bit, typed) → **journal** (trajectory) → **status** (situation). The agent enters at the altitude its task needs: tight loop lives at the gate; session start at status; debugging descends to a single probe (`vise run`).
-10. **The evaluator stays outside the loop.** The gated agent can read everything and change nothing that judges it: manifest and lockfile are operator-territory (§5), and verify/gate output carries the manifest+lockfile hash so a harness can detect tampering.
+1. **One perception act.** `vise status` renders the entire situation in one bounded read. An agent's first move in any session is `status`; it never reconstructs state by exploring.
+2. **Machine-decidable, not merely machine-readable.** Every command supports `--json`; every outcome carries a typed **class** and a `next` field naming the remedy. The agent branches on exit code and class — never on prose.
+3. **Typed verdicts = typed next actions.** One exit code per *distinct next action* (§4). Conflating any two forces the agent to investigate what the tool already knows.
+4. **Bounded output, always.** Green is one line. Red shows first divergence + counts, never dumps. JSON reports failures and counts — never an entry per passing probe. No output grows with repo or probe count — only with divergence.
+5. **Every failure names its remedy.** The error message is the documentation, delivered at the moment of need.
+6. **Crash-safe by contract.** Every multi-artifact write follows the ordering protocol (§3.1); an interrupted command leaves the old state or the new state, never a hybrid. Idempotency means no state hybrid — an event log appending one event per run is correct, not a violation.
+7. **The tool is the campaign's memory.** The journal (§6) is local, append-only JSONL keyed to commit SHAs — the anti-circling device `status` renders as a trajectory.
+8. **Accretive by mechanism.** Every escaped defect becomes a probe — via the proposal flow (§5.1), so the doctrine has a gesture, not just an intention.
+9. **A tower, not a toolbox.** **probe** → **lockfile** → **gate** → **journal** → **status**; each layer consumes only the one below. Tight loop at the gate; debugging descends to one probe; sessions open at status.
+10. **The evaluator stays outside the loop — fail closed.** The gated agent can read everything and change nothing that judges it. When judgment itself is compromised (flaky probe, broken harness, environment drift), the gate is **indeterminate, never green**: a judge that can be ejected is not a judge. The full evaluator surface is manifest + lockfile + every input probes consume (§5.2).
 
 ## 1. Concepts
 
-- **Probe** — one deterministic observation of the codebase's behavior: a command run under declared stubs, producing an output the lockfile can hash and diff.
-- **Manifest** (`vise.toml`) — the repo's declared probe set. Human-authored, committed, read-only to a gated agent.
-- **Lockfile** (`vise.lock`) — the frozen behavior: one record per probe, written only by `vise record`. Committed, read-only to a gated agent.
-- **The gate** — `vise verify` semantics with a hard exit code. Green means: every probe replayed byte-identical to the lockfile. Anything else is red — including a probe that failed to run.
+- **Probe** — one deterministic observation: a command run under declared stubs, its outputs hashed and diffed.
+- **Manifest** (`vise.toml`) — the declared probe set. Committed; operator-territory.
+- **Lockfile** (`vise.lock`) — the frozen truth, written only by `vise record`. Committed; operator-territory. Its content is a pure function of the probes' behavior — no wall-clock timestamps inside (record events with times live in the journal).
+- **Verdict** — three-valued, fail-closed: **green** (every declared behavior probe judged *pass*), **red** (≥1 probe judged *behavior diff*, all others judged), **indeterminate** (≥1 probe unjudgable: flaky, harness-broken, or environment-drifted). Green requires *every* declared probe; nothing is excluded from the denominator, ever.
 
 ## 2. Manifest — `vise.toml`
 
@@ -31,178 +31,183 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 version = 1
 
 [stubs]                       # defaults applied to every probe
-tz = "UTC"                    # TZ env
-lang = "C"                    # LANG/LC_ALL
-seed = "1729"                 # exported as VISE_SEED; the project wires it to its RNG
-network = "refuse"            # "refuse" (default) | "allow" — refuse fails the probe on any network attempt where enforceable, and is always declared in the lockfile
+tz = "UTC"
+lang = "C"
+seed = "1729"                 # exported as VISE_SEED; the app wires it to its RNG (a convention the app honors — vise intercepts nothing)
+network = "declared-off"      # v0: a declaration probes promise to honor, NOT enforced by vise (enforcement is platform-specific — Parked)
+
+[env]                         # optional: environment fingerprint, captured at record, re-checked at verify
+fingerprint = ["sh --version | head -1", "jq --version", "node --version"]
 
 [[probe]]
 id = "cli-help"               # unique, stable; renaming = a new probe
-run = "./mytool --help"      # executed with `sh -c` in the repo root
-timeout = 30                  # seconds; timeout = probe failure, never a hang
-
-[[probe]]
-id = "convert-fixture"
-run = "./mytool convert fixtures/in.csv"
-files = ["out/result.json"]  # artifacts to hash after the run, in addition to stdout/stderr/exit
-
-[[service]]                   # optional: a long-lived process shared by the probes that declare it
-id = "web"
-run = "bin/rails server -p $VISE_PORT -e test"   # $VISE_PORT: a free port vise picks and exports
-ready = "curl -sf http://127.0.0.1:$VISE_PORT/up" # polled until exit 0 (within timeout) before dependent probes run
-timeout = 60
-
-[[probe]]
-id = "home-page"
-service = "web"               # vise boots the service once, runs all its probes, tears it down
-run = "curl -s http://127.0.0.1:$VISE_PORT/ | ./strip-nonce"  # the probe owns normalizing nondeterminism (CSRF nonces, asset digests)
+run = "./mytool --help"      # executed with POSIX `sh -c` from the repo root
+timeout = 30                  # seconds (default 30); killed via process group
+deps = ["fixtures/in.csv", "scripts/strip-nonce"]   # optional: files this probe consumes — hashed into the probe record (§5.2)
+files = ["out/result.json"]  # artifacts to hash after the run; SHOULD be gitignored build outputs; vise deletes them before every run
 ```
 
-### 2.1 Metric probes — the quality half of the loop
+`[[service]]` blocks (long-lived processes shared by probes — the Rails shape) are specified for v1 and land with the first server-shaped dogfood; v0 implements shell probes only. (Design retained from v0.2: `run` + `ready` poll + `$VISE_PORT`; note the port must be normalized out of recorded bytes by the probe — RUNTIMES.md tier 2.)
 
-Refactoring is two-sided: unchanged behavior *and* improved internal quality. Behavior probes enforce the first; **metric probes** measure the second. A metric probe's output is a single number tracked as a **delta**, never diffed for equality:
+### 2.1 Metric probes
+
+Refactoring is two-sided: unchanged behavior *and* improved internal quality. Metric probes measure the second — a single number tracked as a **delta**, never diffed for equality:
 
 ```toml
 [[metric]]
-id = "complexity"                       # total cyclomatic complexity via the house linter
+id = "complexity"
 run = "oxlint --format=json . | jq '[.diagnostics[] | select(.code==\"complexity\")] | length'"
-direction = "down"                      # which way is better: "down" | "up"
-enforce = "none"                        # "none" (report only, default) | "no-regress" (worsening turns the gate red)
+direction = "down"            # "down" | "up"
+enforce = "none"              # "none" (report only, default) | "no-regress" (worsening → exit 5)
+version_cmd = "oxlint --version"   # optional; captured at record — a mismatch at verify is HARNESS class, not a quality regression
 ```
 
-- `run` must print exactly one number on stdout; anything else is a probe error (exit 2 class).
-- vise ships **no analyzer** — the metric is whatever tool the repo already trusts (oxlint, gocyclo, wc, a bundle-size check). vise only runs, records, and compares.
-- **vise never provisions tools.** No downloads, no network (its own ethos is `network = "refuse"`; auto-fetching linters would be a supply-chain surface inside the trust anchor). A missing tool is a harness error: exit 2, `next: {action: "fix_probe", detail: "oxlint not on PATH — install it, then re-run"}` — the driving agent installs via its own tooling, guided at the moment of failure rather than by standing prompt text. `vise init` drafts metric probes only for tools it actually detects (deterministic detection: PATH + repo config files).
-- **Tool-version pinning** (optional, recommended): `version_cmd = "oxlint --version"` — captured into the lockfile at record. A mismatch at verify is classed **harness, not metric**: a linter upgrade that moves the number is not a quality regression and must not turn the gate red as one. `next: human` — upgrade acknowledged by re-record, or the tool rolled back.
-- `verify`/`gate` report metrics as a delta line: `complexity: 148 → 131 (−17) ✓ improving`. With `enforce = "no-regress"`, a worsening metric is a gate failure with its own message class — distinguishable from a behavior diff.
-- Lockfile records the baseline value per metric; `record`'s determinism self-test applies (same number twice, or the metric is flaky and the freeze fails).
-- **The ratchet** (opt-in: `enforce = "ratchet"`): the best value seen across green gates becomes the new floor, persisted in the journal — quality can only improve or hold, mechanically. The accretion device for long campaigns: a good state, once reached, cannot be silently lost.
+- `run` must print exactly one number; anything else is harness class.
+- vise ships **no analyzer** and **never provisions tools** — no downloads, no network. A missing tool is exit 2 with `next: {action: "fix_probe", detail: "oxlint not on PATH — install it, then re-run"}`; the driving agent installs via its own tooling, guided at the moment of failure. `vise init` drafts metric probes only for tools it deterministically detects.
+- A metric probe that yields different numbers across the flake re-run (§4.1) is classed flake → indeterminate, same as behavior probes.
+- ~~ratchet~~ deferred to v1 with the journal-integrity redesign (the floor must live inside an operator-protected artifact, not a plain local file).
 
-Rules (behavior probes):
-- **Probes run against the working tree as it stands** — the working tree *is* the thing under verification; vise never stashes, checks out, or copies. Mid-refactor dirty trees are the normal case, not an edge case.
-- **Isolation is behavioral, not physical**: probes must be order-independent — no probe reads state another probe wrote. A probe may write only to (a) paths it declares in `files` and (b) scratch space (`$VISE_TMP`, provided per-probe, wiped after). vise runs probes sequentially in manifest order but the contract permits any order; `record`'s double-run self-test structurally catches most order-dependence (a probe polluted by a predecessor differs across passes).
-- **Environment is sanitized, not inherited**: probes get a minimal fixed env — `PATH`, `HOME`, the stub set (`TZ`, `LANG`/`LC_ALL`, `VISE_SEED`, `SOURCE_DATE_EPOCH=0`, `VISE=1`, `PYTHONHASHSEED=0`, `NO_COLOR=1`, `TERM=dumb`, `COLUMNS=80`, `CI=1`), non-tty stdio, and `VISE_TMP` — nothing else. Per-runtime quirks and their handling tiers: RUNTIMES.md. Repo-specific vars are declared per-probe (`env = { FOO = "bar" }`) so the manifest, not the operator's shell, defines the probe.
-- **POSIX `sh -c` only in v0.** Cross-platform shells are a portability tarpit; Windows support is a Parked question, not a silent half-support.
-- `run` must be self-contained from the repo root; no probe depends on another probe's side effects.
-- A probe that cannot be made deterministic under the declared stubs does not belong in the manifest. `vise record` run twice back-to-back MUST produce identical lockfiles; if it doesn't, record fails loudly naming the flaky probe (**the self-test**: determinism is verified, not assumed).
-- Env for every probe: `TZ`, `LANG`/`LC_ALL`, `VISE_SEED`, `SOURCE_DATE_EPOCH` (fixed), plus `VISE=1` so app code can gate its own stub seams (the LocalMind monkeypatch-seam pattern).
+### 2.2 Probe execution contract
+
+- **Probes run against the working tree as it stands** — the working tree *is* the thing under verification; vise never stashes, checks out, or copies. Mid-refactor dirty trees are the normal case.
+- **Environment is sanitized, not inherited**: `PATH`, `HOME`, the stub set (`TZ`, `LANG`/`LC_ALL`, `VISE_SEED`, `SOURCE_DATE_EPOCH=0`, `VISE=1`, `PYTHONHASHSEED=0`, `NO_COLOR=1`, `TERM=dumb`, `COLUMNS=80`, `CI=1`), `VISE_TMP` (per-probe scratch, wiped after) — nothing else. Per-probe `env = { … }` adds declared variables. Non-tty stdio. Per-runtime quirks: RUNTIMES.md.
+- **Isolation is behavioral**: probes are order-independent; a probe writes only to declared `files` and `$VISE_TMP`. **A probe must not modify tracked files** — vise checks (`git status` delta) after each record pass and classes a violation as probe error.
+- **Lifecycle per run**: delete declared `files` → run under timeout (process-group kill) → hash stdout/stderr/exit/`files`. This holds for record passes and verify replays identically, so appending probes and stale artifacts cannot slip through.
+- **Determinism self-test at record**: **two full suite passes** (not adjacent per-probe re-runs — full passes catch order-dependence). Any probe differing across passes fails the freeze loudly, named. Known limitation (stated, not hidden): a probe nondeterministic with sticky luck can pass twice; the verify-side flake protocol (§4.1) is the second net.
+- **Git is required.** vise refuses to run outside a git work tree (exit 2): the clean-tree rule, journal keying, and the loop's revert semantics all assume it.
+- **POSIX `sh -c` only in v0.** Windows is Parked, not silently half-supported.
 
 ## 3. Lockfile — `vise.lock`
 
-One TOML/JSON document (single file, v0 — per-probe splitting is a Parked question), written atomically by `record` only:
+**Canonical JSON** (one format, sorted keys, LF, UTF-8; byte-reproducible — resolves the TOML/JSON ambiguity), written atomically by `record` only:
 
 ```
-[meta]      vise_version · recorded_at (from SOURCE_DATE_EPOCH honesty: wall time recorded but excluded from diffing) · stub set
-[probe.<id>]
-  run_hash      = sha256 of the probe's manifest entry (detects probe edits)
-  exit          = 0
-  stdout_sha    = sha256   # full text stored under .vise/blobs/<sha> for diffing
-  stderr_sha    = sha256
-  files         = { "out/result.json" = sha256, ... }
-  duration_ms   = 412      # informational, never diffed
-```
-
-- Full outputs are stored as blobs under `.vise/blobs/<sha256>` (gitignored, content-addressed, re-derivable); the lockfile carries hashes so the committed artifact stays small and diff-noise-free. A missing blob degrades gracefully: verify still judges (hashes suffice) but the human-readable diff says `blob absent — re-run vise record on the recorded commit to regenerate`. `record` prunes blobs unreferenced by the new lockfile (content-addressing makes this safe).
-- **Lockfile granularity: one file** (resolves the open question). Per-probe files would ease partial re-record diffs but fragment the tamper hash and multiply atomic-write surfaces; a single lockfile keeps "the frozen truth" one artifact with one hash. Partial re-record (`--probe`) rewrites the one file atomically.
-- `run_hash` mismatch (manifest edited since record) = red at `verify`, with a distinct message: "probe changed, not behavior — re-record required."
-
-## 4. CLI contract
-
-Global: shared exit-code vocabulary (§0.3): `0` ok · `1` behavior diff · `2` harness error · `3` nondeterminism · `4` not initialized · `5` metric regression.
-
-**Failure precedence** (one exit code even when classes co-occur): `4 > 2 > 3 > 1 > 5` — you can't trust a behavior verdict from a broken harness, you can't trust a diff from a flaky probe, and a metric regression only matters once behavior holds. All co-occurring classes still appear in the output/JSON; only the exit code collapses to the dominant one.
-
-**`--json`** replaces the human rendering (never both) with exactly one object on stdout:
-
-```json
 {
-  "v": 1,                       // schema version
-  "cmd": "gate",
-  "exit": 1,                    // mirrors the process exit code
-  "verdict": "red",             // "green" | "red" | "ok" (non-judging cmds)
-  "classes": ["behavior"],      // all co-occurring classes, dominant first
+  "v": 1,
+  "fingerprint": { "os": "darwin", "arch": "arm64",
+                    "env": { "sh --version | head -1": "GNU bash 3.2…", "jq --version": "jq-1.7" } },
   "probes": {
-    "cli-help": { "class": "behavior", "expect": {"exit": 0}, "got": {"exit": 1},
-                   "diff": "…first-divergence unified diff, truncated…" },
-    "convert-fixture": { "class": "pass" }
+    "cli-help": {
+      "run_hash": "sha256:…",      // canonical-JSON serialization of the parsed probe entry (whitespace/reordering immune)
+      "deps": { "fixtures/in.csv": "sha256:…" },
+      "recorded_commit": "06aee75",
+      "exit": 0,                    // whatever the probe produced — nonzero is a legitimate expectation (§4.2)
+      "stdout": "sha256:…", "stderr": "sha256:…",
+      "files": { "out/result.json": "sha256:…" }
+    }
   },
-  "quarantined": ["flaky-probe-id"],
-  "metrics": { "complexity": { "base": 148, "now": 131, "delta": -17, "floor": 131 } },
-  "lock": "sha256:…",           // manifest+lockfile hash (tamper evidence)
-  "next": { "action": "revert", "detail": "unintended behavior change in cli-help" }
+  "metrics": { "complexity": { "value": 148, "tool_version": "oxlint 1.35.0" } }
 }
 ```
 
-**The `next.action` vocabulary is closed** — an agent branches on it without NLP: `proceed` · `revert` · `fix_probe` (harness error: the named probe/manifest key) · `rerun` (transient environment suspicion — at most once) · `record_first` · `quarantine_ack` (flake journaled; continue, human re-records later) · `human` (anything vise cannot safely prescribe — includes all intended-change acceptance). Free text lives only in `next.detail`.
+- No wall-clock fields — two consecutive `record`s on the same tree MUST produce byte-identical lockfiles (this is itself the self-test's acceptance check).
+- **Blobs are committed**: full outputs live in `.vise/blobs/<sha256>` (content-addressed), and `.vise/blobs/` is **tracked** — so the agent-legible diff works in CI and fresh clones, where gates actually run. A blob over 256 KB is stored hash-only with a lockfile marker (`"stdout_large": true`) and the diff degrades gracefully for that probe alone. `record` prunes blobs unreferenced by the new lockfile.
+- **Environment fingerprint**: `os`/`arch` always; the `[env] fingerprint` command outputs when declared. Any mismatch at verify → **harness class** (exit 2, `next: human` — "environment differs from recording: re-record on this machine, or restore the recorded toolchain"). This converts the cross-machine false-red (the reviews' top determinism finding) into a named, classed condition.
+- Granularity: one file (v0.2 decision stands). Partial re-record (`record --probe`) is **deferred** — it created mixed-provenance lockfiles under one hash; `recorded_commit` is per-probe so the field survives when partial re-record returns.
 
-### `vise status`
-The single perception act (§0.1). Renders: wired or not (manifest present, valid), lockfile state (present · probes covered · manifest hash match · recorded-at commit), last verdict, metric trajectory (baseline → current, over N gates), journal tail (last 5 events), and quarantined probes. Bounded: never more than ~30 lines / one JSON object regardless of repo or history size. Read-only, always exit 0 (status *reports* red, it doesn't *fail* red).
+### 3.1 Crash-safety ordering + concurrency
 
-### `vise record`
-Freeze current behavior. Runs every probe twice (the determinism self-test), writes `vise.lock` + blobs atomically. Fails without writing if any probe is flaky, errors, or times out — a lockfile is never partially written.
-- **Requires a clean working tree** (exit 2 otherwise): frozen truth must correspond to a commit someone can return to. `--allow-dirty` overrides for deliberate cases and journals the event with `"dirty": true` — the escape hatch exists, silently dirty truth does not.
-- `--probe <id>` — re-record one probe (still self-tested).
-- Exit: 0 recorded · 2 probe error · 3 determinism self-test failed.
+- One `flock` on `.vise/run.lock` per invocation — concurrent vise processes queue, never interleave.
+- Write order, always: **blobs first** (content-addressed; orphans are harmless garbage) → **lockfile atomic rename** → **journal append**. A crash at any point leaves a valid prior state plus at worst orphan blobs, pruned at the next record.
 
-### `vise verify`
-Replay all probes against the working tree; diff against the lockfile. Output one block per failing probe, **agent-legible**:
+## 4. CLI contract
 
+Shared exit-code vocabulary, one code per distinct next action:
+`0` ok/green · `1` behavior diff (→ revert) · `2` harness error: broken probe, missing tool, env-fingerprint mismatch, no git, dirty-tree record (→ fix the harness or hand to human — never the refactor) · `3` indeterminate: flake detected (→ quarantine-ack; do NOT treat as pass or fail) · `4` not initialized (→ record first) · `5` metric regression under `no-regress` (→ the change held behavior but worsened quality).
+
+**Failure precedence** when classes co-occur (one exit code; all classes still listed in output): `4 > 2 > 3 > 1 > 5` — no behavior verdict from a broken harness, no diff verdict from a flaky probe, quality only after behavior holds.
+
+**`--json`** replaces the human rendering with exactly one object:
+
+```json
+{ "v": 1, "cmd": "gate", "exit": 1, "verdict": "red",
+  "classes": ["behavior"],
+  "counts": { "declared": 7, "pass": 5, "behavior": 2, "flaky": 0, "harness": 0 },
+  "failures": {
+    "cli-help": { "class": "behavior", "expect": {"exit": 0}, "got": {"exit": 1},
+                   "diff": "…first-divergence unified diff, truncated with counts…" } },
+  "metrics": { "complexity": { "base": 148, "now": 131, "delta": -17 } },
+  "lock": "sha256:…",
+  "next": { "action": "revert", "detail": "unintended behavior change in cli-help; if intended, a human runs vise record" } }
 ```
-FAIL cli-help [behavior]
-  exit: expected 0, got 1
-  stdout: differs (line 3)
-    - Usage: mytool [convert|check] <file>
-    + Usage: mytool [convert] <file>
-  next: unintended → revert the last change. intended → a human runs `vise record`.
-```
 
-Minimal unified diff, first divergence first, truncated with a count when large. No color, no spinner, stable ordering. Metric lines as deltas (§2.1). Output includes `lock: <manifest+lockfile hash>` so a harness can detect gate-tampering.
-- Exit: per the shared vocabulary — `1` behavior · `2` harness · `3` flake (a probe that differs from the lockfile *and* from its own re-run is classed nondeterministic, not a behavior diff) · `5` metric regression under `no-regress`.
+Passing probes appear only in `counts` (§0.4). `next.action` is a **closed vocabulary**: `proceed` · `revert` · `fix_probe` · `rerun` · `record_first` · `quarantine_ack` · `human`. Exactly one action; alternatives (like the intended-change path) live in `detail`. Free text lives only in `detail`.
 
-### `vise gate`
-`verify` with a one-line verdict (`GATE GREEN — 7/7 probes · complexity −17` / `GATE RED [behavior] — 2/7 differ: cli-help, convert-fixture`) and the same exit codes. The command a refactor loop calls between commits and CI calls before merge. `--quiet` prints the verdict only.
+### 4.1 The flake protocol (fail-closed)
 
-### `vise run <probe-id>`
-The debugging descent (§0.9): execute one probe raw — stdout/stderr/exit to the terminal, lockfile untouched, no verdict. For poking a red probe cheaply instead of re-running the world. Exit mirrors the probe's own exit.
+At verify, each probe runs **once**. On any mismatch with the lockfile, that probe runs **once more** (mismatching probes only — the every-commit cadence stays cheap):
+- second run **matches the first** → **behavior diff** (consistent new behavior);
+- second run **differs from the first** → **flake** → verdict **indeterminate**, exit 3, a `flake` event journaled.
 
-### `vise init`
-Adoption in one move: draft a `vise.toml` **deterministically from repo facts** — package.json scripts, Makefile targets, bin entries, existing test commands — as commented-out probe candidates plus the stub block. Draft only: it never records, never overwrites an existing manifest; the operator uncomments what's real and runs `record`. (Deterministic derivation, no model — same repo, same draft.)
+A flaky probe is **never excluded from the verdict** — indeterminate is not green, and there is no quarantine state that shrinks the denominator (this closes the reward-hack both reviews ranked #1: an agent cannot eject a judge by making it flaky). `next: quarantine_ack` means: journal it, tell the operator, and *only* continue if the caller's harness policy explicitly tolerates indeterminate — vise's own exit code stays 3. Resolution is operator-only: fix the nondeterminism (app or probe) and `vise record`, or remove the probe from the manifest — both leave an audit trail (journal + git).
 
-## 5. The re-record gesture (evaluator outside the loop)
+vise itself enforces **`rerun` at most once**: a second consecutive `rerun` for the same probe set is refused (journal-checked) with `next: human`.
 
-An *intended* behavior change mid-refactor must not open the gate to the agent:
-- `record` refuses to overwrite an existing lockfile unless (a) the working tree is clean of unstaged changes to `vise.toml`, and (b) the flag `--i-reviewed-the-diff` is present, which first prints the full behavior diff (old lockfile vs new run) and the probe list it will rewrite.
-- The flag name is deliberately human-shaped; harness policy (hooks / permission rules / CLAUDE.md) instructs agents that `vise record` is operator-only. vise itself cannot verify who typed it — the enforcement seam is the caller's harness, and SPEC says so honestly rather than pretending a CLI can authenticate intent.
-- Every overwrite appends a `record` event to the journal (§6) — the audit trail a morning report can read.
+### 4.2 Exit-expectation table
+
+`record` freezes whatever exit the probe produces — **nonzero is a legitimate expectation** (a probe may assert a failure mode). "Probe error" means only: launch failure (spawn error / 127), timeout, tracked-file mutation, or self-test divergence. At verify:
+
+| Recorded | Observed | Class |
+|---|---|---|
+| exit E, bytes B | exit E, bytes B | pass |
+| exit E, bytes B | different exit or bytes (stable across re-run) | behavior |
+| exit E, bytes B | different, unstable across re-run | flake → indeterminate |
+| anything | launch failure / timeout | harness |
+
+(`record` refuses to freeze launch failures and timeouts — so at verify they always mean the harness broke, not the code.)
+
+### The commands
+
+**`vise status`** — the single perception act. Manifest validity, lockfile state (probes covered, fingerprint match, `recorded_commit` spread), last verdict, metric trajectory, journal tail (last 5 events), recent flakes. Bounded ≤ ~30 lines / one object regardless of history. Read-only; **always exit 0** (the one deliberate exception to the shared vocabulary — status *reports* red, it doesn't *fail* red; stated here so it is contract, not accident).
+
+**`vise record`** — freeze. Two full suite passes (§2.2), byte-identical lockfiles required, then blobs → lockfile → journal (§3.1). Requires a clean working tree (frozen truth must correspond to a returnable commit); `--allow-dirty` overrides and journals `"dirty": true`. **Overwriting an existing lockfile** additionally requires `--i-reviewed-the-diff`, which first prints the full behavior diff old-vs-new (§5). The two flags compose; both are operator-territory. Exit: 0 · 2 (probe error, dirty tree, no git) · 3 (self-test divergence).
+
+**`vise verify`** — replay all probes, judge per §4.1/§4.2. One block per failing probe: class tag, expected/got, first-divergence unified diff (truncated with counts), `next:` line. Metric deltas. `lock:` hash line. `--probe <id>` — **judged single-probe verify** (the missing rung between raw `run` and the full suite; verdict for that probe only, lockfile untouched, exit codes as usual).
+
+**`vise gate`** — verify + one-line verdict (`GATE GREEN — 7/7 · complexity −17` / `GATE RED [behavior] — 2/7: cli-help, convert-fixture` / `GATE INDETERMINATE [flake] — convert-fixture unstable`) + journal event. Same exits. `--quiet` = verdict line only. Re-running gate appends another journal event — correct for an event log (§0.6).
+
+**`vise run <probe-id>`** — raw single-probe execution: stdout/stderr/exit to the terminal, no judgment, no lockfile. Exit mirrors the probe's own exit (documented exception #2 to the vocabulary — `run` output IS the probe's output).
+
+**`vise init`** — writes a **stub manifest** (stubs block + commented example probes + commented metric probes for tools detected deterministically on PATH/repo config) and adds `.vise/journal.jsonl` + `.vise/run.lock` + `VISE_TMP` residue to `.gitignore` (`.vise/blobs/` stays tracked). Never records, never overwrites an existing manifest. Multi-ecosystem *probe* detection (package.json scripts etc.) is deferred — the stub delivers the adoption moment.
+
+## 5. Operator territory
+
+- `vise.toml`, `vise.lock`, and `.vise/blobs/` are the judge: the gated agent reads them, never writes them. Enforcement is the caller's harness policy (hook/permission rule denying `vise record` + writes to those paths to the agent) — vise cannot authenticate who typed a command and says so honestly. `record`'s overwrite gesture (`--i-reviewed-the-diff`, diff shown first, journaled) is deliberately human-shaped.
+- The tamper line: verify/gate print `lock: sha256(manifest+lockfile+blobs-index)`. **The trusted anchor is git** — the hash is reproducible from the committed artifacts at the recorded commit, so CI (or the operator) compares the printed hash against one recomputed from `git show` of the trusted branch. Not a cryptographic identity system; an honest tripwire, and stated as such.
+
+### 5.1 The proposal flow (escaped defects become probes)
+
+When the driving agent discovers uncovered behavior — an escaped defect, a gap the diff revealed — it **drafts** a probe into `.vise/proposals.toml` (same schema as `[[probe]]`, agent-writable, judged by nobody). `vise status` lists pending proposals. The operator reviews, moves accepted entries into `vise.toml`, and — for a defect — records **after the fix lands**, as an acknowledged baseline (recording before the fix would freeze the defective output; codex review, finding 9). The doctrine gets a gesture; the judge stays operator-owned.
+
+### 5.2 The dependency closure
+
+A probe's judgment depends on more than the manifest entry: fixtures, normalizer scripts, seed files. Declared `deps` paths are hashed into the probe's lockfile record — a changed dep at verify is **harness class** ("probe input changed, not behavior — re-record or restore"). Undeclared dependencies are the honest residual: the spec states that the evaluator surface includes everything probes consume, and harness policy should protect probe-referenced scripts the same as the manifest.
 
 ## 6. The journal — `.vise/journal.jsonl`
 
-Append-only JSONL, one event per command that changes or judges state. The campaign's memory (§0.7) and the substrate `status` renders. Committed (it's small — one line per event).
+**Local, gitignored, append-only** JSONL — operator-side state like blobs' scratch, NOT committed (v0.2 had it committed; that dirtied the tree after every gate, broke one-transform-per-commit, and made merge conflicts by design — both reviews' finding). Cross-machine trajectory is out of scope for v0; the committed artifacts (lockfile, blobs) carry everything judgment needs.
 
 ```jsonl
-{"e":"record","commit":"06aee75","probes":7,"lock":"sha256:…"}
-{"e":"gate","commit":"1652409","verdict":"green","probes":"7/7","metrics":{"complexity":131},"lock":"sha256:…"}
-{"e":"gate","commit":"9f21c04","verdict":"red","class":"behavior","failed":["cli-help"],"lock":"sha256:…"}
-{"e":"quarantine","probe":"convert-fixture","reason":"nondeterministic on verify (self-diff)"}
-{"e":"ratchet","metric":"complexity","floor":131}
+{"e":"record","commit":"06aee75","dirty":false,"probes":7,"lock":"sha256:…"}
+{"e":"gate","commit":"1652409","dirty":true,"verdict":"green","counts":{"pass":7},"metrics":{"complexity":131},"lock":"sha256:…"}
+{"e":"gate","commit":"1652409","dirty":true,"verdict":"indeterminate","flaky":["convert-fixture"]}
 ```
 
-- Keyed to **commit SHAs, not wall time** — replayable, diffable, and honest under `SOURCE_DATE_EPOCH`. Mid-refactor gates run on dirty trees by design, so every event carries `"commit": "<HEAD sha>"` plus `"dirty": true|false`; a dirty-tree event means "judged the working tree at this base," not "judged this commit."
-- **Quarantine**: a probe classed nondeterministic at verify (exit 3) is journaled and excluded from the verdict with a visible count (`7/7 green · 1 quarantined`) until re-recorded — a flaky probe must never be silently green *or* silently block the loop.
-- `status` derives everything from journal + lockfile + manifest; it holds no state of its own.
+- Keyed to HEAD SHA + `dirty` flag ("judged the working tree at this base", never "judged this commit").
+- `status` derives flake history, trajectory, and rerun-refusal state from the journal tail; it never replays unbounded history (bounded scan from the end).
 
 ## 7. Harness integration (spec-level)
 
-How the loop actually drives vise, in the three harness shapes that matter here:
-
-- **Inside an agent's refactor loop (the canonical use):** freeze once (`vise record`, operator), then per micro-step: transform → commit → `vise gate --json` → branch on `next.action` (`proceed` → next step; `revert` → `git revert`/restore and journal the dead end; `fix_probe` → repair the harness, never the code, then re-gate; `quarantine_ack` → continue, flag for the human; `human` → park and move on). One transform type per commit; the gate runs *between every commit*, not at the end — the cadence is the value.
-- **ntkit:** an `/autopilot-nt` refactor run treats `vise gate` as the per-item verifier and `vise status` as part of the morning report; a `/lab-nt` refactor campaign uses a metric probe as its contract metric with "gate stays green" as the fence. No ntkit changes shipped yet — parked until vise dogfoods (pending.md).
-- **CI:** `vise gate --quiet` as a required check; exit code is the verdict, `lock:` hash in the log is the tamper evidence.
-- **Hook-level enforcement of operator-only `record`** (Claude Code example, for the README eventually): a PreToolUse hook or permission rule denying `vise record` to the agent while allowing `verify`/`gate`/`status`/`run`. vise's own seam (§5) plus the caller's policy together close the loop.
+- **The canonical loop:** operator `record` once → per micro-step: transform → commit → `vise gate --json` → branch on `next.action` (`proceed` · `revert` + journal the dead end · `fix_probe` — repair harness, never code · `quarantine_ack` — continue only if the harness policy tolerates indeterminate, else stop · `human` — park). One transform type per commit; the gate runs between every commit.
+- **ntkit:** `/autopilot-nt` refactor runs use `vise gate` as the per-item verifier and `vise status` in the morning report; `/lab-nt` campaigns hill-climb a metric probe with "gate stays green" as the fence. (Parked until dogfood.)
+- **CI:** `vise gate --quiet` as a required check; recompute the `lock:` hash from the trusted branch as the tamper tripwire (§5).
+- **Operator-only enforcement:** a PreToolUse hook / permission rule denying the agent `vise record` and writes to `vise.toml` / `vise.lock` / `.vise/blobs/`.
 
 ## 8. Non-goals (v0)
 
-- No transform engine, no model calls, no code edits — ever (README: the net, never the refactorer).
-- No probe types beyond shell commands (HTTP/DOM/browser probes are Parked — the shell probe can shell out to `curl`/Playwright today). Metric probes (§2.1) are in scope for v0; **services (§2) land with the Rails dogfood** — the vertical ships shell probes first, services before the first server-shaped target.
-- No `vise map` yet — a deterministic structural map (tree-sitter/SCIP-class symbol + import inventory) whose diff evidences *what the refactor did* and catches incomplete transformations. v1, after the vertical proves the loop.
+- No transform engine, no model calls, no code edits, no tool provisioning, no network — ever.
+- No probe types beyond shell commands (HTTP/DOM parked; a shell probe may shell out to `curl`/Playwright). Metric probes are in v0; `[[service]]` lands with the Rails dogfood.
+- No `vise map` (v1: tree-sitter/SCIP-class structural diff evidencing what the refactor did).
+- Deferred from v0.2 after review: **ratchet** (needs an operator-protected floor), **`record --probe`** (chimera lockfiles), **init ecosystem detection** (stub manifest only).
 - No parallel probe execution, no caching, no daemon. Boring and sequential until the vertical works.
+- `network = "declared-off"` is a promise probes make, not something vise enforces (platform enforcement Parked; stated to avoid the false-green license the reviews flagged).
