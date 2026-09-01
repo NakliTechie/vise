@@ -167,6 +167,19 @@ run = "printf steady"
 	if exit != 2 || value["next"].(map[string]any)["action"] != "human" {
 		t.Fatalf("gate after single-probe flakes must stay refused: exit=%d value=%#v", exit, value)
 	}
+	// A green verdict for a different probe set is not a boundary for the
+	// full-set chain either.
+	if exit, _, _ := cliRun(t, root, "gate", "--probe", "steady", "--json"); exit != 0 {
+		t.Fatalf("single stable probe gate: exit=%d", exit)
+	}
+	exit, stdout, _ = cliRun(t, root, "gate", "--json")
+	value = parseCLIJSON(t, stdout)
+	if exit != 2 || value["next"].(map[string]any)["action"] != "human" {
+		t.Fatalf("gate after a green single-probe verify must stay refused: exit=%d value=%#v", exit, value)
+	}
+	if exit, stdout, _ := cliRun(t, root, "status", "--json"); exit != 0 || !strings.Contains(stdout, `"state":"rerun-refused"`) {
+		t.Fatalf("status must report the refusal: %d %s", exit, stdout)
+	}
 	events, err := core.ReadJournal(root, 20)
 	if err != nil {
 		t.Fatal(err)
@@ -497,5 +510,20 @@ func TestRecordIsByteReproducibleOnSameHead(t *testing.T) {
 	}
 	if !bytes.Equal(first, second) {
 		t.Fatalf("lockfile bytes changed:\nfirst=%s\nsecond=%s", first, second)
+	}
+}
+
+func TestRunMirrorsLaunchFailureExit(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nexec definitely-not-a-command-xyz")
+	exit, _, stderr := cliRun(t, root, "run", "behavior")
+	if exit != 127 || !strings.Contains(stderr, "not found") {
+		t.Fatalf("run: exit=%d stderr=%q", exit, stderr)
+	}
+	exit, stdout, _ := cliRun(t, root, "run", "behavior", "--json")
+	if value := parseCLIJSON(t, stdout); exit != 127 || value["exit"] != 127.0 {
+		t.Fatalf("run --json: exit=%d value=%#v", exit, value)
+	}
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 2 || !strings.Contains(stderr, "exit 127") {
+		t.Fatalf("record must still refuse a launch failure: exit=%d stderr=%q", exit, stderr)
 	}
 }

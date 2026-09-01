@@ -239,7 +239,10 @@ func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Write
 		return renderSimpleError("run", fmt.Sprintf("unknown probe %q", args[0]), jsonMode, stdout, stderr)
 	}
 	result := (vise.Runner{Root: root, Manifest: manifest}).RunProbe(probe, false)
-	if result.HarnessError != "" {
+	// run mirrors the probe's own exit. A launch failure is the probe's exit 127 and
+	// passes through; a timeout, a refused artifact, or a lingering pipe holder
+	// has no probe exit to mirror and stays a harness error.
+	if result.HarnessError != "" && !(result.Exit == 127 && !result.TimedOut) {
 		return renderSimpleError("run", result.HarnessError, jsonMode, stdout, stderr)
 	}
 	if jsonMode {
