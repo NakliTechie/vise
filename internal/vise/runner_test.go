@@ -199,3 +199,23 @@ func TestKillActiveProbeGroupStopsTheRunningProbe(t *testing.T) {
 		t.Fatal("active group was not cleared")
 	}
 }
+
+func TestProbeScratchLivesUnderViseTmpAndIsWiped(t *testing.T) {
+	root := testGitRepo(t)
+	probe := Probe{ID: "scratch", Run: "printf '%s' \"$VISE_TMP\"; printf data > \"$VISE_TMP/file\"", Timeout: 5}
+	result := (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, true)
+	if result.HarnessError != "" || result.Exit != 0 {
+		t.Fatalf("result = %#v", result)
+	}
+	scratch := string(result.Stdout)
+	if !strings.HasPrefix(scratch, filepath.Join(root, ".vise", "tmp")+string(filepath.Separator)) {
+		t.Fatalf("VISE_TMP = %q, want it under .vise/tmp", scratch)
+	}
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Fatalf("scratch dir survived the run: %v", err)
+	}
+	dirty, err := GitDirty(root)
+	if err != nil || dirty {
+		t.Fatalf("scratch made the tree dirty: dirty=%t err=%v", dirty, err)
+	}
+}

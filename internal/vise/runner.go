@@ -156,7 +156,14 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 }
 
 func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[string]string) RunResult {
-	tmp, err := os.MkdirTemp("", "vise-"+sanitizeTempName(id)+"-")
+	// VISE_TMP lives under .vise/tmp inside the repository: init ignores it,
+	// the dirty-tree check skips it, and it is wiped after every run, so a
+	// crash leaves residue where the operator expects state, not in /tmp.
+	scratchRoot := filepath.Join(r.Root, ".vise", "tmp")
+	if err := os.MkdirAll(scratchRoot, 0o755); err != nil {
+		return RunResult{HarnessError: fmt.Sprintf("create VISE_TMP: %v", err)}
+	}
+	tmp, err := os.MkdirTemp(scratchRoot, sanitizeTempName(id)+"-")
 	if err != nil {
 		return RunResult{HarnessError: fmt.Sprintf("create VISE_TMP: %v", err)}
 	}
