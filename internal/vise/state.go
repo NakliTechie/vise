@@ -65,10 +65,14 @@ type StateLock struct {
 
 func AcquireStateLock(root string) (*StateLock, error) {
 	dir := filepath.Join(root, ".vise")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := ensureDirectory(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create .vise state directory: %w", err)
 	}
-	file, err := os.OpenFile(filepath.Join(dir, "run.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	lockPath := filepath.Join(dir, "run.lock")
+	if err := rejectExistingSymlinkOrSpecial(lockPath); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open run lock: %w", err)
 	}
@@ -135,7 +139,7 @@ func FingerprintEqual(a, b Fingerprint) bool {
 }
 
 func LoadLockfile(root string) (Lockfile, []byte, error) {
-	data, err := os.ReadFile(filepath.Join(root, "vise.lock"))
+	data, err := readRegularFile(filepath.Join(root, "vise.lock"))
 	if err != nil {
 		return Lockfile{}, nil, err
 	}
@@ -155,7 +159,35 @@ func LoadLockfile(root string) (Lockfile, []byte, error) {
 	if lock.Probes == nil {
 		return Lockfile{}, nil, fmt.Errorf("vise.lock has no probe map")
 	}
+	if err := validateLockfileHashes(lock); err != nil {
+		return Lockfile{}, nil, err
+	}
 	return lock, data, nil
+}
+
+func validateLockfileHashes(lock Lockfile) error {
+	for id, probe := range lock.Probes {
+		if _, err := HashName(probe.RunHash); err != nil {
+			return fmt.Errorf("probe %s run_hash: %w", id, err)
+		}
+		if _, err := HashName(probe.Stdout); err != nil {
+			return fmt.Errorf("probe %s stdout: %w", id, err)
+		}
+		if _, err := HashName(probe.Stderr); err != nil {
+			return fmt.Errorf("probe %s stderr: %w", id, err)
+		}
+		for path, hash := range probe.Deps {
+			if _, err := HashName(hash); err != nil {
+				return fmt.Errorf("probe %s dependency %s: %w", id, path, err)
+			}
+		}
+		for path, hash := range probe.Files {
+			if _, err := HashName(hash); err != nil {
+				return fmt.Errorf("probe %s file %s: %w", id, path, err)
+			}
+		}
+	}
+	return nil
 }
 
 func WriteGeneration(root string, lock Lockfile, blobs map[string][]byte) ([]byte, error) {
@@ -177,13 +209,21 @@ func WriteGeneration(root string, lock Lockfile, blobs map[string][]byte) ([]byt
 }
 
 func WriteBlobs(root string, blobs map[string][]byte) error {
-	blobDir := filepath.Join(root, ".vise", "blobs")
-	if err := os.MkdirAll(blobDir, 0o755); err != nil {
+	stateDir := filepath.Join(root, ".vise")
+	if err := ensureDirectory(stateDir, 0o755); err != nil {
+		return fmt.Errorf("create state directory: %w", err)
+	}
+	blobDir := filepath.Join(stateDir, "blobs")
+	if err := ensureDirectory(blobDir, 0o755); err != nil {
 		return fmt.Errorf("create blob directory: %w", err)
 	}
 	for hash, data := range blobs {
-		path := filepath.Join(blobDir, HashName(hash))
-		if existing, err := os.ReadFile(path); err == nil {
+		name, err := HashName(hash)
+		if err != nil {
+			return err
+		}
+		path := filepath.Join(blobDir, name)
+		if existing, err := readRegularFile(path); err == nil {
 			if HashBytes(existing) != hash {
 				return fmt.Errorf("blob collision at %s", path)
 			}
@@ -276,7 +316,11 @@ func BlobData(root, hash string, large bool) ([]byte, bool, error) {
 	if large {
 		return nil, false, nil
 	}
-	data, err := os.ReadFile(filepath.Join(root, ".vise", "blobs", HashName(hash)))
+	path, err := BlobPath(root, hash)
+	if err != nil {
+		return nil, false, err
+	}
+	data, err := readRegularFile(path)
 	if err != nil {
 		return nil, false, err
 	}
@@ -324,7 +368,11 @@ func AddObservationBlobs(blobs map[string][]byte, result RunResult) ProbeLock {
 
 func AppendJournal(root string, event JournalEvent) error {
 	dir := filepath.Join(root, ".vise")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := ensureDirectory(dir, 0o755); err != nil {
+		return err
+	}
+	journalPath := filepath.Join(dir, "journal.jsonl")
+	if err := rejectExistingSymlinkOrSpecial(journalPath); err != nil {
 		return err
 	}
 	event.At = time.Now().UTC().Format(time.RFC3339Nano)
@@ -332,7 +380,7 @@ func AppendJournal(root string, event JournalEvent) error {
 	if err != nil {
 		return err
 	}
-	file, err := os.OpenFile(filepath.Join(dir, "journal.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	file, err := os.OpenFile(journalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}
@@ -344,7 +392,11 @@ func AppendJournal(root string, event JournalEvent) error {
 }
 
 func ReadJournal(root string, limit int) ([]JournalEvent, error) {
-	file, err := os.Open(filepath.Join(root, ".vise", "journal.jsonl"))
+	path := filepath.Join(root, ".vise", "journal.jsonl")
+	if err := rejectExistingSymlinkOrSpecial(path); err != nil {
+		return nil, err
+	}
+	file, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}

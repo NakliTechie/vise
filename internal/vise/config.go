@@ -69,7 +69,7 @@ var reservedEnv = map[string]bool{
 
 func LoadManifest(root string) (Manifest, []byte, error) {
 	path := filepath.Join(root, "vise.toml")
-	data, err := os.ReadFile(path)
+	data, err := readRegularFile(path)
 	if err != nil {
 		return Manifest{}, nil, err
 	}
@@ -251,7 +251,7 @@ func ProbeRunHash(probe Probe) (string, error) {
 
 func LoadProposals(root string) (Proposals, error) {
 	path := filepath.Join(root, ".vise", "proposals.toml")
-	data, err := os.ReadFile(path)
+	data, err := readRegularFile(path)
 	if os.IsNotExist(err) {
 		return Proposals{}, nil
 	}

@@ -88,6 +88,20 @@ func TestValidateRelativePathRejectsEscapesAndSymlinks(t *testing.T) {
 	}
 }
 
+func TestLoadManifestRejectsSymlink(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(t.TempDir(), "manifest")
+	if err := os.WriteFile(target, []byte("[vise]\nversion=1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, "vise.toml")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := LoadManifest(root); err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestLoadProposals(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, ".vise/proposals.toml", "[[probe]]\nid='regression'\nrun='printf fixed'\n")

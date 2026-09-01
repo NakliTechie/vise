@@ -4,6 +4,86 @@
 
 **Tier: Tool.**
 
+## Current state
+
+The v0.3 development CLI is implemented for Git repositories on POSIX systems. It supports shell-command behavior probes, metric probes, deterministic recording, typed verification, fail-closed gating, raw probe runs, bounded status, proposal discovery, and initialization. Windows, service probes, network enforcement, partial recording, ratchets, and `vise map` remain parked by [SPEC.md §8](SPEC.md#8-non-goals-v0).
+
+vise is not publicly packaged yet. Build it from this checkout while the command contract is still marked draft.
+
+## Requirements and build
+
+- Git
+- A POSIX `/bin/sh`
+- Go 1.25.8 or newer; an older Go command with automatic toolchain switching can fetch the module’s declared 1.25.8 toolchain
+
+From this repository:
+
+```sh
+go install ./cmd/vise
+vise version
+```
+
+If `vise` is not on `PATH`, add `$(go env GOPATH)/bin` to `PATH` or invoke that binary by its full path.
+
+## First campaign
+
+Enter the Git repository whose behavior you want to freeze:
+
+```sh
+cd /path/to/your/repository
+vise status
+vise init
+```
+
+`vise init` writes a commented `vise.toml`. Replace the example with at least one deterministic probe. A minimal CLI probe looks like this:
+
+```toml
+[vise]
+version = 1
+
+[stubs]
+tz = "UTC"
+lang = "C"
+seed = "1729"
+network = "declared-off"
+
+[[probe]]
+id = "cli-help"
+run = "./bin/mytool --help"
+timeout = 30
+```
+
+The probe command must already exist and must produce identical bytes across runs. Normalize legitimate timestamps, random IDs, absolute paths, and unstable ordering in the probe command; [RUNTIMES.md](RUNTIMES.md) catalogs common runtime traps.
+
+Commit the evaluator inputs before recording. `record` refuses a dirty tree unless an operator explicitly passes `--allow-dirty`.
+
+```sh
+git add vise.toml .gitignore
+git commit -m "Add vise behavior probes"
+vise record
+git add vise.lock .vise/blobs
+git commit -m "Record behavior baseline"
+vise status
+```
+
+Now run the gate after each focused refactor commit:
+
+```sh
+vise gate --quiet
+```
+
+The compact outcomes drive the loop:
+
+```text
+GATE GREEN — 1/1
+GATE RED [behavior] — 0/1: cli-help
+GATE INDETERMINATE [flake] — 0/1: cli-help
+```
+
+Use `vise verify` for the first bounded divergence, `vise verify --probe cli-help` to judge one probe, and `vise run cli-help` for raw debugging output. Every command accepts `--json`; gate consumers branch on `exit`, `classes`, and the closed `next.action` value.
+
+`vise.toml`, `vise.lock`, and `.vise/blobs/` are operator territory. vise cannot authenticate its caller. The agent harness must deny the gated agent writes to those paths and deny `vise record` during a refactor campaign.
+
 ## The problem
 
 Unverified LLM refactoring fails roughly 60% of the time; the same refactoring gated by a verification layer approaches 98% correctness. The verification layer is where the value lives — yet no shipping tool packages it. What exists nearby is either a transform *engine* (OpenRewrite, codemods), a per-language golden-master *library* for humans (ApprovalTests), or a harness that baselines *the agent's* behavior rather than the app's. Nobody ships the net itself: language-agnostic, CLI-first, built to sit inside an agent's loop.
@@ -39,6 +119,32 @@ vise gate            # green → next step; red → revert, the diff says exactl
 - **Closed-loop micro-iterations.** The gate is cheap enough to run between every commit, because that cadence is what moves success from ~60% to ~98%.
 - **The verifier lives outside the loop.** The agent being gated can run `vise gate` but must not be able to edit `vise.lock` or the probe definitions mid-run — re-recording is a human act.
 
-## Next steps
+## Command surface
 
-See `plan/workplan.md` — spec first (probe manifest format, lockfile format, CLI contract), then the smallest end-to-end vertical: record + verify for shell-command probes on one real repo.
+| Command | Purpose |
+|---|---|
+| `vise init` | Write a starter manifest and local-state ignore rules; never overwrite. |
+| `vise record` | Run two full suite passes and atomically freeze deterministic behavior. |
+| `vise verify [--probe ID]` | Replay and diagnose the full suite or one judged probe. |
+| `vise gate [--quiet]` | Emit the typed refactor-loop verdict and journal the event. |
+| `vise run <probe-id>` | Execute one probe raw without judgment or lockfile access. |
+| `vise status` | Render manifest, lock, fingerprint, proposals, metrics, flakes, and journal tail in one bounded read. |
+| `vise version` | Print the development version. |
+
+Exit codes: `0` green/ok · `1` behavior difference · `2` harness failure · `3` indeterminate flake · `4` baseline missing · `5` enforced metric regression. See [SPEC.md §4](SPEC.md#4-cli-contract) for precedence and JSON fields.
+
+## Development verification
+
+The committed verifier uses checkout-derived state, so primary and linked worktrees do not share binaries, caches, or fixture repositories.
+
+```sh
+scripts/verify doctor
+scripts/verify verify baseline
+scripts/verify verify
+go test -race ./...
+go vet ./...
+shellcheck scripts/verify
+govulncheck ./...
+```
+
+The full feature inventory and known traps live in [`verify/features/`](verify/features/README.md).

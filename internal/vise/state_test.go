@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWriteGenerationRoundTripAndPrune(t *testing.T) {
@@ -13,11 +14,12 @@ func TestWriteGenerationRoundTripAndPrune(t *testing.T) {
 	oldData := []byte("old")
 	keepHash := HashBytes(keepData)
 	oldHash := HashBytes(oldData)
+	runHash := HashBytes([]byte("run"))
 	if err := WriteBlobs(root, map[string][]byte{keepHash: keepData, oldHash: oldData}); err != nil {
 		t.Fatal(err)
 	}
 	lock := Lockfile{V: 1, Fingerprint: Fingerprint{OS: "test", Arch: "test"}, Probes: map[string]ProbeLock{
-		"p": {RunHash: "sha256:run", RecordedCommit: "abc", Stdout: keepHash, Stderr: HashBytes(nil)},
+		"p": {RunHash: runHash, RecordedCommit: "abc", Stdout: keepHash, Stderr: HashBytes(nil)},
 	}}
 	data, err := WriteGeneration(root, lock, map[string][]byte{keepHash: keepData, HashBytes(nil): nil})
 	if err != nil {
@@ -30,7 +32,11 @@ func TestWriteGenerationRoundTripAndPrune(t *testing.T) {
 	if got.Probes["p"].Stdout != keepHash || string(data) != string(gotData) {
 		t.Fatalf("round trip mismatch: %#v", got)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".vise", "blobs", HashName(oldHash))); !os.IsNotExist(err) {
+	oldPath, err := BlobPath(root, oldHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
 		t.Fatalf("old blob not pruned: %v", err)
 	}
 }
@@ -39,8 +45,9 @@ func TestTamperHashIgnoresOrphanBlobsAndChecksReferencedContent(t *testing.T) {
 	root := t.TempDir()
 	data := []byte("expected")
 	hash := HashBytes(data)
+	runHash := HashBytes([]byte("run"))
 	lock := Lockfile{V: 1, Fingerprint: Fingerprint{OS: "test", Arch: "test"}, Probes: map[string]ProbeLock{
-		"p": {RunHash: "sha256:run", RecordedCommit: "abc", Stdout: hash, Stderr: hash},
+		"p": {RunHash: runHash, RecordedCommit: "abc", Stdout: hash, Stderr: hash},
 	}}
 	lockBytes, err := CanonicalJSON(lock)
 	if err != nil {
@@ -53,7 +60,11 @@ func TestTamperHashIgnoresOrphanBlobsAndChecksReferencedContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".vise", "blobs", HashName(HashBytes([]byte("another orphan")))), []byte("another orphan"), 0o644); err != nil {
+	orphanPath, err := BlobPath(root, HashBytes([]byte("another orphan")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(orphanPath, []byte("another orphan"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	second, err := TamperHash(root, []byte("manifest"), lockBytes)
@@ -63,11 +74,35 @@ func TestTamperHashIgnoresOrphanBlobsAndChecksReferencedContent(t *testing.T) {
 	if first != second {
 		t.Fatalf("orphan changed hash: %s != %s", first, second)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".vise", "blobs", HashName(hash)), []byte("corrupt"), 0o644); err != nil {
+	hashPath, err := BlobPath(root, hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hashPath, []byte("corrupt"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := TamperHash(root, []byte("manifest"), lockBytes); err == nil {
 		t.Fatal("expected corrupt blob rejection")
+	}
+}
+
+func TestLockfileRejectsPathShapedHashes(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "vise.lock", `{
+  "v": 1,
+  "fingerprint": {"os": "test", "arch": "test"},
+  "probes": {
+    "p": {
+      "run_hash": "sha256:../../vise.toml",
+      "recorded_commit": "abc",
+      "exit": 0,
+      "stdout": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}`)
+	if _, _, err := LoadLockfile(root); err == nil || !strings.Contains(err.Error(), "invalid sha256 hash") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -110,6 +145,118 @@ func TestJournalTailAndConsecutiveFlakes(t *testing.T) {
 	}
 	if len(events) != 5 || ConsecutiveFlakes(events, "c", "l", []string{"p"}) != 2 {
 		t.Fatalf("events = %#v", events)
+	}
+}
+
+func TestReadJournalUsesBoundedTail(t *testing.T) {
+	root := t.TempDir()
+	padding := strings.Repeat("x", 300*1024)
+	path := filepath.Join(root, ".vise", "journal.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{\"e\":\"old\",\"at\":\""+padding+"\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendJournal(root, JournalEvent{Event: "gate", Commit: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := ReadJournal(root, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Commit != "new" {
+		t.Fatalf("events = %#v", events)
+	}
+}
+
+func TestStatePathsRejectSymlinks(t *testing.T) {
+	t.Run("state-directory", func(t *testing.T) {
+		root := t.TempDir()
+		outside := t.TempDir()
+		if err := os.Symlink(outside, filepath.Join(root, ".vise")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := AcquireStateLock(root); err == nil {
+			t.Fatal("expected state-directory symlink rejection")
+		}
+		if _, err := os.Stat(filepath.Join(outside, "run.lock")); !os.IsNotExist(err) {
+			t.Fatalf("outside lock created: %v", err)
+		}
+	})
+	t.Run("journal", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.Mkdir(filepath.Join(root, ".vise"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		target := filepath.Join(t.TempDir(), "target")
+		if err := os.WriteFile(target, []byte("unchanged"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(root, ".vise", "journal.jsonl")); err != nil {
+			t.Fatal(err)
+		}
+		if err := AppendJournal(root, JournalEvent{Event: "gate"}); err == nil {
+			t.Fatal("expected journal symlink rejection")
+		}
+		data, err := os.ReadFile(target)
+		if err != nil || string(data) != "unchanged" {
+			t.Fatalf("target changed: %v %q", err, data)
+		}
+	})
+}
+
+func TestStateLockSerializesInvocations(t *testing.T) {
+	root := t.TempDir()
+	first, err := AcquireStateLock(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired := make(chan error, 1)
+	go func() {
+		second, err := AcquireStateLock(root)
+		if err == nil {
+			err = second.Close()
+		}
+		acquired <- err
+	}()
+	select {
+	case err := <-acquired:
+		t.Fatalf("second invocation bypassed lock: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-acquired:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second invocation did not acquire released lock")
+	}
+}
+
+func TestAtomicWriteFailurePreservesOldFile(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "state")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	err := atomicWrite(path, []byte("new"), 0o644)
+	if restoreErr := os.Chmod(root, 0o700); restoreErr != nil {
+		t.Fatal(restoreErr)
+	}
+	if err == nil {
+		t.Skip("filesystem allowed writes through a read-only directory")
+	}
+	data, readErr := os.ReadFile(path)
+	if readErr != nil || string(data) != "old" {
+		t.Fatalf("old state lost: %v %q", readErr, data)
 	}
 }
 

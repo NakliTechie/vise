@@ -26,7 +26,7 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 	outcome.Counts.Declared = len(manifest.Probes)
 	result := RecordResult{Outcome: outcome}
 	if len(manifest.Probes) == 0 {
-		result.Outcome = harnessOnly("record", "manifest", "manifest must declare at least one [[probe]] before recording")
+		result.Outcome = harnessWithNext("record", "manifest", "manifest must declare at least one [[probe]] before recording", "fix_probe", "declare at least one probe in vise.toml, commit the harness, then rerun vise record")
 		return result
 	}
 
@@ -36,7 +36,7 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		return result
 	}
 	if dirty && !opts.AllowDirty {
-		result.Outcome = harnessOnly("record", "working-tree", "record requires a clean working tree; commit or stash changes, or pass --allow-dirty")
+		result.Outcome = harnessWithNext("record", "working-tree", "record requires a clean working tree; commit or stash changes, or pass --allow-dirty", "human", "commit or stash the current tree, or rerun record with --allow-dirty")
 		return result
 	}
 
@@ -47,13 +47,13 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		return result
 	}
 	if hasOld && !opts.ReviewedDiff {
-		result.Outcome = harnessOnly("record", "operator-review", "vise.lock already exists; review the behavior diff and rerun with --i-reviewed-the-diff")
+		result.Outcome = harnessWithNext("record", "operator-review", "vise.lock already exists; review the behavior diff and rerun with --i-reviewed-the-diff", "human", "review the behavior diff, then rerun record with --i-reviewed-the-diff")
 		return result
 	}
 
 	fingerprint, err := CaptureFingerprint(root, manifest)
 	if err != nil {
-		result.Outcome = harnessOnly("record", "fingerprint", err.Error())
+		result.Outcome = harnessWithNext("record", "fingerprint", err.Error(), "fix_probe", "repair the environment fingerprint command, then rerun record")
 		return result
 	}
 	commit, err := GitHead(root)
@@ -212,6 +212,12 @@ func harnessOnly(cmd, id, detail string) Outcome {
 	outcome := NewOutcome(cmd)
 	outcome.AddFailure(id, Failure{Class: "harness", Detail: detail})
 	outcome.Finalize()
+	return outcome
+}
+
+func harnessWithNext(cmd, id, detail, action, nextDetail string) Outcome {
+	outcome := harnessOnly(cmd, id, detail)
+	outcome.Next = Next{Action: action, Detail: nextDetail}
 	return outcome
 }
 

@@ -69,3 +69,42 @@ func rejectSymlinkComponents(root, rel string) error {
 	}
 	return nil
 }
+
+func ensureDirectory(path string, mode os.FileMode) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return os.Mkdir(path, mode)
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("%s must be a real directory, not a symlink or special file", path)
+	}
+	return nil
+}
+
+func readRegularFile(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s must be a regular file, not a symlink or special file", path)
+	}
+	return os.ReadFile(path)
+}
+
+func rejectExistingSymlinkOrSpecial(path string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("%s must be a regular file, not a symlink or special file", path)
+	}
+	return nil
+}

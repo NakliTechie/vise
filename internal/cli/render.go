@@ -5,6 +5,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/NakliTechie/vise/internal/vise"
 )
@@ -18,9 +19,9 @@ func renderOutcome(w io.Writer, outcome vise.Outcome, label string) {
 	sort.Strings(ids)
 	for _, id := range ids {
 		failure := outcome.Failures[id]
-		fmt.Fprintf(w, "%s [%s] — %s\n", id, failure.Class, failure.Detail)
+		fmt.Fprintf(w, "%s [%s] — %s\n", id, failure.Class, terminalSafe(failure.Detail, false))
 		if failure.Diff != "" {
-			fmt.Fprintln(w, failure.Diff)
+			fmt.Fprintln(w, terminalSafe(failure.Diff, true))
 		}
 	}
 	metricIDs := make([]string, 0, len(outcome.Metrics))
@@ -35,7 +36,7 @@ func renderOutcome(w io.Writer, outcome vise.Outcome, label string) {
 	if outcome.Lock != "" {
 		fmt.Fprintln(w, "lock: "+outcome.Lock)
 	}
-	fmt.Fprintf(w, "next: %s — %s\n", outcome.Next.Action, outcome.Next.Detail)
+	fmt.Fprintf(w, "next: %s — %s\n", outcome.Next.Action, terminalSafe(outcome.Next.Detail, false))
 }
 
 func renderGate(w io.Writer, outcome vise.Outcome, quiet bool) {
@@ -56,7 +57,7 @@ func renderGate(w io.Writer, outcome vise.Outcome, quiet bool) {
 		fmt.Fprintln(w, "lock: "+outcome.Lock)
 	}
 	if outcome.Exit != vise.ExitOK {
-		fmt.Fprintf(w, "next: %s — %s\n", outcome.Next.Action, outcome.Next.Detail)
+		fmt.Fprintf(w, "next: %s — %s\n", outcome.Next.Action, terminalSafe(outcome.Next.Detail, false))
 	}
 }
 
@@ -95,8 +96,44 @@ func renderStatus(w io.Writer, report vise.StatusReport) {
 		fmt.Fprintln(w, "journal: empty")
 	} else {
 		for _, event := range report.Journal {
-			fmt.Fprintf(w, "journal: %s · %s · %s\n", event.Event, event.Commit, event.Verdict)
+			details := []string{event.Event, event.Commit, event.Verdict}
+			if len(event.Flaky) > 0 {
+				details = append(details, "flaky="+strings.Join(event.Flaky, ","))
+			}
+			if len(event.Metrics) > 0 {
+				metricIDs := make([]string, 0, len(event.Metrics))
+				for id := range event.Metrics {
+					metricIDs = append(metricIDs, id)
+				}
+				sort.Strings(metricIDs)
+				pairs := make([]string, 0, len(metricIDs))
+				for _, id := range metricIDs {
+					pairs = append(pairs, fmt.Sprintf("%s=%g", id, event.Metrics[id]))
+				}
+				details = append(details, "metrics="+strings.Join(pairs, ","))
+			}
+			fmt.Fprintln(w, "journal: "+strings.Join(details, " · "))
 		}
 	}
-	fmt.Fprintf(w, "next: %s — %s\n", report.Next.Action, report.Next.Detail)
+	fmt.Fprintf(w, "next: %s — %s\n", report.Next.Action, terminalSafe(report.Next.Detail, false))
+}
+
+func terminalSafe(value string, allowNewline bool) string {
+	var b strings.Builder
+	for _, r := range value {
+		if allowNewline && r == '\n' {
+			b.WriteRune(r)
+			continue
+		}
+		if r == '\t' {
+			b.WriteRune(r)
+			continue
+		}
+		if unicode.IsControl(r) {
+			fmt.Fprintf(&b, "\\u%04x", r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

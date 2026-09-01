@@ -1,2 +1,5 @@
 .DS_Store
 plan/
+.vise/journal.jsonl
+.vise/run.lock
+.vise/tmp/

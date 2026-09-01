@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -55,7 +56,11 @@ func TamperHash(root string, manifest, lock []byte) (string, error) {
 	}
 	sort.Strings(hashes)
 	for _, hash := range hashes {
-		data, err := os.ReadFile(filepath.Join(root, ".vise", "blobs", HashName(hash)))
+		path, err := BlobPath(root, hash)
+		if err != nil {
+			return "", err
+		}
+		data, err := readRegularFile(path)
 		if err != nil {
 			return "", err
 		}
@@ -73,6 +78,19 @@ func writeHashPart(w io.Writer, label string, data []byte) {
 	_, _ = io.WriteString(w, "\n")
 }
 
-func HashName(hash string) string {
-	return strings.TrimPrefix(hash, "sha256:")
+var sha256Pattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+func HashName(hash string) (string, error) {
+	if !sha256Pattern.MatchString(hash) {
+		return "", fmt.Errorf("invalid sha256 hash %q", hash)
+	}
+	return strings.TrimPrefix(hash, "sha256:"), nil
+}
+
+func BlobPath(root, hash string) (string, error) {
+	name, err := HashName(hash)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, ".vise", "blobs", name), nil
 }

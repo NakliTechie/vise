@@ -91,7 +91,7 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 		renderStatus(stdout, report)
 		return vise.ExitOK
 	default:
-		return renderSimpleError(command, "unknown command; run 'vise --help'", jsonMode, stdout, stderr)
+		return renderSimpleError("vise", fmt.Sprintf("unknown command %q; run 'vise --help'", command), jsonMode, stdout, stderr)
 	}
 }
 

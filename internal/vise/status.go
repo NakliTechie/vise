@@ -97,6 +97,10 @@ func BuildStatus(root string) StatusReport {
 			hash, err := TamperHash(root, manifestBytes, lockBytes)
 			if err == nil {
 				report.Lock.Hash = hash
+			} else {
+				report.State = "harness-error"
+				report.Lock.Error = err.Error()
+				report.Next = Next{Action: "fix_probe", Detail: "restore a valid vise.lock and referenced blobs"}
 			}
 		}
 	}

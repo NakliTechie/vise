@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	core "github.com/NakliTechie/vise/internal/vise"
 )
 
 func cliRepo(t *testing.T, manifest, script string) string {
@@ -206,6 +208,11 @@ func TestDirtyRecordGuardAndOverride(t *testing.T) {
 	if exit, _, stderr := cliRun(t, root, "record"); exit != 2 || !strings.Contains(stderr, "clean working tree") {
 		t.Fatalf("guard: %d %q", exit, stderr)
 	}
+	exit, stdout, _ := cliRun(t, root, "record", "--json")
+	value := parseCLIJSON(t, stdout)
+	if exit != 2 || value["next"].(map[string]any)["action"] != "human" || !strings.Contains(value["next"].(map[string]any)["detail"].(string), "--allow-dirty") {
+		t.Fatalf("guard json: %d %#v", exit, value)
+	}
 	if exit, stdout, stderr := cliRun(t, root, "record", "--allow-dirty"); exit != 0 || !strings.Contains(stdout, "RECORDED") || stderr != "" {
 		t.Fatalf("override: %d %q %q", exit, stdout, stderr)
 	}
@@ -223,6 +230,11 @@ func TestOverwriteRequiresReviewGestureAndPrintsDiffFirst(t *testing.T) {
 	cliGit(t, root, "commit", "-qm", "new behavior")
 	if exit, _, stderr := cliRun(t, root, "record"); exit != 2 || !strings.Contains(stderr, "--i-reviewed-the-diff") {
 		t.Fatalf("review guard: %d %q", exit, stderr)
+	}
+	exit, stdout, _ := cliRun(t, root, "record", "--json")
+	value := parseCLIJSON(t, stdout)
+	if exit != 2 || value["next"].(map[string]any)["action"] != "human" || !strings.Contains(value["next"].(map[string]any)["detail"].(string), "--i-reviewed-the-diff") {
+		t.Fatalf("review json: %d %#v", exit, value)
 	}
 	exit, stdout, stderr := cliRun(t, root, "record", "--i-reviewed-the-diff")
 	if exit != 0 || !strings.HasPrefix(stdout, "BEHAVIOR DIFF UNDER REVIEW") || !strings.Contains(stdout, "RECORDED") || stderr != "" {
@@ -245,6 +257,11 @@ func TestInitStatusAndEmptyManifestRecordRemedy(t *testing.T) {
 	if exit, _, stderr := cliRun(t, root, "record"); exit != 2 || !strings.Contains(stderr, "at least one") || !strings.Contains(stderr, "0/0") {
 		t.Fatalf("record empty: %d %q", exit, stderr)
 	}
+	exit, stdout, _ := cliRun(t, root, "record", "--json")
+	value := parseCLIJSON(t, stdout)
+	if exit != 2 || value["next"].(map[string]any)["action"] != "fix_probe" || !strings.Contains(value["next"].(map[string]any)["detail"].(string), "declare at least one probe") {
+		t.Fatalf("record empty json: %d %#v", exit, value)
+	}
 }
 
 func TestHelpAndStatusOutsideGit(t *testing.T) {
@@ -256,5 +273,167 @@ func TestHelpAndStatusOutsideGit(t *testing.T) {
 	value := parseCLIJSON(t, stdout)
 	if exit != 0 || value["state"] != "no-git" || stderr != "" {
 		t.Fatalf("status: %d %#v %q", exit, value, stderr)
+	}
+}
+
+func TestVerifySingleProbeAndMissingBlob(t *testing.T) {
+	manifest := `[vise]
+version = 1
+[stubs]
+network = "declared-off"
+[[probe]]
+id = "one"
+run = "./one.sh"
+[[probe]]
+id = "two"
+run = "./two.sh"
+`
+	root := cliRepo(t, manifest, "")
+	cliWrite(t, root, "one.sh", "#!/bin/sh\nprintf one")
+	cliWrite(t, root, "two.sh", "#!/bin/sh\nprintf two")
+	if err := os.Chmod(filepath.Join(root, "one.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, "two.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cliGit(t, root, "add", ".")
+	cliGit(t, root, "commit", "-qm", "probes")
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 0 {
+		t.Fatalf("record: %d %s", exit, stderr)
+	}
+
+	cliWrite(t, root, "two.sh", "#!/bin/sh\nprintf changed")
+	if exit, stdout, stderr := cliRun(t, root, "verify", "--probe", "one"); exit != 0 || !strings.Contains(stdout, "1/1") || stderr != "" {
+		t.Fatalf("single: %d %q %q", exit, stdout, stderr)
+	}
+	if exit, _, stderr := cliRun(t, root, "verify"); exit != 1 || !strings.Contains(stderr, "two [behavior]") {
+		t.Fatalf("full: %d %q", exit, stderr)
+	}
+
+	cliWrite(t, root, "two.sh", "#!/bin/sh\nprintf two")
+	lock, _, err := core.LoadLockfile(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := core.BlobPath(root, lock.Probes["one"].Stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(blob); err != nil {
+		t.Fatal(err)
+	}
+	if exit, _, stderr := cliRun(t, root, "verify", "--probe", "one"); exit != 2 || !strings.Contains(stderr, "tamper-hash") {
+		t.Fatalf("missing blob: %d %q", exit, stderr)
+	}
+	exit, stdout, stderr := cliRun(t, root, "status", "--json")
+	value := parseCLIJSON(t, stdout)
+	if exit != 0 || value["state"] != "harness-error" || stderr != "" {
+		t.Fatalf("status after missing blob: %d %#v %q", exit, value, stderr)
+	}
+}
+
+func TestRecordRejectsFlakeAndLaunchFailure(t *testing.T) {
+	t.Run("flake", func(t *testing.T) {
+		root := cliRepo(t, basicManifest(""), "#!/bin/sh\nif test -f .toggle; then rm .toggle; printf b; else touch .toggle; printf a; fi")
+		exit, stdout, _ := cliRun(t, root, "record", "--json")
+		value := parseCLIJSON(t, stdout)
+		if exit != 3 || value["verdict"] != "indeterminate" {
+			t.Fatalf("record: %d %#v", exit, value)
+		}
+		if _, err := os.Stat(filepath.Join(root, "vise.lock")); !os.IsNotExist(err) {
+			t.Fatalf("lock exists after flake: %v", err)
+		}
+	})
+	t.Run("exit-127", func(t *testing.T) {
+		root := cliRepo(t, basicManifest(""), "#!/bin/sh\ncommand-that-does-not-exist")
+		exit, stdout, _ := cliRun(t, root, "record", "--json")
+		value := parseCLIJSON(t, stdout)
+		if exit != 2 || value["verdict"] != "indeterminate" {
+			t.Fatalf("record: %d %#v", exit, value)
+		}
+	})
+	t.Run("fingerprint", func(t *testing.T) {
+		manifest := `[vise]
+version = 1
+[stubs]
+network = "declared-off"
+[env]
+fingerprint = ["missing-command-for-record"]
+[[probe]]
+id = "behavior"
+run = "printf stable"
+`
+		root := cliRepo(t, manifest, "")
+		exit, stdout, _ := cliRun(t, root, "record", "--json")
+		value := parseCLIJSON(t, stdout)
+		if exit != 2 || value["next"].(map[string]any)["action"] != "fix_probe" || !strings.Contains(value["next"].(map[string]any)["detail"].(string), "fingerprint") {
+			t.Fatalf("fingerprint: %d %#v", exit, value)
+		}
+	})
+}
+
+func TestRunBinaryJSONAndProposalStatus(t *testing.T) {
+	manifest := `[vise]
+version = 1
+[stubs]
+network = "declared-off"
+[[probe]]
+id = "binary"
+run = "printf '\\377'"
+`
+	root := cliRepo(t, manifest, "")
+	cliWrite(t, root, ".vise/proposals.toml", "[[probe]]\nid='escaped-defect'\nrun='printf fixed'\n")
+	exit, stdout, stderr := cliRun(t, root, "run", "binary", "--json")
+	value := parseCLIJSON(t, stdout)
+	if exit != 0 || value["stdout_base64"] != "/w==" || stderr != "" {
+		t.Fatalf("run: %d %#v %q", exit, value, stderr)
+	}
+	exit, stdout, stderr = cliRun(t, root, "status", "--json")
+	value = parseCLIJSON(t, stdout)
+	if exit != 0 || value["pending_proposals"] != float64(1) || stderr != "" {
+		t.Fatalf("status: %d %#v %q", exit, value, stderr)
+	}
+}
+
+func TestInitNeverOverwrites(t *testing.T) {
+	root := cliRepo(t, "", "")
+	if exit, _, stderr := cliRun(t, root, "init"); exit != 0 {
+		t.Fatalf("first init: %d %q", exit, stderr)
+	}
+	before, err := os.ReadFile(filepath.Join(root, "vise.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Index(string(before), "[[probe]]") > strings.Index(string(before), "[stubs]") {
+		t.Fatal("starter manifest does not lead with the first probe")
+	}
+	if exit, _, stderr := cliRun(t, root, "init"); exit != 2 || !strings.Contains(stderr, "never overwrites") {
+		t.Fatalf("second init: %d %q", exit, stderr)
+	}
+	after, err := os.ReadFile(filepath.Join(root, "vise.toml"))
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("manifest changed: %v", err)
+	}
+}
+
+func TestRecordIsByteReproducibleOnSameHead(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf stable")
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 0 {
+		t.Fatalf("first: %d %q", exit, stderr)
+	}
+	first, err := os.ReadFile(filepath.Join(root, "vise.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exit, _, stderr := cliRun(t, root, "record", "--allow-dirty", "--i-reviewed-the-diff"); exit != 0 {
+		t.Fatalf("second: %d %q", exit, stderr)
+	}
+	second, err := os.ReadFile(filepath.Join(root, "vise.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatalf("lockfile bytes changed:\nfirst=%s\nsecond=%s", first, second)
 	}
 }

@@ -10,15 +10,7 @@ import (
 const StubManifest = `[vise]
 version = 1
 
-[stubs]
-tz = "UTC"
-lang = "C"
-seed = "1729"
-network = "declared-off"
-
-# [env]
-# fingerprint = ["sh --version | head -1", "git --version"]
-
+# Start here: uncomment one probe and point it at deterministic behavior.
 # [[probe]]
 # id = "cli-help"
 # run = "./mytool --help"
@@ -26,6 +18,18 @@ network = "declared-off"
 # deps = ["fixtures/input.txt"]
 # files = ["out/result.json"]
 
+# Universal determinism defaults applied to every probe.
+[stubs]
+tz = "UTC"
+lang = "C"
+seed = "1729"
+network = "declared-off"
+
+# Advanced: fingerprint tool versions that affect probe output.
+# [env]
+# fingerprint = ["sh --version | head -1", "git --version"]
+
+# Advanced: track a numeric quality objective beside behavior.
 # [[metric]]
 # id = "complexity"
 # run = "your-analyzer --numeric-output"
