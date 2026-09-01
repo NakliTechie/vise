@@ -215,7 +215,7 @@ func WriteGeneration(root string, lock Lockfile, blobs map[string][]byte) ([]byt
 	if err != nil {
 		return nil, fmt.Errorf("encode vise.lock: %w", err)
 	}
-	if err := atomicWrite(filepath.Join(root, "vise.lock"), data, 0o644); err != nil {
+	if err := atomicWrite(root, filepath.Join(root, "vise.lock"), data, 0o644); err != nil {
 		return nil, fmt.Errorf("write vise.lock: %w", err)
 	}
 	if err := pruneBlobs(blobDir, referencedHashes(lock)); err != nil {
@@ -247,19 +247,26 @@ func WriteBlobs(root string, blobs map[string][]byte) error {
 		} else if !os.IsNotExist(err) {
 			return err
 		}
-		if err := atomicWrite(path, data, 0o644); err != nil {
+		if err := atomicWrite(root, path, data, 0o644); err != nil {
 			return fmt.Errorf("write blob %s: %w", hash, err)
 		}
 	}
 	return nil
 }
 
-func atomicWrite(path string, data []byte, mode os.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+// atomicWrite stages the new content under root/.vise/tmp (ignored by init,
+// skipped by the dirty-tree check) and renames it over path, so a crash
+// leaves the old file intact and any residue where state is expected, never
+// an untracked stray beside vise.lock.
+func atomicWrite(root, path string, data []byte, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".vise-write-*")
+	staging := filepath.Join(root, ".vise", "tmp")
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(staging, "write-*")
 	if err != nil {
 		return err
 	}
@@ -283,7 +290,7 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	if err := os.Rename(tmpName, path); err != nil {
 		return err
 	}
-	dirHandle, err := os.Open(dir)
+	dirHandle, err := os.Open(filepath.Dir(path))
 	if err == nil {
 		_ = dirHandle.Sync()
 		_ = dirHandle.Close()

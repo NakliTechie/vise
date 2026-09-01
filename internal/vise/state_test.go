@@ -306,7 +306,7 @@ func TestAtomicWriteFailurePreservesOldFile(t *testing.T) {
 	if err := os.Chmod(root, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	err := atomicWrite(path, []byte("new"), 0o644)
+	err := atomicWrite(root, path, []byte("new"), 0o644)
 	if restoreErr := os.Chmod(root, 0o700); restoreErr != nil {
 		t.Fatal(restoreErr)
 	}
@@ -394,4 +394,32 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func TestAtomicWriteStagesUnderViseTmp(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "vise.lock")
+	if err := atomicWrite(root, path, []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "content" {
+		t.Fatalf("written = %q, %v", data, err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".vise-write-") {
+			t.Fatalf("stray staging file beside the target: %s", entry.Name())
+		}
+	}
+	if info, err := os.Stat(filepath.Join(root, ".vise", "tmp")); err != nil || !info.IsDir() {
+		t.Fatalf("staging directory missing: %v", err)
+	}
+	leftovers, err := os.ReadDir(filepath.Join(root, ".vise", "tmp"))
+	if err != nil || len(leftovers) != 0 {
+		t.Fatalf("staging residue after a clean write: %v %v", leftovers, err)
+	}
 }
