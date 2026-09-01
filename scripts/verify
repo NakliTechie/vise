@@ -10,6 +10,10 @@ VERIFY_GOCACHE=$VERIFY_BASE/go-build
 VERIFY_GOMODCACHE=$VERIFY_BASE/go-mod
 VERIFY_TOOLCHAIN=go$(awk '$1 == "go" { print $2; exit }' "$VISE_ROOT/go.mod")
 
+# Every build, test, and fixture step below is relative to the checkout, not
+# to wherever the caller happened to be.
+cd -- "$VISE_ROOT" || { printf 'verify: cannot enter %s\n' "$VISE_ROOT" >&2; exit 2; }
+
 summary() {
   printf 'VISE_VERIFY {"feature":"%s","status":"%s"}\n' "$1" "$2"
 }
@@ -54,6 +58,14 @@ doctor() {
   printf 'host go: %s\n' "$(go version)"
   printf 'module toolchain: %s\n' "$VERIFY_TOOLCHAIN"
   summary doctor pass
+}
+
+clean_fixtures() {
+  rm -rf "$VERIFY_BASE/fixtures"
+  for leftover in "$VERIFY_BASE"/orientation.*; do
+    test -e "$leftover" && rm -rf "$leftover"
+  done
+  return 0
 }
 
 build_binary() {
@@ -305,6 +317,7 @@ case "${1:-}" in
     ;;
   verify)
     doctor >/dev/null
+    clean_fixtures
     build_binary
     if test "$#" -eq 2; then
       run_feature "$2"
