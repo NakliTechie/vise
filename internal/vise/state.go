@@ -396,11 +396,17 @@ func AppendJournal(root string, event JournalEvent) error {
 	if err != nil {
 		return err
 	}
-	file, err := os.OpenFile(journalPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	file, err := os.OpenFile(journalPath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
+	// An interrupted append can leave a torn final line without a newline.
+	// Drop that fragment before writing so the journal never carries a
+	// malformed interior line.
+	if err := truncateTornTail(file); err != nil {
+		return err
+	}
 	if _, err := file.Write(append(data, '\n')); err != nil {
 		return err
 	}
@@ -453,14 +459,26 @@ func readJournalTail(root string) (events []JournalEvent, truncated bool, err er
 		truncated = true
 		_ = scanner.Scan()
 	}
+	var lines [][]byte
 	for scanner.Scan() {
+		lines = append(lines, append([]byte(nil), scanner.Bytes()...))
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, false, err
+	}
+	for i, line := range lines {
 		var event JournalEvent
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+		if err := json.Unmarshal(line, &event); err != nil {
+			if i == len(lines)-1 {
+				// A torn final line is what an interrupted append leaves behind;
+				// the next append starts a fresh line, so the tail stays readable.
+				break
+			}
 			return nil, false, fmt.Errorf("parse journal: %w", err)
 		}
 		events = append(events, event)
 	}
-	return events, truncated, scanner.Err()
+	return events, truncated, nil
 }
 
 // ConsecutiveFlakes counts flake events for this probe set since the last
@@ -492,4 +510,35 @@ func ConsecutiveFlakes(events []JournalEvent, commit, lock string, probes []stri
 		}
 	}
 	return count, false
+}
+
+// truncateTornTail removes a trailing partial line (no final newline) from
+// the journal, which is what an interrupted append leaves behind.
+func truncateTornTail(file *os.File) error {
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	size := info.Size()
+	if size == 0 {
+		return nil
+	}
+	const window int64 = 1024 * 1024
+	start := size - window
+	if start < 0 {
+		start = 0
+	}
+	tail := make([]byte, size-start)
+	if _, err := file.ReadAt(tail, start); err != nil && err != io.EOF {
+		return err
+	}
+	if tail[len(tail)-1] == '\n' {
+		return nil
+	}
+	cut := bytes.LastIndexByte(tail, '\n')
+	keep := start
+	if cut >= 0 {
+		keep = start + int64(cut) + 1
+	}
+	return file.Truncate(keep)
 }

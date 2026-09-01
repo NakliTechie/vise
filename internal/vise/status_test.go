@@ -50,3 +50,12 @@ func TestStatusReportsBaselineDriftWithoutRunningProbes(t *testing.T) {
 		t.Fatalf("empty-manifest status = %#v", report)
 	}
 }
+
+func TestMalformedProposalsDoNotChangeStatusState(t *testing.T) {
+	root := recordedStatusRepo(t)
+	writeTestFile(t, root, ".vise/proposals.toml", "[[probe]]\nid = \"\"\nrun = \"\"\nnot = valid\n")
+	report := BuildStatus(root)
+	if report.State != "ready" || report.Next.Action != "proceed" || report.ProposalError == "" || report.PendingProposals != 0 {
+		t.Fatalf("report = %#v", report)
+	}
+}

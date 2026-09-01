@@ -354,3 +354,42 @@ func TestOutcomeReplacesFailureWithoutDoubleCounting(t *testing.T) {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 }
+
+func TestReadJournalToleratesTornFinalLineOnly(t *testing.T) {
+	root := t.TempDir()
+	if err := AppendJournal(root, JournalEvent{Event: "gate", Commit: "c", Verdict: "green"}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, ".vise", "journal.jsonl")
+	if err := os.WriteFile(path, append(mustRead(t, path), []byte(`{"e":"ga`)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	events, err := ReadJournal(root, 5)
+	if err != nil || len(events) != 1 || events[0].Verdict != "green" {
+		t.Fatalf("torn tail: events=%#v err=%v", events, err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := AppendJournal(root, JournalEvent{Event: "gate", Commit: "c", Verdict: "red"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events, err = ReadJournal(root, 5)
+	if err != nil || len(events) != 3 || events[2].Verdict != "red" {
+		t.Fatalf("appends after a torn tail: events=%#v err=%v", events, err)
+	}
+	if err := os.WriteFile(path, []byte("{\"e\":\"ga\n{\"e\":\"gate\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadJournal(root, 5); err == nil {
+		t.Fatal("a torn interior line must still fail")
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}

@@ -114,13 +114,11 @@ func BuildStatus(root string) StatusReport {
 		}
 	}
 
+	// proposals.toml is agent-writable and judges nothing, so a malformed file
+	// is reported but never changes the state or the next action.
 	proposals, err := LoadProposals(root)
 	if err != nil {
 		report.ProposalError = err.Error()
-		if report.State != "harness-error" {
-			report.State = "harness-error"
-			report.Next = Next{Action: "fix_probe", Detail: "repair .vise/proposals.toml"}
-		}
 	} else {
 		report.PendingProposals = len(proposals.Probes)
 	}
