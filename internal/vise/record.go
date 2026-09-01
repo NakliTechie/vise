@@ -23,7 +23,7 @@ type RecordResult struct {
 
 func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOptions) RecordResult {
 	outcome := NewOutcome("record")
-	outcome.Counts.Declared = len(manifest.Probes)
+	outcome.Counts.Declared = len(manifest.Probes) + len(manifest.Metrics)
 	result := RecordResult{Outcome: outcome}
 	if len(manifest.Probes) == 0 {
 		result.Outcome = harnessWithNext("record", "manifest", "manifest must declare at least one [[probe]] before recording", "fix_probe", "declare at least one probe in vise.toml, commit the harness, then rerun vise record")
@@ -171,7 +171,8 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		result.Outcome = harnessOnly("record", "tamper-hash", err.Error())
 		return result
 	}
-	counts := Counts{Declared: len(manifest.Probes), Pass: len(manifest.Probes)}
+	declared := len(manifest.Probes) + len(manifest.Metrics)
+	counts := Counts{Declared: declared, Pass: declared}
 	if err := AppendJournal(root, JournalEvent{Event: "record", Commit: commit, Dirty: dirty, Counts: &counts, Lock: lockHash}); err != nil {
 		result.Outcome = harnessOnly("record", "journal", "baseline was written but journal append failed: "+err.Error())
 		result.Lockfile = lock

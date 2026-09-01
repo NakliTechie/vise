@@ -255,6 +255,13 @@ version_cmd = "printf analyzer-1"
 	if exit != 5 || value["verdict"] != "red" {
 		t.Fatalf("metric: %d %#v", exit, value)
 	}
+	counts := value["counts"].(map[string]any)
+	if counts["declared"] != 2.0 || counts["pass"] != 1.0 || counts["metric"] != 1.0 {
+		t.Fatalf("metric counts must include the metric in the denominator: %#v", counts)
+	}
+	if _, text, _ := cliRun(t, root, "gate"); !strings.Contains(text, "GATE RED [metric] — 1/2: complexity") {
+		t.Fatalf("gate line = %q", text)
+	}
 }
 
 func TestDirtyRecordGuardAndOverride(t *testing.T) {

@@ -124,7 +124,7 @@ func (o *Outcome) Finalize() {
 		classes = append(classes, "metric")
 	}
 	o.Classes = classes
-	o.Counts.Pass = o.Counts.Declared - o.Counts.Behavior - o.Counts.Flaky - o.Counts.Harness
+	o.Counts.Pass = o.Counts.Declared - o.Counts.Behavior - o.Counts.Flaky - o.Counts.Harness - o.Counts.Metric
 	if o.Counts.Pass < 0 {
 		o.Counts.Pass = 0
 	}

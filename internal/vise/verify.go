@@ -31,7 +31,7 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	lock, lockBytes, err := LoadLockfile(root)
 	if os.IsNotExist(err) {
 		outcome.Exit = ExitNotInitialized
-		outcome.Counts.Declared = len(manifest.Probes)
+		outcome.Counts.Declared = len(manifest.Probes) + len(manifest.Metrics)
 		outcome.Finalize()
 		result.Outcome = outcome
 		return result
@@ -72,6 +72,9 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 		probeIDs = append(probeIDs, probe.ID)
 	}
 	if opts.ProbeID == "" {
+		// Metrics are judged checks too: they count in the denominator so a
+		// failing metric lowers pass instead of hiding behind the probe count.
+		outcome.Counts.Declared += len(manifest.Metrics)
 		for _, metric := range manifest.Metrics {
 			probeIDs = append(probeIDs, metric.ID)
 		}

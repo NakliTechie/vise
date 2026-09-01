@@ -329,6 +329,21 @@ func TestOutcomePrecedence(t *testing.T) {
 	}
 }
 
+func TestFinalizeCountsEveryFailingCheckAgainstPass(t *testing.T) {
+	// Two probes and two metrics declared: one metric regressed, one flaked.
+	outcome := NewOutcome("verify")
+	outcome.Counts.Declared = 4
+	outcome.AddFailure("complexity", Failure{Class: "metric"})
+	outcome.AddFailure("size", Failure{Class: "flake"})
+	outcome.Finalize()
+	if outcome.Counts.Pass != 2 || outcome.Counts.Metric != 1 || outcome.Counts.Flaky != 1 {
+		t.Fatalf("counts = %#v", outcome.Counts)
+	}
+	if outcome.Exit != ExitIndeterminate {
+		t.Fatalf("exit = %d, want flake precedence over metric", outcome.Exit)
+	}
+}
+
 func TestOutcomeReplacesFailureWithoutDoubleCounting(t *testing.T) {
 	outcome := NewOutcome("verify")
 	outcome.Counts.Declared = 1
