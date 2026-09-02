@@ -183,3 +183,42 @@ func TestRecordRefusesANonDeterministicFingerprint(t *testing.T) {
 		t.Fatal("a baseline was written despite an unstable fingerprint")
 	}
 }
+
+// A removed probe is the entry in a review diff an operator most needs to
+// scrutinise: an observation is going away. It was rendered with fewer fields
+// than an added probe, which is backwards. Found by a coding agent asked to
+// report anything that looked wrong while refactoring this function.
+func TestTheReviewDiffDescribesARemovedProbeAsFullyAsAnAddedOne(t *testing.T) {
+	probe := ProbeLock{
+		RunHash:        "sha256:" + strings.Repeat("a", 64),
+		RecordedCommit: strings.Repeat("b", 40),
+		Exit:           0,
+		Stdout:         "sha256:" + strings.Repeat("c", 64),
+		Stderr:         "sha256:" + strings.Repeat("d", 64),
+		Files:          map[string]string{"out/one.txt": "sha256:" + strings.Repeat("e", 64)},
+	}
+	old := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{"gone": probe}}
+	fresh := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{"added": probe}}
+
+	diff := LockfileDiff(t.TempDir(), old, fresh, nil)
+	var removed, added string
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "- probe gone") {
+			removed = line
+		}
+		if strings.HasPrefix(line, "+ probe added") {
+			added = line
+		}
+	}
+	if removed == "" || added == "" {
+		t.Fatalf("diff did not describe both probes:\n%s", diff)
+	}
+	for _, field := range []string{"1 file(s)", "recorded at " + probe.RecordedCommit} {
+		if !strings.Contains(added, field) {
+			t.Fatalf("the added line lost %q: %s", field, added)
+		}
+		if !strings.Contains(removed, field) {
+			t.Fatalf("the removed line omits %q, which the added line shows: %s", field, removed)
+		}
+	}
+}

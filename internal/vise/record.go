@@ -409,7 +409,11 @@ func LockfileDiff(root string, oldLock, newLock Lockfile, newBlobs map[string][]
 		case !oldOK:
 			fmt.Fprintf(&b, "+ probe %s (exit %d, stdout %s, stderr %s, %d file(s), recorded at %s)\n", id, newProbe.Exit, newProbe.Stdout, newProbe.Stderr, len(newProbe.Files), newProbe.RecordedCommit)
 		case !newOK:
-			fmt.Fprintf(&b, "- probe %s (exit %d, stdout %s, stderr %s)\n", id, oldProbe.Exit, oldProbe.Stdout, oldProbe.Stderr)
+			// The same fields as an added probe, deliberately. A removal is the
+			// entry in this diff an operator most needs to scrutinise — an
+			// observation is going away — and it was showing less than an
+			// addition, which is backwards.
+			fmt.Fprintf(&b, "- probe %s (exit %d, stdout %s, stderr %s, %d file(s), recorded at %s)\n", id, oldProbe.Exit, oldProbe.Stdout, oldProbe.Stderr, len(oldProbe.Files), oldProbe.RecordedCommit)
 		default:
 			if oldProbe.RunHash != newProbe.RunHash {
 				fmt.Fprintf(&b, "%s definition changed since the recorded baseline (run_hash %s -> %s); see git diff vise.toml\n", id, oldProbe.RunHash, newProbe.RunHash)
