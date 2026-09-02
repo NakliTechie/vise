@@ -49,6 +49,10 @@ Three tiers of handling, in order of preference:
 **Browser / DOM** (LocalMind class)
 - Font metrics, GPU rasterization, animation timing — why DOM probes are Parked. Today's honest form: probe the app's *logic* via a headless JS entry point; leave pixel/GPU truth to `/live-check-nt`.
 
+## Processes vise cannot reach
+
+Every guard vise has over a running probe is a process-group guard: the timeout kill, the post-exit sweep, the one-second pipe close. An ordinary background child stays in the group and the sweep kills it — `sleep 30 &`, a plain double fork, and `nohup` alike (`nohup` only ignores SIGHUP; it does not change session). What escapes is a child that starts a **new session**: `setsid`, or a daemonize idiom that calls it — the shape a Spring preloader or a detaching `rails server` uses. vise cannot kill that child; it still refuses the run if the run changed evaluator state, and still catches a tracked-file write that lands before the tracked-tree check, but a write that lands after it is invisible. Rules for probe authors: start nothing you do not `wait` for, redirect anything you background (`>/dev/null 2>&1 &`) so it cannot hold the probe's pipes, and never let a probe leave a detached process behind. SPEC §2.2 states the boundary.
+
 ## The boundary rule
 
 If a behavior can't be made deterministic at reasonable cost (GPU output, TCC-gated paths, wall-clock-coupled flows), it is **not a vise probe** — it belongs to the live-check layer. vise guards what can be frozen; pretending to freeze the unfreezable produces quarantine noise that erodes trust in the gate.
