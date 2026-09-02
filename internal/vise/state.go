@@ -166,6 +166,9 @@ func LoadLockfile(root string) (Lockfile, []byte, error) {
 	if err != nil {
 		return Lockfile{}, nil, err
 	}
+	if err := rejectDuplicateJSONKeys(data); err != nil {
+		return Lockfile{}, nil, fmt.Errorf("parse vise.lock: %w", err)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var lock Lockfile
@@ -184,6 +187,9 @@ func LoadLockfile(root string) (Lockfile, []byte, error) {
 	}
 	if err := validateLockfileHashes(lock); err != nil {
 		return Lockfile{}, nil, err
+	}
+	if err := validateLockfileSchema(lock); err != nil {
+		return Lockfile{}, nil, fmt.Errorf("vise.lock: %w", err)
 	}
 	return lock, data, nil
 }
@@ -275,19 +281,19 @@ func WriteBlobs(root string, blobs map[string][]byte) error {
 // leaves the old file intact and any residue where state is expected, never
 // an untracked stray beside vise.lock.
 func atomicWrite(root, path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := persistence.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	staging, err := stateScratchDir(root)
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(staging, "write-*")
+	tmp, err := persistence.CreateStaged(staging, "write-*")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer persistence.Remove(tmpName)
 	if err := tmp.Chmod(mode); err != nil {
 		_ = tmp.Close()
 		return err
@@ -303,14 +309,17 @@ func atomicWrite(root, path string, data []byte, mode os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	// Until this rename the target still holds the previous generation; after
+	// it, the new one. There is no moment where it holds neither, so the
+	// rename is the commit point.
+	if err := persistence.Rename(tmpName, path); err != nil {
 		return err
 	}
-	dirHandle, err := os.Open(filepath.Dir(path))
-	if err == nil {
-		_ = dirHandle.Sync()
-		_ = dirHandle.Close()
-	}
+	// Flushing the directory entry is a durability upgrade on an already
+	// committed write. Reporting its failure would tell the caller the
+	// baseline was not written when it was — the same lie a failed prune used
+	// to tell (SPEC §3.1) — so it is best effort.
+	_ = persistence.SyncDir(filepath.Dir(path))
 	return nil
 }
 
