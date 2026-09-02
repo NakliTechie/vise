@@ -85,20 +85,18 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 		}
 		return renderSimpleError(command, err.Error(), jsonMode, stdout, stderr)
 	}
-	stateLock, err := vise.AcquireStateLock(root)
-	if err != nil {
-		if command == "status" {
-			report := vise.StatusReport{V: 1, Cmd: "status", Exit: 0, State: "harness-error", Next: vise.Next{Action: "fix_probe", Detail: err.Error()}}
-			if jsonMode {
-				report.Tool = toolIdentity()
-				return writeJSON(stdout, report)
-			}
-			renderStatus(stdout, report)
-			return vise.ExitOK
+	// status is the one command that writes nothing, so it takes no lock and
+	// creates no state directory: a repository that has never run vise is
+	// unchanged by asking it what its situation is. Concurrency is safe without
+	// one — the lockfile is replaced by atomic rename, so a reader sees the old
+	// generation or the new one, and a torn journal tail is already tolerated.
+	if command != "status" {
+		stateLock, err := vise.AcquireStateLock(root)
+		if err != nil {
+			return renderSimpleError(command, err.Error(), jsonMode, stdout, stderr)
 		}
-		return renderSimpleError(command, err.Error(), jsonMode, stdout, stderr)
+		defer stateLock.Close()
 	}
-	defer stateLock.Close()
 
 	switch command {
 	case "init":

@@ -805,3 +805,31 @@ func TestStatusJSONNamesTheToolButHumanStatusDoesNot(t *testing.T) {
 		t.Fatalf("human status leaked build identity: %q", stdout)
 	}
 }
+
+func TestStatusWritesNothingAtAll(t *testing.T) {
+	root := t.TempDir()
+	cliGit(t, root, "init", "-q")
+	cliGit(t, root, "config", "user.email", "cli-tests@example.invalid")
+	cliGit(t, root, "config", "user.name", "cli tests")
+	before, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exit, _, _ := cliRun(t, root, "status", "--json"); exit != 0 {
+		t.Fatalf("status: %d", exit)
+	}
+	after, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		names := make([]string, 0, len(after))
+		for _, entry := range after {
+			names = append(names, entry.Name())
+		}
+		t.Fatalf("status created state in a repository that had none: %v", names)
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".vise")); !os.IsNotExist(err) {
+		t.Fatalf(".vise exists after status: %v", err)
+	}
+}
