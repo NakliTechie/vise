@@ -113,7 +113,7 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 
 | command | purpose |
 |---|---|
-| `vise init` | Write a starter manifest and ignore rules. Never overwrites. |
+| `vise init` | Write a starter manifest, ignore rules, and the agent contract (`AGENTS.md`). Never overwrites. |
 | `vise record` | Two full suite passes, then atomically freeze the baseline. |
 | `vise record --preview` | Show the candidate diff and its digest. Writes no baseline state. |
 | `vise record --accept <digest>` | Freeze exactly the candidate that was previewed. |

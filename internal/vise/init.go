@@ -1,11 +1,20 @@
 package vise
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// AgentContract is the rulebook a coding agent reads before working in a gated
+// repository. It is embedded so `init` can deliver it: a gate nobody explained
+// is a gate an agent works around. vise's own AGENTS.md is a copy of this file,
+// which a test keeps identical.
+//
+//go:embed agents.md
+var AgentContract string
 
 const StubManifest = `[vise]
 version = 1
@@ -61,7 +70,32 @@ func InitRepository(root string) error {
 	if err := updateGitignore(root); err != nil {
 		return fmt.Errorf("vise.toml was written but .gitignore update failed: %w", err)
 	}
+	if err := writeAgentContract(root); err != nil {
+		return fmt.Errorf("vise.toml was written but AGENTS.md could not be created: %w", err)
+	}
 	return nil
+}
+
+// InitCreated lists the files a fresh init wrote, so the caller can report them.
+func InitCreated(root string) []string {
+	created := []string{"vise.toml"}
+	if _, err := os.Lstat(filepath.Join(root, "AGENTS.md")); err == nil {
+		created = append(created, "AGENTS.md")
+	}
+	return created
+}
+
+// writeAgentContract installs the agent rulebook, and never overwrites one the
+// project already has — a project with its own AGENTS.md has already thought
+// about this, and clobbering it would be the tool overruling the operator.
+func writeAgentContract(root string) error {
+	path := filepath.Join(root, "AGENTS.md")
+	if _, err := os.Lstat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return atomicWrite(root, path, []byte(AgentContract), 0o644)
 }
 
 func updateGitignore(root string) error {

@@ -140,6 +140,12 @@ verify_initialization() {
   grep -q '"cmd":"init"' "$repo/init.json" || fail initialization "init did not emit its JSON contract"
   test -f "$repo/vise.toml" || fail initialization "init did not create vise.toml"
   grep -q '.vise/journal.jsonl' "$repo/.gitignore" || fail initialization "init did not wire journal state into .gitignore"
+  test -f "$repo/AGENTS.md" || fail initialization "init did not install the agent contract"
+  grep -q 'Never run .vise record' "$repo/AGENTS.md" || fail initialization "the installed agent contract is missing its rules"
+  printf 'ours\n' > "$repo/AGENTS.md"
+  rm "$repo/vise.toml"
+  (cd "$repo" && "$VERIFY_BIN" init --json) >/dev/null
+  test "$(cat "$repo/AGENTS.md")" = ours || fail initialization "init overwrote an existing AGENTS.md"
   (cd "$repo" && "$VERIFY_BIN" status --json) | grep -q '"state":"unrecorded"' || fail initialization "cold status did not report an unrecorded manifest"
   expect_exit 2 sh -c "cd '$repo' && '$VERIFY_BIN' record --json >/dev/null"
   summary initialization pass

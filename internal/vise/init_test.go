@@ -32,3 +32,42 @@ func TestInitRefusesSymlinkedGitignoreBeforeWritingAnything(t *testing.T) {
 		t.Fatalf("symlink target changed: %q %v", data, err)
 	}
 }
+
+func TestInitInstallsTheAgentContractWithoutOverwriting(t *testing.T) {
+	root := t.TempDir()
+	if err := InitRepository(root); err != nil {
+		t.Fatal(err)
+	}
+	contract, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil || string(contract) != AgentContract {
+		t.Fatalf("AGENTS.md = %d bytes, %v", len(contract), err)
+	}
+	if created := InitCreated(root); len(created) != 2 || created[1] != "AGENTS.md" {
+		t.Fatalf("created = %v", created)
+	}
+
+	// A project that already has one has already thought about this.
+	other := t.TempDir()
+	mine := "# our own rules\n"
+	if err := os.WriteFile(filepath.Join(other, "AGENTS.md"), []byte(mine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := InitRepository(other); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(other, "AGENTS.md")); string(data) != mine {
+		t.Fatalf("init overwrote an existing AGENTS.md: %q", data)
+	}
+}
+
+func TestTheRepositoryContractMatchesTheEmbeddedOne(t *testing.T) {
+	// vise gates itself, so its own AGENTS.md is the template in use. If they
+	// drift, one of them is lying to somebody.
+	root, err := os.ReadFile(filepath.Join("..", "..", "AGENTS.md"))
+	if err != nil {
+		t.Skipf("repository AGENTS.md unavailable: %v", err)
+	}
+	if string(root) != AgentContract {
+		t.Fatal("AGENTS.md and internal/vise/agents.md have drifted; copy one over the other")
+	}
+}

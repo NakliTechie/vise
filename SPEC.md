@@ -172,7 +172,7 @@ vise itself enforces **`rerun` at most once**: the third consecutive `gate` or `
 
 **`vise run <probe-id>`** — raw single-probe execution: stdout/stderr/exit to the terminal, no judgment, no lockfile. Exit mirrors the probe's own exit (documented exception #2 to the vocabulary — `run` output IS the probe's output). A launch failure is the probe's own exit 127 and passes through; a timeout, a refused artifact, or a lingering pipe holder has no probe exit to mirror and exits 2.
 
-**`vise init`** — writes a **stub manifest** (stubs block + one commented example probe + one commented example metric; no tool or ecosystem detection — parked, §8) and adds `.vise/journal.jsonl` + `.vise/run.lock` + `VISE_TMP` residue to `.gitignore` (`.vise/blobs/` stays tracked). Never records, never overwrites an existing manifest. Multi-ecosystem *probe* detection (package.json scripts etc.) is deferred — the stub delivers the adoption moment.
+**`vise init`** — writes the agent contract (`AGENTS.md`, embedded in the binary, never overwriting one the project already has — a gate nobody explained is a gate an agent works around) and a **stub manifest** (stubs block + one commented example probe + one commented example metric; no tool or ecosystem detection — parked, §8) and adds `.vise/journal.jsonl` + `.vise/run.lock` + `VISE_TMP` residue to `.gitignore` (`.vise/blobs/` stays tracked). Never records, never overwrites an existing manifest. Multi-ecosystem *probe* detection (package.json scripts etc.) is deferred — the stub delivers the adoption moment.
 
 ## 5. Operator territory
 

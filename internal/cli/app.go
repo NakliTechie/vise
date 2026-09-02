@@ -134,17 +134,18 @@ func runInit(args []string, root string, jsonMode bool, stdout, stderr io.Writer
 	if err := vise.InitRepository(root); err != nil {
 		return renderSimpleError("init", err.Error(), jsonMode, stdout, stderr)
 	}
+	created := vise.InitCreated(root)
 	response := map[string]any{
 		"v":       1,
 		"cmd":     "init",
 		"exit":    0,
-		"created": []string{"vise.toml"},
+		"created": created,
 		"next":    vise.Next{Action: "fix_probe", Detail: "uncomment and configure at least one probe, then run vise record"},
 	}
 	if jsonMode {
 		return writeJSON(stdout, response)
 	}
-	fmt.Fprintln(stdout, "INITIALIZED — wrote vise.toml and wired local state into .gitignore")
+	fmt.Fprintln(stdout, "INITIALIZED — wrote "+strings.Join(created, ", ")+" and wired local state into .gitignore")
 	fmt.Fprintln(stdout, "NEXT — declare at least one probe, commit the harness, then run vise record")
 	return vise.ExitOK
 }
