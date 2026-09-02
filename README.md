@@ -121,7 +121,26 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 | `vise gate [--quiet]` | The refactor-loop verdict, journaled. |
 | `vise run <probe-id>` | Execute one probe raw. Exit mirrors the probe. |
 | `vise status` | The whole situation in one bounded read. Always exit 0. |
+| `vise doctor` | Check the repository is fit to hand to an agent. Read-only, always exit 0. |
 | `vise version` | The version, and with `--json` the build revision. |
+
+## Before you hand the repository to an agent
+
+```sh
+vise doctor
+```
+
+Six checks, each one a setup failure that cost a session when vise was first
+handed to real coding agents: a toolchain nobody fingerprinted, a probe naming
+a path that exists only on your machine, a script a probe runs without
+declaring it as an input, a baseline that was never committed so a fresh clone
+cannot gate, vise's own local state left unignored, and a repository with no
+written rules for the agent. Every finding names its remedy. It runs no probe,
+writes nothing, and always exits 0.
+
+The failures are invisible from where you sit and expensive from where the
+agent sits: the operator's shell has the toolchain, the caches, and the home
+directory that the sandbox does not.
 
 ## What it holds, and what it cannot
 

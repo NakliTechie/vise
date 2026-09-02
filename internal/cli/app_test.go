@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -893,5 +894,88 @@ func TestAnUnencodableVerdictIsReportedAsHarness(t *testing.T) {
 	}
 	if value := parseCLIJSON(t, out.String()); value["verdict"] != "red" || value["extra"] != true {
 		t.Fatalf("plain value = %#v", value)
+	}
+}
+
+// doctor is an operator's read-only question about the repository. Like
+// status it always exits 0: its findings are advice to a human, not a verdict
+// an agent branches on, and giving it an exit code would put a seventh
+// meaning into a vocabulary whose whole value is that each code names one
+// next action.
+func TestDoctorAlwaysExitsZeroAndAnswersJSON(t *testing.T) {
+	root := t.TempDir()
+	cliGit(t, root, "init", "-q")
+	cliGit(t, root, "config", "user.email", "vise-tests@example.invalid")
+	cliGit(t, root, "config", "user.name", "vise tests")
+	cliWrite(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
+
+	var out, errOut bytes.Buffer
+	if exit := Run([]string{"doctor", "--json"}, root, &out, &errOut); exit != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr %s)", exit, errOut.String())
+	}
+	var document struct {
+		Cmd      string `json:"cmd"`
+		Ready    bool   `json:"ready"`
+		Findings []struct {
+			Check  string `json:"check"`
+			Remedy string `json:"remedy"`
+		} `json:"findings"`
+		Next struct {
+			Action string `json:"action"`
+		} `json:"next"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &document); err != nil {
+		t.Fatalf("doctor --json is not one object: %v\n%s", err, out.String())
+	}
+	if document.Cmd != "doctor" || document.Ready {
+		t.Fatalf("document = %#v", document)
+	}
+	if len(document.Findings) == 0 {
+		t.Fatal("doctor found nothing in a repository with no fingerprint, no contract, and no baseline")
+	}
+	for _, finding := range document.Findings {
+		if finding.Remedy == "" {
+			t.Fatalf("finding %q carries no remedy", finding.Check)
+		}
+	}
+	if document.Next.Action != "human" {
+		t.Fatalf("next.action = %q", document.Next.Action)
+	}
+
+	// A positional argument is a mistake worth naming rather than ignoring.
+	out.Reset()
+	errOut.Reset()
+	if exit := Run([]string{"doctor", "extra"}, root, &out, &errOut); exit == 0 {
+		t.Fatal("doctor accepted a positional argument")
+	}
+}
+
+// Help has one source. The top-level list and the per-command usage used to be
+// separate strings, which is how a command exists and is undocumented.
+func TestEveryCommandAppearsInBothRenderingsOfHelp(t *testing.T) {
+	var human bytes.Buffer
+	if exit := Run([]string{"--help"}, t.TempDir(), &human, io.Discard); exit != 0 {
+		t.Fatalf("help exit = %d", exit)
+	}
+	var machine bytes.Buffer
+	if exit := Run([]string{"--help", "--json"}, t.TempDir(), &machine, io.Discard); exit != 0 {
+		t.Fatalf("help --json exit = %d", exit)
+	}
+	var document struct {
+		Commands map[string]string `json:"commands"`
+	}
+	if err := json.Unmarshal(machine.Bytes(), &document); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range commands {
+		if !strings.Contains(human.String(), entry.Name) {
+			t.Errorf("%q is missing from the human help", entry.Name)
+		}
+		if _, ok := document.Commands[entry.Name]; !ok {
+			t.Errorf("%q is missing from the JSON help", entry.Name)
+		}
+	}
+	if len(document.Commands) != len(commands) {
+		t.Errorf("JSON help lists %d commands, the table has %d", len(document.Commands), len(commands))
 	}
 }

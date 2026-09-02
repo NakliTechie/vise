@@ -26,6 +26,13 @@ whether it agrees with the manifest, whether the environment drifted, whether a
 rerun is refused, and exactly one `next.action`. Read it before you touch
 anything.
 
+`vise doctor` also exists and is safe to run: it is read-only, always exits 0,
+and reports what an operator should fix before an agent works here. If it
+raises findings, name them in your final message. They are not yours to fix —
+they are changes to the harness, and the rules below say why that is not your
+job — but an operator reading "the toolchain is unfingerprinted" alongside your
+report has the missing half of the story.
+
 ## The loop
 
 ```sh

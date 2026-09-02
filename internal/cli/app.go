@@ -115,6 +115,16 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 		return runVerify(args[1:], root, jsonMode, true, stdout, stderr)
 	case "run":
 		return runProbe(args[1:], root, jsonMode, stdout, stderr)
+	case "doctor":
+		if len(args) != 1 {
+			return renderSimpleError("doctor", "doctor accepts no positional arguments", jsonMode, stdout, stderr)
+		}
+		report := vise.Doctor(root)
+		if jsonMode {
+			return writeJSON(stdout, report)
+		}
+		renderDoctor(stdout, report)
+		return vise.ExitOK
 	case "status":
 		if len(args) != 1 {
 			return renderSimpleError("status", "status accepts no positional arguments", jsonMode, stdout, stderr)
@@ -466,20 +476,11 @@ func toolIdentity() *vise.StatusTool {
 }
 
 func printHelp(w io.Writer) {
-	fmt.Fprint(w, `vise — deterministic behavior locks for agent-led refactoring
-
-Usage:
-  vise <command> [options]
-
-Commands:
-  init                 Write a stub vise.toml and local-state ignores
-  record               Freeze deterministic behavior into vise.lock
-  verify [--probe ID]  Replay and diagnose behavior
-  gate [--probe ID]    Emit the bounded refactor-loop verdict
-  run <probe-id>       Execute one probe without judgment
-  status               Render the complete bounded situation
-  version              Print the vise version
-
+	fmt.Fprint(w, "vise — deterministic behavior locks for agent-led refactoring\n\nUsage:\n  vise <command> [options]\n\nCommands:\n")
+	for _, entry := range commands {
+		fmt.Fprintf(w, "  %-20s %s\n", entry.Invocation, entry.Summary)
+	}
+	fmt.Fprint(w, `
 Global options:
   --json               Replace human output with one JSON object
   --help               Show help without requiring a Git repository
@@ -488,19 +489,45 @@ Run 'vise <command> --help' for command-specific help.
 `)
 }
 
-// commandUsage is the one source for both renderings of help, so the JSON and
-// the human text cannot drift apart.
-var commandUsage = map[string]string{
-	"init":   "Usage: vise init [--json]\nWrites a commented starter manifest and local-state .gitignore entries.\n",
-	"record": "Usage: vise record [--allow-dirty] [--i-reviewed-the-diff] [--preview | --accept DIGEST] [--json]\nRuns two full suite passes and atomically writes the behavior baseline.\n--preview shows the candidate diff and digest without writing; --accept writes only that candidate.\n",
-	"verify": "Usage: vise verify [--probe ID] [--json]\nReplays all probes or one judged probe against vise.lock.\n",
-	"gate":   "Usage: vise gate [--probe ID] [--quiet] [--json]\nRuns verification and emits the refactor-loop verdict.\n",
-	"run":    "Usage: vise run <probe-id> [--json]\nExecutes a probe raw without reading or changing vise.lock.\n",
-	"status": "Usage: vise status [--json]\nReports manifest, lock, fingerprint, proposals, and the last five journal events.\n",
+// commands is the one source for every rendering of help: the top-level list,
+// the per-command usage, and the JSON document. The top-level list used to be
+// a separate hardcoded string, which is how a command surface and its
+// documentation drift apart one addition at a time.
+var commands = []struct {
+	Name       string
+	Invocation string
+	Summary    string
+	Usage      string
+}{
+	{"init", "init", "Write a stub vise.toml and local-state ignores",
+		"Usage: vise init [--json]\nWrites a commented starter manifest, the agent contract, and local-state .gitignore entries.\n"},
+	{"record", "record", "Freeze deterministic behavior into vise.lock",
+		"Usage: vise record [--allow-dirty] [--i-reviewed-the-diff] [--preview | --accept DIGEST] [--json]\nRuns two full suite passes and atomically writes the behavior baseline.\n--preview shows the candidate diff and digest without writing; --accept writes only that candidate.\n"},
+	{"verify", "verify [--probe ID]", "Replay and diagnose behavior",
+		"Usage: vise verify [--probe ID] [--json]\nReplays all probes or one judged probe against vise.lock.\n"},
+	{"gate", "gate [--probe ID]", "Emit the bounded refactor-loop verdict",
+		"Usage: vise gate [--probe ID] [--quiet] [--json]\nRuns verification and emits the refactor-loop verdict.\n"},
+	{"run", "run <probe-id>", "Execute one probe without judgment",
+		"Usage: vise run <probe-id> [--json]\nExecutes a probe raw without reading or changing vise.lock.\n"},
+	{"status", "status", "Render the complete bounded situation",
+		"Usage: vise status [--json]\nReports manifest, lock, fingerprint, proposals, and the last five journal events.\n"},
+	{"doctor", "doctor", "Check the repository is fit to hand to an agent",
+		"Usage: vise doctor [--json]\nReports what an operator should fix before an agent works here: an unfingerprinted toolchain, a probe that names a path outside the checkout, a script a probe runs without declaring, an uncommitted baseline, unignored local state, a missing agent contract.\nRuns no probe, writes nothing, and always exits 0.\n"},
+	{"version", "version", "Print the vise version",
+		"Usage: vise version [--json]\nPrints the version, and with --json the build revision and whether the tree was modified.\n"},
+}
+
+func commandUsageFor(name string) (string, bool) {
+	for _, entry := range commands {
+		if entry.Name == name {
+			return entry.Usage, true
+		}
+	}
+	return "", false
 }
 
 func printCommandHelp(w io.Writer, command string) {
-	if help, ok := commandUsage[command]; ok {
+	if help, ok := commandUsageFor(command); ok {
 		fmt.Fprint(w, help)
 		return
 	}
@@ -516,16 +543,16 @@ func helpDocument(command string) map[string]any {
 		"exit": 0,
 		"next": vise.Next{Action: "proceed", Detail: "help reported"},
 	}
-	if usage, ok := commandUsage[command]; ok {
+	if usage, ok := commandUsageFor(command); ok {
 		document["command"] = command
 		document["usage"] = strings.TrimSpace(usage)
 		return document
 	}
-	commands := make(map[string]string, len(commandUsage))
-	for name, usage := range commandUsage {
-		commands[name] = strings.TrimSpace(usage)
+	listed := make(map[string]string, len(commands))
+	for _, entry := range commands {
+		listed[entry.Name] = strings.TrimSpace(entry.Usage)
 	}
-	document["commands"] = commands
+	document["commands"] = listed
 	document["global_options"] = map[string]string{
 		"--json": "Replace human output with one JSON object",
 		"--help": "Show help without requiring a Git repository",

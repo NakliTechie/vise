@@ -148,3 +148,19 @@ func terminalSafe(value string, allowNewline bool) string {
 	}
 	return b.String()
 }
+
+// renderDoctor prints the operator's readiness check. Bounded like every
+// other rendering: one line per finding, its remedy beneath it, and nothing
+// that grows with the size of the repository.
+func renderDoctor(w io.Writer, report vise.DoctorReport) {
+	if report.Ready {
+		fmt.Fprintln(w, "DOCTOR READY — nothing to fix before an agent works here")
+	} else {
+		fmt.Fprintf(w, "DOCTOR — %d finding(s)\n", len(report.Findings))
+	}
+	for _, finding := range report.Findings {
+		fmt.Fprintf(w, "%s — %s\n", finding.Check, finding.Detail)
+		fmt.Fprintf(w, "  fix: %s\n", finding.Remedy)
+	}
+	fmt.Fprintf(w, "next: %s — %s\n", report.Next.Action, report.Next.Detail)
+}
