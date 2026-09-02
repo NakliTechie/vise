@@ -3,6 +3,7 @@ package vise
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -194,5 +195,35 @@ func TestDoctorDoesNotAskForTheCodeUnderTestToBeDeclared(t *testing.T) {
 	}
 	if !report.Ready {
 		t.Fatalf("doctor found %v", doctorChecks(report))
+	}
+}
+
+// A finding's check is a stable identifier a script can act on without reading
+// prose, so the set is part of the contract and SPEC names it.
+func TestDoctorFindingsUseStableCheckNames(t *testing.T) {
+	known := []string{"env-fingerprint", "portable-paths", "declared-inputs", "baseline-committed", "local-state-ignored", "agent-contract", "manifest"}
+
+	// A repository with a broken manifest, and one with every other gap open.
+	broken := testGitRepo(t)
+	writeTestFile(t, broken, "vise.toml", "not = [valid\n")
+	bare := testGitRepo(t)
+	writeTestFile(t, bare, ".gitignore", "node_modules/\n")
+	writeTestFile(t, bare, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\nenv = { CACHE = \"/opt/elsewhere\" }\n")
+
+	seen := map[string]bool{}
+	for _, root := range []string{broken, bare} {
+		report := Doctor(root)
+		if len(report.Findings) == 0 {
+			t.Fatalf("no findings for %s", root)
+		}
+		for _, finding := range report.Findings {
+			if !slices.Contains(known, finding.Check) {
+				t.Errorf("check %q is not one of the names SPEC documents: %v", finding.Check, known)
+			}
+			seen[finding.Check] = true
+		}
+	}
+	if !seen["manifest"] {
+		t.Error("a manifest that will not parse produced no manifest finding")
 	}
 }
