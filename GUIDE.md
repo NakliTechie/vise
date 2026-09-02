@@ -480,7 +480,12 @@ up front — an agent that has been told commits are the loop will otherwise sto
 and ask when it cannot make one.
 
 **One agent, one worktree.** Give each agent its own `git worktree` and do not
-commit into it while it is running. Mid-flight commits move the baseline under
+commit into it while it is running, and never point two agents at the same one.
+Both mistakes were made here. The second time, the agent caught it: the gate
+returned `probe modified tracked files`, a harness class it knew it could not
+have caused, and it refused to trust any timing taken under concurrent
+mutation. If you see that class and no agent edited a tracked file, look for a
+second writer before you look for a bug. Mid-flight commits move the baseline under
 the agent, which then reasons about a repository that no longer exists — an
 error worth naming because it was made here, and it cost a whole run.
 
