@@ -153,3 +153,33 @@ func TestReRecordingUnchangedBehaviorLeavesTheLockfileByteIdentical(t *testing.T
 		t.Fatalf("recorded_commit = %s, want HEAD %s", got, head)
 	}
 }
+
+// The fingerprint is the one value compared on every later run, and it was the
+// only recorded value that never got the two-pass check probes get. A command
+// that prints something different each time would be frozen once and then
+// never match, so every gate on every machine would report drift against a
+// toolchain that never moved.
+func TestRecordRefusesANonDeterministicFingerprint(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "counter.sh", "#!/bin/sh\ncount=0\nif test -f .count; then count=$(cat .count); fi\ncount=$((count+1))\nprintf '%s' \"$count\" > .count\nprintf 'tool v%s\\n' \"$count\"\n")
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n.count\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"sh counter.sh\"]\n[[probe]]\nid = \"stable\"\nrun = \"printf stable\"\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "manifest")
+
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := Record(root, manifest, manifestBytes, RecordOptions{})
+	if result.Outcome.Exit != ExitHarness {
+		t.Fatalf("exit = %d, want harness; outcome %#v", result.Outcome.Exit, result.Outcome)
+	}
+	failure := result.Outcome.Failures["fingerprint"]
+	if !strings.Contains(failure.Detail, "not deterministic") {
+		t.Fatalf("detail %q does not name the cause", failure.Detail)
+	}
+	if _, err := os.Stat(filepath.Join(root, "vise.lock")); err == nil {
+		t.Fatal("a baseline was written despite an unstable fingerprint")
+	}
+}

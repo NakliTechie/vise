@@ -63,7 +63,7 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		return result
 	}
 
-	fingerprint, err := CaptureFingerprint(root, manifest)
+	fingerprint, err := captureStableFingerprint(root, manifest)
 	if err != nil {
 		result.Outcome = harnessWithNext("record", "fingerprint", err.Error(), "fix_probe", "repair the environment fingerprint command, then rerun record")
 		return result
@@ -501,4 +501,32 @@ func observationsEqual(a, b ProbeLock) bool {
 		maps.Equal(a.Deps, b.Deps) &&
 		maps.Equal(a.Files, b.Files) &&
 		maps.Equal(a.FilesLarge, b.FilesLarge)
+}
+
+// captureStableFingerprint runs the environment fingerprint twice and refuses
+// a baseline whose fingerprint does not agree with itself.
+//
+// Probes get a two-pass self test at record; the fingerprint did not, and it
+// is the one value compared on every later run. A command that prints a
+// timestamp, a PID, or a path with a random component would be frozen once and
+// then never match again, so every gate on every machine would report
+// environment drift — an exit-2 the agent is told to stop and report, pointing
+// at a toolchain that never moved. Catching it here costs one extra run of a
+// command that is meant to print a version string.
+func captureStableFingerprint(root string, manifest Manifest) (Fingerprint, error) {
+	first, err := CaptureFingerprint(root, manifest)
+	if err != nil {
+		return Fingerprint{}, err
+	}
+	if len(manifest.Environment.Fingerprint) == 0 {
+		return first, nil
+	}
+	second, err := CaptureFingerprint(root, manifest)
+	if err != nil {
+		return Fingerprint{}, err
+	}
+	if mismatch := FingerprintMismatch(first, second); mismatch != "" {
+		return Fingerprint{}, fmt.Errorf("environment fingerprint is not deterministic: %s; a fingerprint command must print the same bytes every time, or every later run reports environment drift against a toolchain that never moved", mismatch)
+	}
+	return first, nil
 }
