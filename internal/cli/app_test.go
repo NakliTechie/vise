@@ -692,3 +692,25 @@ func TestRecordPreviewThenAcceptWritesOnlyTheReviewedCandidate(t *testing.T) {
 		t.Fatalf("empty accept: %d %s", exit, stderr)
 	}
 }
+
+func TestReviewDiffIsTerminalSafeAndVersionRejectsArguments(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf old")
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 0 {
+		t.Fatalf("record: %d %s", exit, stderr)
+	}
+	cliGit(t, root, "add", ".")
+	cliGit(t, root, "commit", "-qm", "baseline")
+	cliWrite(t, root, "probe.sh", "#!/bin/sh\nprintf '\\033[2Jnew'")
+	cliGit(t, root, "add", ".")
+	cliGit(t, root, "commit", "-qm", "escape")
+	_, stdout, _ := cliRun(t, root, "record", "--i-reviewed-the-diff")
+	if strings.ContainsRune(stdout, 0x1b) || !strings.Contains(stdout, `[2Jnew`) {
+		t.Fatalf("review diff reached the terminal raw: %q", stdout)
+	}
+	if exit, _, stderr := cliRun(t, root, "version", "extra"); exit != 2 || !strings.Contains(stderr, "no arguments") {
+		t.Fatalf("version extra: %d %s", exit, stderr)
+	}
+	if exit, stdout, _ := cliRun(t, root, "record", "--preview", "--allow-dirty"); exit != 0 || !strings.Contains(stdout, "no baseline state written") {
+		t.Fatalf("preview wording: %d %s", exit, stdout)
+	}
+}

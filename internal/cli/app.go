@@ -36,6 +36,7 @@ func stopProbeOnSignal() {
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-signals
+		vise.MarkInterrupted()
 		vise.KillActiveProbeGroup()
 		code := 128
 		if number, ok := sig.(syscall.Signal); ok {
@@ -52,6 +53,9 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 		return vise.ExitOK
 	}
 	if args[0] == "version" || args[0] == "--version" {
+		if len(args) != 1 {
+			return renderSimpleError("version", "version accepts no arguments", jsonMode, stdout, stderr)
+		}
 		if jsonMode {
 			return writeJSON(stdout, map[string]any{"v": 1, "cmd": "version", "exit": 0, "version": Version, "next": vise.Next{Action: "proceed", Detail: "version reported"}})
 		}
@@ -171,7 +175,7 @@ func runRecord(args []string, root string, jsonMode bool, stdout, stderr io.Writ
 	if *reviewed && !jsonMode {
 		opts.BeforeOverwrite = func(diff string) error {
 			fmt.Fprintln(stdout, "BEHAVIOR DIFF UNDER REVIEW")
-			fmt.Fprintln(stdout, diff)
+			fmt.Fprintln(stdout, terminalSafe(diff, true))
 			return nil
 		}
 	}
@@ -187,7 +191,7 @@ func runRecord(args []string, root string, jsonMode bool, stdout, stderr io.Writ
 		return writeOutcomeJSON(stdout, result.Outcome, extra)
 	}
 	if *preview && result.Outcome.Exit == vise.ExitOK {
-		fmt.Fprintln(stdout, "CANDIDATE BASELINE — nothing written")
+		fmt.Fprintln(stdout, "CANDIDATE BASELINE — no baseline state written (probes ran; declared artifacts were regenerated)")
 		if result.ReviewDiff != "" {
 			fmt.Fprintln(stdout, terminalSafe(result.ReviewDiff, true))
 		} else {

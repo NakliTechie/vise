@@ -443,3 +443,48 @@ func TestAppendJournalKeepsCompleteUnterminatedFinalRecord(t *testing.T) {
 		t.Fatalf("events=%#v err=%v", events, err)
 	}
 }
+
+func TestReadJournalFailsOnNewlineTerminatedMalformedFinalLine(t *testing.T) {
+	root := t.TempDir()
+	if err := AppendJournal(root, JournalEvent{Event: "gate", Commit: "c", Verdict: "green"}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, ".vise", "journal.jsonl")
+	if err := os.WriteFile(path, append(mustRead(t, path), []byte("{\"e\":\"ga\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadJournal(root, 5); err == nil {
+		t.Fatal("a newline-terminated malformed line is corruption and must fail")
+	}
+}
+
+func TestWriteGenerationSurvivesPruneFailure(t *testing.T) {
+	root := t.TempDir()
+	data := []byte("keep")
+	hash := HashBytes(data)
+	lock := Lockfile{V: 1, Probes: map[string]ProbeLock{"p": {RunHash: HashBytes([]byte("r")), Stdout: hash, Stderr: hash}}}
+	if err := WriteBlobs(root, map[string][]byte{HashBytes([]byte("orphan")): []byte("orphan")}); err != nil {
+		t.Fatal(err)
+	}
+	blobDir := filepath.Join(root, ".vise", "blobs")
+	if _, err := WriteGeneration(root, lock, map[string][]byte{hash: data}); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteBlobs(root, map[string][]byte{HashBytes([]byte("orphan2")): []byte("orphan2")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(blobDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(blobDir, 0o755)
+	// The lock is written and the generation succeeds even though the orphan
+	// cannot be pruned from a read-only directory.
+	lock.Probes["p"] = ProbeLock{RunHash: HashBytes([]byte("r2")), Stdout: hash, Stderr: hash}
+	if _, err := WriteGeneration(root, lock, map[string][]byte{hash: data}); err != nil {
+		t.Fatalf("generation failed on prune: %v", err)
+	}
+	got, _, err := LoadLockfile(root)
+	if err != nil || got.Probes["p"].RunHash != HashBytes([]byte("r2")) {
+		t.Fatalf("lock not written: %#v %v", got, err)
+	}
+}

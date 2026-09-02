@@ -11,7 +11,15 @@ import (
 // lets a signal delivered to vise stop the probe instead of orphaning it.
 var activeProbeGroup atomic.Int64
 
+// interrupted is set by the signal handler before it looks at the active
+// group, so a probe started in the same instant kills itself on registration
+// instead of outliving vise.
+var interrupted atomic.Bool
+
 func setActiveProbeGroup(pgid int) { activeProbeGroup.Store(int64(pgid)) }
+
+// MarkInterrupted records that vise is exiting on a signal.
+func MarkInterrupted() { interrupted.Store(true) }
 
 // KillActiveProbeGroup SIGKILLs the running probe's process group, if any.
 // Callers invoke it from a signal handler before exiting so an interrupted

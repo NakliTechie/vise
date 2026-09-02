@@ -67,6 +67,9 @@ const noNewlineMarker = "\\ No newline at end of file"
 // for input that ends in a newline; input that does not end in one gets the
 // marker line appended instead.
 func splitLines(data []byte) []string {
+	if len(data) == 0 {
+		return nil
+	}
 	lines := strings.Split(string(data), "\n")
 	if len(lines) > 1 && lines[len(lines)-1] == "" {
 		return lines[:len(lines)-1]
