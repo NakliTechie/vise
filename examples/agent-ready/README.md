@@ -12,7 +12,11 @@ handover test before giving an agent any work:
 vise doctor
 
 # 1. the operator's cold check — nothing from your shell
-env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/local/go/bin vise gate --quiet
+# Resolve the tools before clearing the environment: `env -i` throws away the
+# PATH that found them, and a cold check that dies with "vise: not found" has
+# told you nothing about your gate.
+VISE_BIN=$(command -v vise) GO_DIR=$(dirname -- "$(command -v go)")
+env -i HOME="$HOME" PATH="$GO_DIR:/usr/bin:/bin" "$VISE_BIN" gate --quiet
 
 # 2. the agent's check — one turn, before any task
 #    "Run `vise gate --json` and report the exit code and verdict. Change nothing."

@@ -330,7 +330,7 @@ func TestInitStatusAndEmptyManifestRecordRemedy(t *testing.T) {
 	if err != nil || !strings.Contains(string(data), ".vise/journal.jsonl") {
 		t.Fatalf("gitignore: %v %q", err, data)
 	}
-	if exit, stdout, stderr := cliRun(t, root, "status"); exit != 0 || !strings.Contains(stdout, "UNRECORDED") || !strings.Contains(stdout, "declare at least one probe") || strings.Contains(stdout, "run vise init") || stderr != "" {
+	if exit, stdout, stderr := cliRun(t, root, "status"); exit != 0 || !strings.Contains(stdout, "UNRECORDED") || !strings.Contains(stdout, "an operator declares a probe") || strings.Contains(stdout, "run vise init") || stderr != "" {
 		t.Fatalf("status: %d %q %q", exit, stdout, stderr)
 	}
 	if exit, _, stderr := cliRun(t, root, "record"); exit != 2 || !strings.Contains(stderr, "at least one") || !strings.Contains(stderr, "0/0") {
@@ -540,7 +540,9 @@ func TestEmptyManifestNeverGatesGreen(t *testing.T) {
 	if exit != 2 || value["verdict"] == "green" || value["next"].(map[string]any)["action"] != "fix_probe" {
 		t.Fatalf("empty manifest gate: exit=%d value=%#v", exit, value)
 	}
-	if exit, stdout, _ := cliRun(t, root, "status", "--json"); exit != 0 || strings.Contains(stdout, `"state":"ready"`) || !strings.Contains(stdout, `"action":"fix_probe"`) {
+	// status routes to human, not fix_probe: the repair is in vise.toml,
+	// which the agent contract forbids the agent from writing.
+	if exit, stdout, _ := cliRun(t, root, "status", "--json"); exit != 0 || strings.Contains(stdout, `"state":"ready"`) || !strings.Contains(stdout, `"action":"human"`) {
 		t.Fatalf("empty manifest status must not say ready: %d %s", exit, stdout)
 	}
 }

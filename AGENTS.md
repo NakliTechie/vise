@@ -13,6 +13,7 @@ code, not the tests alone, not your confidence.
 ```sh
 vise version --json     # which build am I talking to?
 vise status --json      # what is the situation?
+vise gate --json        # is it green before I touch anything?
 ```
 
 `status --json` carries a `tool` object (version, revision, modified), so one
@@ -21,17 +22,16 @@ read tells you both the situation and which binary is reporting it. `version
 tell two builds apart, so check the revision whenever the tool behaves oddly,
 and always when a lockfile will not parse.
 
-`status` always exits 0 and reports the whole situation: whether a baseline exists,
-whether it agrees with the manifest, whether the environment drifted, whether a
-rerun is refused, and exactly one `next.action`. Read it before you touch
-anything.
+`status` always exits 0 and reports the whole situation: whether a baseline
+exists, whether it agrees with the manifest, whether the environment drifted,
+whether a rerun is refused, and exactly one `next.action`. Read it before you
+touch anything.
 
-`vise doctor` also exists and is safe to run: it is read-only, always exits 0,
-and reports what an operator should fix before an agent works here. If it
-raises findings, name them in your final message. They are not yours to fix —
-they are changes to the harness, and the rules below say why that is not your
-job — but an operator reading "the toolchain is unfingerprinted" alongside your
-report has the missing half of the story.
+**Then gate once, before your first edit.** `status` reads state; it does not
+run a probe, so it cannot tell you whether the suite passes right now. Without
+that first verdict you cannot tell a failure you caused from one that was
+waiting for you, and the two have opposite responses: fix your change, or stop
+and report a blocked repository. It costs one run.
 
 ## The loop
 
@@ -56,6 +56,13 @@ mention in your final report, not a reason to stop. Gate before each step
 regardless; the verdict is what matters, the commit is bookkeeping.
 
 ## Branch on the exit code, never on the prose
+
+**This table is for `gate` and `verify`.** They are the commands that judge a
+change, and their exit code is the verdict. `status`, `doctor`, `version`, and
+`help` always exit 0 whatever they find — they report a situation rather than
+judging one — so for those, read `next.action` and ignore the exit code. An
+agent that treats exit 0 as "all is well" will walk straight past a `status`
+that just told it there is no baseline.
 
 | exit | verdict | meaning | what you do |
 |---|---|---|---|
@@ -84,6 +91,14 @@ leave the baseline alone.
 
 The message names the cause. The response is always to restore the harness,
 never to edit the code under test so the gate passes.
+
+Two harnesses, and only one of them is yours. A probe command your change broke
+is yours to fix. `vise.toml`, `vise.lock`, `.vise/blobs/`, and the journal are
+not, and the rules below forbid you from writing them — so when the repair is
+in one of those, the tool says `next.action: human` rather than `fix_probe`,
+and your move is to stop and report. You should never be in a position where
+obeying `next.action` means breaking a rule; if you ever are, that is a defect
+in vise and worth saying so.
 
 | message | cause | your move |
 |---|---|---|

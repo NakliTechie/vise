@@ -14,8 +14,9 @@ vise status          # where am I? (always exit 0)
 vise init            # once: write a starter vise.toml
 <declare probes, commit>
 vise record          # freeze behavior into vise.lock (+ .vise/blobs/), commit both
-<refactor one thing, commit>
+<refactor one thing>
 vise gate --quiet    # GREEN → next step · RED → revert · INDETERMINATE → stop and read
+<commit, only when green>
 ```
 
 `gate` is the only command the refactoring agent needs in its loop. `verify` explains a red gate, `run` shows one probe raw, `status` shows the whole situation. `record` and the manifest are the operator's.
@@ -470,7 +471,11 @@ test for "this repository is ready for an agent" is one command, run from an
 environment stripped of everything your shell happens to carry:
 
 ```sh
-env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/local/go/bin vise gate --quiet
+# Resolve the tools before clearing the environment: `env -i` throws away the
+# PATH that found them, and a cold check that dies with "vise: not found" has
+# told you nothing about your gate.
+VISE_BIN=$(command -v vise) GO_DIR=$(dirname -- "$(command -v go)")
+env -i HOME="$HOME" PATH="$GO_DIR:/usr/bin:/bin" "$VISE_BIN" gate --quiet
 ```
 
 Green means the gate depends on nothing your shell was providing. Anything else

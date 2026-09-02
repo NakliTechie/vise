@@ -36,7 +36,9 @@ type StatusLock struct {
 type StatusTool struct {
 	Version  string `json:"version"`
 	Revision string `json:"revision,omitempty"`
-	Modified bool   `json:"modified,omitempty"`
+	// Always present, never omitted: an agent checking whether the tool was
+	// built from a dirty tree must be able to tell false from absent.
+	Modified bool `json:"modified"`
 }
 
 type StatusReport struct {
@@ -78,12 +80,17 @@ func buildProposalsStatus(root string, report *StatusReport) {
 	}
 }
 
+// Every next action below is human, not fix_probe. The agent contract forbids
+// an agent from writing vise.toml, vise.lock, the blobs, or the journal, so
+// telling it to repair one of them offered a choice between disobeying the
+// rules and disobeying the tool. fix_probe stays for the harness an agent may
+// touch: a probe command its own change broke.
 func buildJournalStatus(root string, report *StatusReport) {
 	journal, err := ReadJournal(root, 5)
 	if err != nil {
 		report.State = "harness-error"
 		report.JournalUnreadable = true
-		report.Next = Next{Action: NextFixProbe, Detail: "repair the local journal"}
+		report.Next = Next{Action: NextHuman, Detail: "repair the local journal (.vise/journal.jsonl); an agent may not write it"}
 	} else {
 		report.Journal = journal
 	}
@@ -134,7 +141,7 @@ func buildLockfilePresenceAndValidity(root string, report *StatusReport) (Lockfi
 	}
 	report.Lock = StatusLock{Present: true, Valid: false, Error: err.Error()}
 	report.State = "harness-error"
-	report.Next = Next{Action: NextFixProbe, Detail: "restore a valid vise.lock, then rerun status"}
+	report.Next = Next{Action: NextHuman, Detail: "restore a valid vise.lock; an agent may not write it"}
 	return Lockfile{}, nil, false
 }
 
@@ -189,7 +196,7 @@ func buildTamperHash(root string, manifestBytes, lockBytes []byte, report *Statu
 	}
 	report.State = "harness-error"
 	report.Lock.Error = err.Error()
-	report.Next = Next{Action: NextFixProbe, Detail: "restore a valid vise.lock and referenced blobs"}
+	report.Next = Next{Action: NextHuman, Detail: "restore a valid vise.lock and referenced blobs; an agent may not write them"}
 	return false
 }
 
@@ -216,7 +223,7 @@ func buildEmptyManifestRefusal(manifest Manifest, report *StatusReport) {
 		// A lock beside a manifest with no probes judges nothing; gate
 		// refuses it, so status must not promise proceed.
 		report.State = "harness-error"
-		report.Next = Next{Action: NextFixProbe, Detail: "manifest declares no [[probe]]; declare at least one probe in vise.toml and record a baseline"}
+		report.Next = Next{Action: NextHuman, Detail: "manifest declares no [[probe]]; an operator declares one in vise.toml and records a baseline"}
 	}
 }
 
@@ -228,13 +235,13 @@ func buildManifestStatus(root string, report *StatusReport) (Manifest, []byte, e
 		} else {
 			report.Manifest = StatusManifest{Present: true, Valid: false, Error: manifestErr.Error()}
 			report.State = "harness-error"
-			report.Next = Next{Action: NextFixProbe, Detail: "repair vise.toml, then rerun status"}
+			report.Next = Next{Action: NextHuman, Detail: "repair vise.toml; an agent may not write it"}
 		}
 	} else {
 		report.Manifest = StatusManifest{Present: true, Valid: true, Probes: len(manifest.Probes), Metrics: len(manifest.Metrics)}
 		report.State = "unrecorded"
 		if len(manifest.Probes) == 0 {
-			report.Next = Next{Action: NextFixProbe, Detail: "declare at least one probe in vise.toml, commit the harness, then run vise record"}
+			report.Next = Next{Action: NextHuman, Detail: "an operator declares a probe in vise.toml, commits the harness, and runs vise record"}
 		} else {
 			report.Next = Next{Action: NextRecordFirst, Detail: "commit the harness, then run vise record"}
 		}

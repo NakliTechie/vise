@@ -205,7 +205,7 @@ A probe's judgment depends on more than the manifest entry: fixtures, normalizer
 
 ## 7. Harness integration (spec-level)
 
-- **The canonical loop:** operator `record` once → per micro-step: transform → commit → `vise gate --json` → branch on `next.action` (`proceed` · `revert` + journal the dead end · `fix_probe` — repair harness, never code · `quarantine_ack` — continue only if the harness policy tolerates indeterminate, else stop · `human` — park). One transform type per commit; the gate runs between every commit.
+- **The canonical loop:** operator `record` once → per micro-step: transform → `vise gate --json` → branch on `next.action` → commit only when green (`proceed` · `revert` + journal the dead end · `fix_probe` — repair harness, never code · `quarantine_ack` — continue only if the harness policy tolerates indeterminate, else stop · `human` — park). One transform type per commit; the gate runs between every commit.
 - **ntkit:** `/autopilot-nt` refactor runs use `vise gate` as the per-item verifier and `vise status` in the morning report; `/lab-nt` campaigns hill-climb a metric probe with "gate stays green" as the fence. (Parked until dogfood.)
 - **CI:** `vise gate --quiet` as a required check; recompute the `lock:` hash from the trusted branch as the tamper tripwire (§5).
 - **Operator-only enforcement:** a PreToolUse hook / permission rule denying the agent `vise record` and writes to `vise.toml` / `vise.lock` / `.vise/blobs/` / `.vise/journal.jsonl` (the last one guards the rerun limit, §4.1).

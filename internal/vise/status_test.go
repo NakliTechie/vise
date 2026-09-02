@@ -50,7 +50,7 @@ func TestStatusReportsBaselineDriftWithoutRunningProbes(t *testing.T) {
 	report = BuildStatus(root)
 	// With no probes declared, gate refuses before judging, so status reports
 	// harness-error while still listing the drift that explains it.
-	if report.State != "harness-error" || report.Next.Action != "fix_probe" || !strings.Contains(strings.Join(report.Lock.Drift, "\n"), "stable: probe exists in vise.lock but not vise.toml") {
+	if report.State != "harness-error" || report.Next.Action != NextHuman || !strings.Contains(strings.Join(report.Lock.Drift, "\n"), "stable: probe exists in vise.lock but not vise.toml") {
 		t.Fatalf("empty-manifest status = %#v", report)
 	}
 }
