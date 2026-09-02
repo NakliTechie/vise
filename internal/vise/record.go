@@ -22,8 +22,6 @@ type RecordOptions struct {
 
 type RecordResult struct {
 	Outcome    Outcome
-	Lockfile   Lockfile
-	LockBytes  []byte
 	ReviewDiff string
 	// Candidate is the digest of the lockfile these passes would write.
 	Candidate string
@@ -172,7 +170,6 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		return result
 	}
 	result.Candidate = HashBytes(candidateBytes)
-	result.Lockfile = lock
 	if hasOld {
 		result.ReviewDiff = LockfileDiff(root, oldLock, lock, blobs)
 	}
@@ -207,15 +204,11 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 	counts := Counts{Declared: declared, Pass: declared}
 	if err := AppendJournal(root, JournalEvent{Event: "record", Commit: commit, Dirty: dirty, Counts: &counts, Lock: lockHash}); err != nil {
 		result.Outcome = harnessOnly("record", "journal", "baseline was written but journal append failed: "+err.Error())
-		result.Lockfile = lock
-		result.LockBytes = lockBytes
 		return result
 	}
 
 	result.Outcome.Lock = lockHash
 	result.Outcome.Finalize()
-	result.Lockfile = lock
-	result.LockBytes = lockBytes
 	return result
 }
 
