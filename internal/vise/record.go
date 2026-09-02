@@ -9,8 +9,14 @@ import (
 )
 
 type RecordOptions struct {
-	AllowDirty      bool
-	ReviewedDiff    bool
+	AllowDirty   bool
+	ReviewedDiff bool
+	// Preview runs both passes, builds the candidate lockfile, and returns
+	// its review diff and digest without writing anything.
+	Preview bool
+	// Accept writes the candidate only if its digest equals this value, so
+	// what gets frozen is exactly what a preview showed.
+	Accept          string
 	BeforeOverwrite func(string) error
 }
 
@@ -19,6 +25,8 @@ type RecordResult struct {
 	Lockfile   Lockfile
 	LockBytes  []byte
 	ReviewDiff string
+	// Candidate is the digest of the lockfile these passes would write.
+	Candidate string
 }
 
 func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOptions) RecordResult {
@@ -46,8 +54,8 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		result.Outcome = harnessOnly("record", "vise.lock", oldErr.Error())
 		return result
 	}
-	if hasOld && !opts.ReviewedDiff {
-		result.Outcome = harnessWithNext("record", "operator-review", "vise.lock already exists; review the behavior diff and rerun with --i-reviewed-the-diff", "human", "review the behavior diff, then rerun record with --i-reviewed-the-diff")
+	if hasOld && !opts.ReviewedDiff && !opts.Preview && opts.Accept == "" {
+		result.Outcome = harnessWithNext("record", "operator-review", "vise.lock already exists; preview the behavior diff with --preview and accept its digest with --accept, or rerun with --i-reviewed-the-diff", "human", "run record --preview, review the diff, then record --accept <digest>; or rerun with --i-reviewed-the-diff to review and write in one step")
 		return result
 	}
 
@@ -158,17 +166,31 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		lock.Metrics = nil
 	}
 
+	candidateBytes, err := CanonicalJSON(lock)
+	if err != nil {
+		result.Outcome = harnessOnly("record", "persistence", err.Error())
+		return result
+	}
+	result.Candidate = HashBytes(candidateBytes)
+	result.Lockfile = lock
 	if hasOld {
-		if err := WriteBlobs(root, blobs); err != nil {
-			result.Outcome = harnessOnly("record", "persistence", err.Error())
+		result.ReviewDiff = LockfileDiff(root, oldLock, lock, blobs)
+	}
+	if opts.Preview {
+		// Nothing is written: no blobs, no lock, no journal event.
+		result.Outcome.Counts.Pass = result.Outcome.Counts.Declared
+		result.Outcome.Finalize()
+		result.Outcome.Next = Next{Action: "human", Detail: "review the diff, then freeze it with record --accept " + result.Candidate}
+		return result
+	}
+	if opts.Accept != "" && opts.Accept != result.Candidate {
+		result.Outcome = harnessWithNext("record", "operator-review", "candidate "+result.Candidate+" differs from the accepted "+opts.Accept+"; the tree or environment changed since the preview", "human", "rerun record --preview and review the new diff")
+		return result
+	}
+	if hasOld && opts.BeforeOverwrite != nil {
+		if err := opts.BeforeOverwrite(result.ReviewDiff); err != nil {
+			result.Outcome = harnessOnly("record", "operator-review", err.Error())
 			return result
-		}
-		result.ReviewDiff = LockfileDiff(root, oldLock, lock)
-		if opts.BeforeOverwrite != nil {
-			if err := opts.BeforeOverwrite(result.ReviewDiff); err != nil {
-				result.Outcome = harnessOnly("record", "operator-review", err.Error())
-				return result
-			}
 		}
 	}
 	lockBytes, err := WriteGeneration(root, lock, blobs)
@@ -222,7 +244,9 @@ func harnessWithNext(cmd, id, detail, action, nextDetail string) Outcome {
 	return outcome
 }
 
-func LockfileDiff(root string, oldLock, newLock Lockfile) string {
+// LockfileDiff explains old versus new. newBlobs carries the new side's bytes
+// when they are not on disk yet (a preview); the old side reads the store.
+func LockfileDiff(root string, oldLock, newLock Lockfile, newBlobs map[string][]byte) string {
 	var b strings.Builder
 	ids := make(map[string]bool)
 	for id := range oldLock.Probes {
@@ -260,8 +284,8 @@ func LockfileDiff(root string, oldLock, newLock Lockfile) string {
 					fmt.Fprintf(&b, "%s dep %s: %s -> %s\n", id, path, hashOrNone(oldProbe.Deps[path]), hashOrNone(newProbe.Deps[path]))
 				}
 			}
-			appendBlobDiff(&b, root, id+"/stdout", oldProbe.Stdout, oldProbe.StdoutLarge, newProbe.Stdout, newProbe.StdoutLarge)
-			appendBlobDiff(&b, root, id+"/stderr", oldProbe.Stderr, oldProbe.StderrLarge, newProbe.Stderr, newProbe.StderrLarge)
+			appendBlobDiff(&b, root, newBlobs, id+"/stdout", oldProbe.Stdout, oldProbe.StdoutLarge, newProbe.Stdout, newProbe.StdoutLarge)
+			appendBlobDiff(&b, root, newBlobs, id+"/stderr", oldProbe.Stderr, oldProbe.StderrLarge, newProbe.Stderr, newProbe.StderrLarge)
 			paths := make(map[string]bool)
 			for path := range oldProbe.Files {
 				paths[path] = true
@@ -270,7 +294,7 @@ func LockfileDiff(root string, oldLock, newLock Lockfile) string {
 				paths[path] = true
 			}
 			for _, path := range sortedKeys(paths) {
-				appendBlobDiff(&b, root, id+"/"+path, oldProbe.Files[path], oldProbe.FilesLarge[path], newProbe.Files[path], newProbe.FilesLarge[path])
+				appendBlobDiff(&b, root, newBlobs, id+"/"+path, oldProbe.Files[path], oldProbe.FilesLarge[path], newProbe.Files[path], newProbe.FilesLarge[path])
 			}
 		}
 	}
@@ -307,12 +331,15 @@ func LockfileDiff(root string, oldLock, newLock Lockfile) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-func appendBlobDiff(b *strings.Builder, root, label, oldHash string, oldLarge bool, newHash string, newLarge bool) {
+func appendBlobDiff(b *strings.Builder, root string, newBlobs map[string][]byte, label, oldHash string, oldLarge bool, newHash string, newLarge bool) {
 	if oldHash == newHash && oldLarge == newLarge {
 		return
 	}
 	oldData, oldAvailable, _ := BlobData(root, oldHash, oldLarge)
-	newData, newAvailable, _ := BlobData(root, newHash, newLarge)
+	newData, newAvailable := newBlobs[newHash]
+	if !newAvailable {
+		newData, newAvailable, _ = BlobData(root, newHash, newLarge)
+	}
 	if oldAvailable && newAvailable {
 		fmt.Fprintln(b, FirstDiff(label, oldData, newData))
 		return

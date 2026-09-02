@@ -143,6 +143,8 @@ func runRecord(args []string, root string, jsonMode bool, stdout, stderr io.Writ
 	fs.SetOutput(io.Discard)
 	allowDirty := fs.Bool("allow-dirty", false, "allow recording a dirty work tree")
 	reviewed := fs.Bool("i-reviewed-the-diff", false, "accept overwriting the current lockfile")
+	preview := fs.Bool("preview", false, "run the passes and show the candidate diff and digest without writing")
+	accept := fs.String("accept", "", "write the candidate only if its digest equals this value")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		if err == nil {
 			err = fmt.Errorf("record accepts no positional arguments")
@@ -153,7 +155,19 @@ func runRecord(args []string, root string, jsonMode bool, stdout, stderr io.Writ
 	if err != nil {
 		return renderSimpleError("record", err.Error(), jsonMode, stdout, stderr)
 	}
-	opts := vise.RecordOptions{AllowDirty: *allowDirty, ReviewedDiff: *reviewed}
+	if *preview && *accept != "" {
+		return renderSimpleError("record", "--preview and --accept are mutually exclusive", jsonMode, stdout, stderr)
+	}
+	acceptSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "accept" {
+			acceptSet = true
+		}
+	})
+	if acceptSet && *accept == "" {
+		return renderSimpleError("record", "--accept needs the candidate digest printed by --preview", jsonMode, stdout, stderr)
+	}
+	opts := vise.RecordOptions{AllowDirty: *allowDirty, ReviewedDiff: *reviewed, Preview: *preview, Accept: *accept}
 	if *reviewed && !jsonMode {
 		opts.BeforeOverwrite = func(diff string) error {
 			fmt.Fprintln(stdout, "BEHAVIOR DIFF UNDER REVIEW")
@@ -167,7 +181,21 @@ func runRecord(args []string, root string, jsonMode bool, stdout, stderr io.Writ
 		if result.ReviewDiff != "" {
 			extra["review_diff"] = result.ReviewDiff
 		}
+		if result.Candidate != "" {
+			extra["candidate"] = result.Candidate
+		}
 		return writeOutcomeJSON(stdout, result.Outcome, extra)
+	}
+	if *preview && result.Outcome.Exit == vise.ExitOK {
+		fmt.Fprintln(stdout, "CANDIDATE BASELINE — nothing written")
+		if result.ReviewDiff != "" {
+			fmt.Fprintln(stdout, terminalSafe(result.ReviewDiff, true))
+		} else {
+			fmt.Fprintln(stdout, "No lockfile yet; the candidate is a fresh baseline.")
+		}
+		fmt.Fprintln(stdout, "candidate: "+result.Candidate)
+		fmt.Fprintf(stdout, "next: %s — %s\n", result.Outcome.Next.Action, terminalSafe(result.Outcome.Next.Detail, false))
+		return vise.ExitOK
 	}
 	if result.Outcome.Exit == vise.ExitOK {
 		fmt.Fprintf(stdout, "RECORDED — %d probe(s) · %d metric(s)\n", len(manifest.Probes), len(manifest.Metrics))
@@ -366,7 +394,7 @@ Run 'vise <command> --help' for command-specific help.
 func printCommandHelp(w io.Writer, command string) {
 	text := map[string]string{
 		"init":   "Usage: vise init [--json]\nWrites a commented starter manifest and local-state .gitignore entries.\n",
-		"record": "Usage: vise record [--allow-dirty] [--i-reviewed-the-diff] [--json]\nRuns two full suite passes and atomically writes the behavior baseline.\n",
+		"record": "Usage: vise record [--allow-dirty] [--i-reviewed-the-diff] [--preview | --accept DIGEST] [--json]\nRuns two full suite passes and atomically writes the behavior baseline.\n--preview shows the candidate diff and digest without writing; --accept writes only that candidate.\n",
 		"verify": "Usage: vise verify [--probe ID] [--json]\nReplays all probes or one judged probe against vise.lock.\n",
 		"gate":   "Usage: vise gate [--probe ID] [--quiet] [--json]\nRuns verification and emits the refactor-loop verdict.\n",
 		"run":    "Usage: vise run <probe-id> [--json]\nExecutes a probe raw without reading or changing vise.lock.\n",

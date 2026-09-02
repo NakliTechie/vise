@@ -638,3 +638,57 @@ func cliReadFile(t *testing.T, root, rel string) []byte {
 	}
 	return data
 }
+
+func TestRecordPreviewThenAcceptWritesOnlyTheReviewedCandidate(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf stable")
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 0 {
+		t.Fatalf("record: %d %s", exit, stderr)
+	}
+	cliGit(t, root, "add", ".")
+	cliGit(t, root, "commit", "-qm", "baseline")
+	before := cliReadFile(t, root, "vise.lock")
+	cliWrite(t, root, "probe.sh", "#!/bin/sh\nprintf changed")
+	cliGit(t, root, "add", ".")
+	cliGit(t, root, "commit", "-qm", "intended change")
+
+	exit, stdout, _ := cliRun(t, root, "record", "--preview", "--json")
+	value := parseCLIJSON(t, stdout)
+	candidate, _ := value["candidate"].(string)
+	diff, _ := value["review_diff"].(string)
+	if exit != 0 || candidate == "" || !strings.Contains(diff, "-stable") || !strings.Contains(diff, "+changed") || value["next"].(map[string]any)["action"] != "human" {
+		t.Fatalf("preview: exit=%d value=%#v", exit, value)
+	}
+	if string(cliReadFile(t, root, "vise.lock")) != string(before) {
+		t.Fatal("preview wrote vise.lock")
+	}
+	if exit, stdout, _ := cliRun(t, root, "record", "--accept", "sha256:0000", "--json"); exit != 2 || !strings.Contains(stdout, "differs from the accepted") {
+		t.Fatalf("wrong digest: %d %s", exit, stdout)
+	}
+	if string(cliReadFile(t, root, "vise.lock")) != string(before) {
+		t.Fatal("a refused accept wrote vise.lock")
+	}
+	if exit, _, stderr := cliRun(t, root, "record", "--accept", candidate); exit != 0 {
+		t.Fatalf("accept: %d %s", exit, stderr)
+	}
+	if string(cliReadFile(t, root, "vise.lock")) == string(before) {
+		t.Fatal("accept did not write the candidate")
+	}
+	if exit, _, _ := cliRun(t, root, "gate", "--quiet"); exit != 0 {
+		t.Fatalf("gate after accept: %d", exit)
+	}
+	cliGit(t, root, "add", ".")
+	cliGit(t, root, "commit", "-qm", "accepted baseline")
+	// A plain record still needs a gesture, and the human preview writes nothing.
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 2 || !strings.Contains(stderr, "--preview") {
+		t.Fatalf("gesture: %d %s", exit, stderr)
+	}
+	if exit, stdout, _ := cliRun(t, root, "record", "--preview"); exit != 0 || !strings.Contains(stdout, "CANDIDATE BASELINE") || !strings.Contains(stdout, "candidate: sha256:") {
+		t.Fatalf("human preview: %d %s", exit, stdout)
+	}
+	if exit, _, stderr := cliRun(t, root, "record", "--preview", "--accept", candidate); exit != 2 || !strings.Contains(stderr, "mutually exclusive") {
+		t.Fatalf("exclusive flags: %d %s", exit, stderr)
+	}
+	if exit, _, stderr := cliRun(t, root, "record", "--accept", ""); exit != 2 || !strings.Contains(stderr, "needs the candidate digest") {
+		t.Fatalf("empty accept: %d %s", exit, stderr)
+	}
+}

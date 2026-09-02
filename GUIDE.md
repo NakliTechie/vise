@@ -171,7 +171,27 @@ Revert the change and the gate is green again. `verify --probe greet` judges one
 
 ## 5. Accepting a new baseline (operator)
 
-When the change was intended, the operator re-records. Overwriting an existing lock needs an explicit gesture, and the behavior diff is printed first:
+When the change was intended, the operator re-records. Overwriting an existing lock needs an explicit gesture. The two-phase form previews without writing and then accepts exactly what was previewed (this is the form for `--json` callers):
+
+```
+$ vise record --preview
+CANDIDATE BASELINE — nothing written
+--- expected/greet/stdout
++++ got/greet/stdout
+@@ first divergence line 1 @@
+-hello, vise
++hi, vise
+candidate: sha256:57da…
+next: human — review the diff, then freeze it with record --accept sha256:57da…
+[exit 0]
+
+$ vise record --accept sha256:57da…
+RECORDED — 2 probe(s) · 0 metric(s)
+lock: sha256:…
+[exit 0]
+```
+
+If the tree changed between preview and accept, the digest no longer matches and `accept` refuses (exit 2). The one-step form prints the diff and writes in one go:
 
 ```
 $ vise record

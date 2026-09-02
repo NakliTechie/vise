@@ -47,7 +47,7 @@ func TestLockfileDiffCoversFingerprintMetricsAndDeps(t *testing.T) {
 		Probes:      map[string]ProbeLock{"p": {Exit: 0, Stdout: stdout, Stderr: stdout, Deps: map[string]string{"fixture.txt": "sha256:bbbb"}}},
 		Metrics:     map[string]MetricLock{"complexity": {Value: 12, ToolVersion: "v2"}, "added": {Value: 3}},
 	}
-	diff := LockfileDiff(root, old, updated)
+	diff := LockfileDiff(root, old, updated, nil)
 	for _, want := range []string{
 		"p dep fixture.txt: sha256:aaaa -> sha256:bbbb",
 		"fingerprint: manifest [stubs] differ from the recorded baseline",
@@ -60,7 +60,7 @@ func TestLockfileDiffCoversFingerprintMetricsAndDeps(t *testing.T) {
 			t.Fatalf("diff %q lacks %q", diff, want)
 		}
 	}
-	if diff := LockfileDiff(root, old, old); diff != "No recorded behavior changed." {
+	if diff := LockfileDiff(root, old, old, nil); diff != "No recorded behavior changed." {
 		t.Fatalf("unchanged diff = %q", diff)
 	}
 }

@@ -126,7 +126,7 @@ vise gate            # green → next step; red → revert, the diff says exactl
 | Command | Purpose |
 |---|---|
 | `vise init` | Write a starter manifest and local-state ignore rules; never overwrite. |
-| `vise record` | Run two full suite passes and atomically freeze deterministic behavior. |
+| `vise record [--preview | --accept DIGEST]` | Run two full suite passes and atomically freeze deterministic behavior; preview the candidate and accept its digest to overwrite safely. |
 | `vise verify [--probe ID]` | Replay and diagnose the full suite or one judged probe. |
 | `vise gate [--quiet]` | Emit the typed refactor-loop verdict and journal the event. |
 | `vise run <probe-id>` | Execute one probe raw without judgment or lockfile access. |
