@@ -222,3 +222,51 @@ func TestTheReviewDiffDescribesARemovedProbeAsFullyAsAnAddedOne(t *testing.T) {
 		}
 	}
 }
+
+// The review diff is what an operator reads before accepting a new baseline.
+// It reported only the first environment difference, so a baseline could be
+// accepted because one of three changes looked reasonable while the other two
+// were never shown. Found by a coding agent asked to report what looked wrong.
+func TestTheReviewDiffReportsEveryEnvironmentChange(t *testing.T) {
+	oldLock := Lockfile{V: LockVersion, Fingerprint: Fingerprint{
+		OS: "linux", Arch: "amd64",
+		Env: map[string]string{"go version": "go1.24.0", "jq --version": "jq-1.6"},
+	}}
+	newLock := Lockfile{V: LockVersion, Fingerprint: Fingerprint{
+		OS: "darwin", Arch: "arm64",
+		Env: map[string]string{"go version": "go1.25.8", "jq --version": "jq-1.7"},
+	}}
+
+	diff := LockfileDiff(t.TempDir(), oldLock, newLock, nil)
+	for _, expected := range []string{"platform", "go version", "jq --version"} {
+		if !strings.Contains(diff, expected) {
+			t.Errorf("the review diff never mentions %q:\n%s", expected, diff)
+		}
+	}
+}
+
+// A blob deliberately withheld (over the capture bound) and one that is
+// missing or fails its content hash rendered identically, so an operator could
+// not tell "too large to show you" from "the evidence is gone". The second is
+// a reason to stop reviewing and repair the baseline.
+func TestTheReviewDiffSaysWhenABlobCannotBeRead(t *testing.T) {
+	root := testGitRepo(t)
+	present := []byte("present")
+	hash := HashBytes(present)
+	missing := HashBytes([]byte("this blob was never written"))
+
+	oldLock := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{"p": {Stdout: missing, Stderr: hash}}}
+	newLock := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{"p": {Stdout: hash, Stderr: hash}}}
+
+	diff := LockfileDiff(root, oldLock, newLock, map[string][]byte{hash: present})
+	if !strings.Contains(diff, "blob unreadable") {
+		t.Fatalf("a missing blob rendered as an ordinary withheld one:\n%s", diff)
+	}
+
+	// A large blob is withheld on purpose and must not be reported as broken.
+	largeOld := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{"p": {Stdout: hash, StdoutLarge: true}}}
+	largeNew := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{"p": {Stdout: hash, StdoutLarge: false}}}
+	if diff := LockfileDiff(root, largeOld, largeNew, map[string][]byte{hash: present}); strings.Contains(diff, "unreadable") {
+		t.Fatalf("a deliberately withheld blob was reported as broken:\n%s", diff)
+	}
+}

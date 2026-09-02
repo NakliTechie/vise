@@ -147,6 +147,33 @@ func FingerprintEqual(a, b Fingerprint) bool {
 
 // FingerprintMismatch names the first way current differs from recorded, or
 // returns "" when the two fingerprints match.
+// FingerprintMismatches returns every way current differs from recorded.
+//
+// FingerprintMismatch names only the first, which is right where the output is
+// one line and the reader needs one cause to act on. It is wrong in the review
+// diff an operator reads before accepting a new baseline: if the platform and
+// two tool versions all moved, being shown one of them and told nothing about
+// the others is how a baseline gets accepted for a reason that was only a third
+// of the truth.
+func FingerprintMismatches(current, recorded Fingerprint) []string {
+	var all []string
+	if current.OS != recorded.OS || current.Arch != recorded.Arch {
+		all = append(all, fmt.Sprintf("platform %s/%s differs from the recorded %s/%s", current.OS, current.Arch, recorded.OS, recorded.Arch))
+	}
+	if current.Stubs != recorded.Stubs {
+		all = append(all, "manifest [stubs] differ from the recorded baseline")
+	}
+	if len(current.Env) != len(recorded.Env) {
+		all = append(all, "the set of fingerprint commands differs from the recorded baseline")
+	}
+	for _, key := range sortedKeys(current.Env) {
+		if recorded.Env[key] != current.Env[key] {
+			all = append(all, fmt.Sprintf("fingerprint %q output differs from the recorded baseline", key))
+		}
+	}
+	return all
+}
+
 func FingerprintMismatch(current, recorded Fingerprint) string {
 	if current.OS != recorded.OS || current.Arch != recorded.Arch {
 		return fmt.Sprintf("platform %s/%s differs from the recorded %s/%s", current.OS, current.Arch, recorded.OS, recorded.Arch)

@@ -95,6 +95,17 @@ run = "./probe-cli.sh version"
 timeout = 300
 deps = ["probe-cli.sh"]
 
+# The review diff is the output whose whole job is to be read carefully, and
+# until a coding agent said so out loud, nothing gated it: it refactored the
+# renderer, the gate went green, and no declared probe had walked the code. A
+# preview against a manifest with one probe added and one removed exercises the
+# added, removed, and changed branches in one deterministic render.
+[[probe]]
+id = "cli-review-diff"
+run = "./probe-preview.sh"
+timeout = 300
+deps = ["probe-preview.sh", "probe-cli.sh"]
+
 # An error path is observable behavior too, and the one most likely to be
 # quietly reworded by a refactor. The trailing branch keeps the probe's own
 # exit at 0; what is frozen is the message and the exit code vise printed.
@@ -114,6 +125,47 @@ cat >> .gitignore <<'IGNORE'
 .vise/tmp/
 .gocache/
 IGNORE
+
+cat > probe-preview.sh <<'PREVIEW'
+#!/bin/sh
+# Render a review diff deterministically.
+#
+# Builds a throwaway repository under $VISE_TMP with one probe, records it,
+# then previews a manifest that adds one probe, removes the first, and changes
+# nothing else — so the added, removed, and changed branches of the renderer
+# all appear in one frozen output. Digests vary with the tree, so the sha256
+# values are normalised away; what is frozen is the shape of the render.
+set -eu
+BIN="$VISE_TMP/vise"
+GOCACHE="$PWD/.gocache" GOFLAGS=-mod=vendor GOTOOLCHAIN=TOOLCHAIN_PLACEHOLDER \
+  go build -o "$BIN" ./cmd/vise 2>"$VISE_TMP/preview-build.err" || {
+    grep -E '(^#|\.go:)' "$VISE_TMP/preview-build.err" >&2 || cat "$VISE_TMP/preview-build.err" >&2
+    exit 1
+  }
+
+WORK="$VISE_TMP/preview"
+mkdir -p "$WORK"
+cd "$WORK"
+git init -q .
+git config user.email preview@vise.invalid
+git config user.name preview
+printf '.vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n' > .gitignore
+printf '[vise]\nversion = 1\n[[probe]]\nid = "first"\nrun = "printf one"\n' > vise.toml
+git add -A
+git commit -qm base
+"$BIN" record > /dev/null
+printf '[vise]\nversion = 1\n[[probe]]\nid = "second"\nrun = "printf two"\n' > vise.toml
+# Commit the new manifest before previewing. record refuses a dirty tree, and
+# the first version of this probe froze that refusal instead of a review diff —
+# a probe that looked like coverage, passed, and walked none of the code it was
+# written to watch.
+git add -A
+git commit -qm change
+"$BIN" record --preview 2>&1 | sed -E 's/[0-9a-f]{64}/HASH/g; s/[0-9a-f]{40}/COMMIT/g'
+PREVIEW
+sed "s/TOOLCHAIN_PLACEHOLDER/$TOOLCHAIN/" probe-preview.sh > probe-preview.sh.tmp
+mv probe-preview.sh.tmp probe-preview.sh
+chmod +x probe-preview.sh
 
 step "committing the harness"
 git add -A >/dev/null

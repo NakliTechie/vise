@@ -390,11 +390,21 @@ func harnessWithNext(cmd, id, detail string, next Next) Outcome {
 // when they are not on disk yet (a preview); the old side reads the store.
 func LockfileDiff(root string, oldLock, newLock Lockfile, newBlobs map[string][]byte) string {
 	var b strings.Builder
+	appendProbeDiffs(&b, root, oldLock.Probes, newLock.Probes, newBlobs)
+	appendFingerprintDiff(&b, oldLock.Fingerprint, newLock.Fingerprint)
+	appendMetricDiffs(&b, oldLock.Metrics, newLock.Metrics)
+	if b.Len() == 0 {
+		return "No recorded behavior changed."
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func appendProbeDiffs(b *strings.Builder, root string, oldProbes, newProbes map[string]ProbeLock, newBlobs map[string][]byte) {
 	ids := make(map[string]bool)
-	for id := range oldLock.Probes {
+	for id := range oldProbes {
 		ids[id] = true
 	}
-	for id := range newLock.Probes {
+	for id := range newProbes {
 		ids[id] = true
 	}
 	keys := make([]string, 0, len(ids))
@@ -403,100 +413,128 @@ func LockfileDiff(root string, oldLock, newLock Lockfile, newBlobs map[string][]
 	}
 	sort.Strings(keys)
 	for _, id := range keys {
-		oldProbe, oldOK := oldLock.Probes[id]
-		newProbe, newOK := newLock.Probes[id]
+		oldProbe, oldOK := oldProbes[id]
+		newProbe, newOK := newProbes[id]
 		switch {
 		case !oldOK:
-			fmt.Fprintf(&b, "+ probe %s (exit %d, stdout %s, stderr %s, %d file(s), recorded at %s)\n", id, newProbe.Exit, newProbe.Stdout, newProbe.Stderr, len(newProbe.Files), newProbe.RecordedCommit)
+			appendAddedProbeDiff(b, id, newProbe)
 		case !newOK:
-			// The same fields as an added probe, deliberately. A removal is the
-			// entry in this diff an operator most needs to scrutinise — an
-			// observation is going away — and it was showing less than an
-			// addition, which is backwards.
-			fmt.Fprintf(&b, "- probe %s (exit %d, stdout %s, stderr %s, %d file(s), recorded at %s)\n", id, oldProbe.Exit, oldProbe.Stdout, oldProbe.Stderr, len(oldProbe.Files), oldProbe.RecordedCommit)
+			appendRemovedProbeDiff(b, id, oldProbe)
 		default:
-			if oldProbe.RunHash != newProbe.RunHash {
-				fmt.Fprintf(&b, "%s definition changed since the recorded baseline (run_hash %s -> %s); see git diff vise.toml\n", id, oldProbe.RunHash, newProbe.RunHash)
-			}
-			if oldProbe.Exit != newProbe.Exit {
-				fmt.Fprintf(&b, "%s exit: %d -> %d\n", id, oldProbe.Exit, newProbe.Exit)
-			}
-			depPaths := make(map[string]bool)
-			for path := range oldProbe.Deps {
-				depPaths[path] = true
-			}
-			for path := range newProbe.Deps {
-				depPaths[path] = true
-			}
-			for _, path := range sortedKeys(depPaths) {
-				if oldProbe.Deps[path] != newProbe.Deps[path] {
-					fmt.Fprintf(&b, "%s dep %s: %s -> %s\n", id, path, hashOrNone(oldProbe.Deps[path]), hashOrNone(newProbe.Deps[path]))
-				}
-			}
-			appendBlobDiff(&b, root, newBlobs, id+"/stdout", oldProbe.Stdout, oldProbe.StdoutLarge, newProbe.Stdout, newProbe.StdoutLarge)
-			appendBlobDiff(&b, root, newBlobs, id+"/stderr", oldProbe.Stderr, oldProbe.StderrLarge, newProbe.Stderr, newProbe.StderrLarge)
-			paths := make(map[string]bool)
-			for path := range oldProbe.Files {
-				paths[path] = true
-			}
-			for path := range newProbe.Files {
-				paths[path] = true
-			}
-			for _, path := range sortedKeys(paths) {
-				appendBlobDiff(&b, root, newBlobs, id+"/"+path, oldProbe.Files[path], oldProbe.FilesLarge[path], newProbe.Files[path], newProbe.FilesLarge[path])
-			}
+			appendChangedProbeDiff(b, root, newBlobs, id, oldProbe, newProbe)
 		}
 	}
-	if mismatch := FingerprintMismatch(newLock.Fingerprint, oldLock.Fingerprint); mismatch != "" {
-		fmt.Fprintf(&b, "fingerprint: %s\n", mismatch)
+}
+
+// appendFingerprintDiff renders every environment difference, not the first.
+// This is the diff an operator reads before accepting a new baseline, and a
+// baseline accepted because one of three changes looked reasonable is a
+// baseline accepted for a third of a reason.
+func appendFingerprintDiff(b *strings.Builder, oldFingerprint, newFingerprint Fingerprint) {
+	for _, mismatch := range FingerprintMismatches(newFingerprint, oldFingerprint) {
+		fmt.Fprintf(b, "fingerprint: %s\n", mismatch)
 	}
+}
+
+func appendAddedProbeDiff(b *strings.Builder, id string, probe ProbeLock) {
+	fmt.Fprintf(b, "+ probe %s (exit %d, stdout %s, stderr %s, %d file(s), recorded at %s)\n", id, probe.Exit, probe.Stdout, probe.Stderr, len(probe.Files), probe.RecordedCommit)
+}
+
+func appendRemovedProbeDiff(b *strings.Builder, id string, probe ProbeLock) {
+	// The same fields as an added probe, deliberately. A removal is the
+	// entry in this diff an operator most needs to scrutinise — an
+	// observation is going away — and it was showing less than an
+	// addition, which is backwards.
+	fmt.Fprintf(b, "- probe %s (exit %d, stdout %s, stderr %s, %d file(s), recorded at %s)\n", id, probe.Exit, probe.Stdout, probe.Stderr, len(probe.Files), probe.RecordedCommit)
+}
+
+func appendChangedProbeDiff(b *strings.Builder, root string, newBlobs map[string][]byte, id string, oldProbe, newProbe ProbeLock) {
+	if oldProbe.RunHash != newProbe.RunHash {
+		fmt.Fprintf(b, "%s definition changed since the recorded baseline (run_hash %s -> %s); see git diff vise.toml\n", id, oldProbe.RunHash, newProbe.RunHash)
+	}
+	if oldProbe.Exit != newProbe.Exit {
+		fmt.Fprintf(b, "%s exit: %d -> %d\n", id, oldProbe.Exit, newProbe.Exit)
+	}
+	depPaths := make(map[string]bool)
+	for path := range oldProbe.Deps {
+		depPaths[path] = true
+	}
+	for path := range newProbe.Deps {
+		depPaths[path] = true
+	}
+	for _, path := range sortedKeys(depPaths) {
+		if oldProbe.Deps[path] != newProbe.Deps[path] {
+			fmt.Fprintf(b, "%s dep %s: %s -> %s\n", id, path, hashOrNone(oldProbe.Deps[path]), hashOrNone(newProbe.Deps[path]))
+		}
+	}
+	appendBlobDiff(b, root, newBlobs, id+"/stdout", oldProbe.Stdout, oldProbe.StdoutLarge, newProbe.Stdout, newProbe.StdoutLarge)
+	appendBlobDiff(b, root, newBlobs, id+"/stderr", oldProbe.Stderr, oldProbe.StderrLarge, newProbe.Stderr, newProbe.StderrLarge)
+	paths := make(map[string]bool)
+	for path := range oldProbe.Files {
+		paths[path] = true
+	}
+	for path := range newProbe.Files {
+		paths[path] = true
+	}
+	for _, path := range sortedKeys(paths) {
+		appendBlobDiff(b, root, newBlobs, id+"/"+path, oldProbe.Files[path], oldProbe.FilesLarge[path], newProbe.Files[path], newProbe.FilesLarge[path])
+	}
+}
+
+func appendMetricDiffs(b *strings.Builder, oldMetrics, newMetrics map[string]MetricLock) {
 	metricIDs := make(map[string]bool)
-	for id := range oldLock.Metrics {
+	for id := range oldMetrics {
 		metricIDs[id] = true
 	}
-	for id := range newLock.Metrics {
+	for id := range newMetrics {
 		metricIDs[id] = true
 	}
 	for _, id := range sortedKeys(metricIDs) {
-		oldMetric, oldOK := oldLock.Metrics[id]
-		newMetric, newOK := newLock.Metrics[id]
+		oldMetric, oldOK := oldMetrics[id]
+		newMetric, newOK := newMetrics[id]
 		switch {
 		case !oldOK:
-			fmt.Fprintf(&b, "+ metric %s (value %g, tool_version %q)\n", id, newMetric.Value, newMetric.ToolVersion)
+			fmt.Fprintf(b, "+ metric %s (value %g, tool_version %q)\n", id, newMetric.Value, newMetric.ToolVersion)
 		case !newOK:
-			fmt.Fprintf(&b, "- metric %s (value %g, tool_version %q)\n", id, oldMetric.Value, oldMetric.ToolVersion)
+			fmt.Fprintf(b, "- metric %s (value %g, tool_version %q)\n", id, oldMetric.Value, oldMetric.ToolVersion)
 		default:
 			if oldMetric.RunHash != newMetric.RunHash {
-				fmt.Fprintf(&b, "%s definition changed since the recorded baseline (run, direction, enforce, env, timeout, or version_cmd; run_hash %s -> %s); see git diff vise.toml\n", id, oldMetric.RunHash, newMetric.RunHash)
+				fmt.Fprintf(b, "%s definition changed since the recorded baseline (run, direction, enforce, env, timeout, or version_cmd; run_hash %s -> %s); see git diff vise.toml\n", id, oldMetric.RunHash, newMetric.RunHash)
 			}
 			if oldMetric.Value != newMetric.Value {
-				fmt.Fprintf(&b, "%s value: %g -> %g\n", id, oldMetric.Value, newMetric.Value)
+				fmt.Fprintf(b, "%s value: %g -> %g\n", id, oldMetric.Value, newMetric.Value)
 			}
 			if oldMetric.ToolVersion != newMetric.ToolVersion {
-				fmt.Fprintf(&b, "%s tool_version: %q -> %q\n", id, oldMetric.ToolVersion, newMetric.ToolVersion)
+				fmt.Fprintf(b, "%s tool_version: %q -> %q\n", id, oldMetric.ToolVersion, newMetric.ToolVersion)
 			}
 		}
 	}
-	if b.Len() == 0 {
-		return "No recorded behavior changed."
-	}
-	return strings.TrimSuffix(b.String(), "\n")
 }
 
 func appendBlobDiff(b *strings.Builder, root string, newBlobs map[string][]byte, label, oldHash string, oldLarge bool, newHash string, newLarge bool) {
 	if oldHash == newHash && oldLarge == newLarge {
 		return
 	}
-	oldData, oldAvailable, _ := BlobData(root, oldHash, oldLarge)
+	oldData, oldAvailable, oldErr := BlobData(root, oldHash, oldLarge)
 	newData, newAvailable := newBlobs[newHash]
+	var newErr error
 	if !newAvailable {
-		newData, newAvailable, _ = BlobData(root, newHash, newLarge)
+		newData, newAvailable, newErr = BlobData(root, newHash, newLarge)
 	}
 	if oldAvailable && newAvailable {
 		fmt.Fprintln(b, FirstDiff(label, oldData, newData))
 		return
 	}
+	// A blob that is deliberately unavailable (over the capture bound) and one
+	// that is missing or fails its content hash rendered identically, so an
+	// operator could not tell "too large to show you" from "the evidence is
+	// gone". The second is a reason to stop reviewing and repair the baseline.
 	fmt.Fprintf(b, "%s hash: %s -> %s\n", label, oldHash, newHash)
+	for _, err := range []error{oldErr, newErr} {
+		if err != nil {
+			fmt.Fprintf(b, "%s blob unreadable: %s\n", label, err)
+		}
+	}
 }
 
 func DiffRuns(root string, expected ProbeLock, got RunResult) string {
