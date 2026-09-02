@@ -1,6 +1,10 @@
 package vise
 
 import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -87,5 +91,65 @@ func TestLockfileDiffShowsDefinitionChangesAndDescribesAdditions(t *testing.T) {
 		if !strings.Contains(diff, want) {
 			t.Fatalf("diff %q lacks %q", diff, want)
 		}
+	}
+}
+
+// A re-record that observes exactly what the baseline already holds must
+// produce a byte-identical lockfile. Restamping recorded_commit made every
+// re-record churn the file and its tamper hash, which trains a reviewer to
+// skim the one diff that is supposed to be readable.
+func TestReRecordingUnchangedBehaviorLeavesTheLockfileByteIdentical(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"stable\"\nrun = \"printf stable\"\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "manifest")
+
+	record := func(t *testing.T) []byte {
+		t.Helper()
+		parsed, bytes_, err := LoadManifest(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := Record(root, parsed, bytes_, RecordOptions{ReviewedDiff: true})
+		if result.Outcome.Exit != ExitOK {
+			t.Fatalf("record: %#v", result.Outcome)
+		}
+		data, err := os.ReadFile(filepath.Join(root, "vise.lock"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+
+	first := record(t)
+	// A new commit moves HEAD without changing anything a probe observes.
+	writeTestFile(t, root, "unrelated.txt", "unrelated")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "unrelated")
+	second := record(t)
+
+	if !bytes.Equal(first, second) {
+		t.Fatalf("re-record changed the lockfile:\nfirst:  %s\nsecond: %s", first, second)
+	}
+
+	// A real behavior change still restamps: provenance names the commit the
+	// new observation was frozen at, not the one the old one was.
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"stable\"\nrun = \"printf changed\"\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "changed")
+	third := record(t)
+	if bytes.Equal(second, third) {
+		t.Fatal("a changed observation left the lockfile untouched")
+	}
+	head, err := GitHead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lock Lockfile
+	if err := json.Unmarshal(third, &lock); err != nil {
+		t.Fatal(err)
+	}
+	if got := lock.Probes["stable"].RecordedCommit; got != head {
+		t.Fatalf("recorded_commit = %s, want HEAD %s", got, head)
 	}
 }

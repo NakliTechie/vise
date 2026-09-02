@@ -3,6 +3,7 @@ package vise
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"os"
 	"sort"
 	"strings"
@@ -99,7 +100,7 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		entry := AddObservationBlobs(blobs, selfTest.probes[probe.ID])
 		entry.RunHash = runHash
 		entry.Deps = deps
-		entry.RecordedCommit = commit
+		entry.RecordedCommit = firstFrozenAt(oldLock.Probes[probe.ID], entry, commit)
 		lock.Probes[probe.ID] = entry
 	}
 	for _, metric := range manifest.Metrics {
@@ -469,4 +470,35 @@ func hashOrNone(hash string) string {
 		return "(none)"
 	}
 	return hash
+}
+
+// firstFrozenAt returns the commit to stamp on a freshly recorded probe.
+// A re-record that observes exactly what the old baseline holds keeps the
+// commit the observation was first frozen at, so an unchanged behavior
+// produces a byte-identical lockfile: a reviewer reading `git diff vise.lock`
+// sees nothing, which is the truth. Stamping HEAD every time churned the file
+// and the tamper hash with it, and taught reviewers to skim a diff that was
+// usually noise — the one habit that lets a real change through.
+func firstFrozenAt(old, fresh ProbeLock, head string) string {
+	if old.RecordedCommit == "" {
+		return head
+	}
+	fresh.RecordedCommit = old.RecordedCommit
+	if observationsEqual(old, fresh) {
+		return old.RecordedCommit
+	}
+	return head
+}
+
+func observationsEqual(a, b ProbeLock) bool {
+	return a.RunHash == b.RunHash &&
+		a.RecordedCommit == b.RecordedCommit &&
+		a.Exit == b.Exit &&
+		a.Stdout == b.Stdout &&
+		a.Stderr == b.Stderr &&
+		a.StdoutLarge == b.StdoutLarge &&
+		a.StderrLarge == b.StderrLarge &&
+		maps.Equal(a.Deps, b.Deps) &&
+		maps.Equal(a.Files, b.Files) &&
+		maps.Equal(a.FilesLarge, b.FilesLarge)
 }
