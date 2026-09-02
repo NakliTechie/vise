@@ -381,6 +381,13 @@ verify_dogfood() {
   git clone -q "$VISE_ROOT" "$repo"
   git -C "$repo" config user.email verify@example.invalid
   git -C "$repo" config user.name "vise verify"
+  # Drop any baseline the checkout carries. This feature records its own, and
+  # an inherited vise.lock makes record refuse with operator-review — so the
+  # harness stopped working the moment it was run from inside a vise-gated
+  # clone, which is exactly what the dogfood targets are.
+  rm -rf "$repo/.vise" "$repo/vise.lock"
+  git -C "$repo" rm -r -q --cached --ignore-unmatch .vise vise.lock >/dev/null 2>&1 || true
+  git -C "$repo" commit -qm "drop the inherited baseline" >/dev/null 2>&1 || true
   cat > "$repo/vise.toml" <<EOF
 [vise]
 version = 1
