@@ -184,10 +184,21 @@ vise carries no model and edits no code. Pull the AI out and it is a plain golde
 ```sh
 scripts/verify verify          # the committed harness: 8 features, from any directory
 scripts/verify verify baseline # one feature
-go test -race ./... && go vet ./... && shellcheck scripts/verify && govulncheck ./...
+go test -race ./... && go vet ./... && shellcheck scripts/verify scripts/dogfood && govulncheck ./...
 ```
 
 The feature inventory and the traps each one guards live in [`verify/features/`](verify/features/README.md).
+
+```sh
+scripts/dogfood /tmp/vise-dogfood     # a gated clone of this checkout, ready for an agent
+```
+
+`scripts/dogfood` builds the target vise is tested against: a clone of this
+repository with vendored dependencies, agent-ready probes, a recorded baseline,
+`vise doctor` clean, and a cold gate green. It exists because every round of
+testing vise against real coding agents began by rebuilding that target by hand,
+and every rebuild rediscovered the same half-dozen details. Two of the defects
+fixed this week were found by the script itself on its first run.
 
 ## Documents
 
