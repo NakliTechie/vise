@@ -379,6 +379,24 @@ Everything above assumes a human at the keyboard. The reason vise exists is the
 other case, and that one has a setup step people skip. These lessons come from
 running real coding agents against a vise-gated clone of vise itself.
 
+**Ask the agent what looks wrong, not only to change things.** A refactor
+forces a careful read of code nobody has re-read in weeks, and the agent
+finishes that read holding exactly the context an auditor would have to
+rebuild from scratch. Adding one paragraph to the task costs nothing:
+
+> If while reading this code you find something that looks wrong — a case that
+> is not handled, an output that could mislead the person reading it, an
+> ordering that contradicts what the comments claim — report it under a
+> heading "Things that look wrong". Do not fix them. Just say what you saw and
+> where.
+
+Separating *report* from *fix* is what makes this safe: the findings arrive as
+a list you triage, not as changes riding along inside a refactor you were
+reviewing for something else. One round here returned a single finding, and it
+was real — the review diff described a removed probe with fewer fields than an
+added one, which is backwards, because a removal is the entry an operator most
+needs to look at.
+
 **Stay off the machine while the agent works, or set generous timeouts.**
 Probe timeouts are wall clock. Running a heavy build or test suite alongside a
 gated agent pushed one probe here from seconds past two minutes, and a probe

@@ -147,9 +147,27 @@ An hour spent looking for a way around the gate is worse than one minute spent
 saying the task needs an operator. You are not failing the task by reporting
 this; you are doing the only useful thing left.
 
+## Say when the gate did not really check you
+
+A green gate means every declared observation matched. It does not mean your
+change is right. It means no probe noticed — and if no probe walks the code you
+touched, none would have noticed had you broken it.
+
+So before you report a change as green, ask which probe would have gone red if
+the change were wrong. If the honest answer is *none*, say so in your final
+message. Name the change and say no declared observation covers it. You are not
+admitting a mistake; you are telling the operator which part of your work the
+gate did not vouch for, which is the difference between a review that can be
+short and one that has to be long.
+
+This matters most for the changes that look safest: an internal helper nothing
+prints, a lookup nobody's probe exercises, a path taken only on an error
+nothing triggers. Those are exactly the changes a green gate says nothing
+about.
+
 ## When you finish
 
 State plainly, in this order: the gate's final verdict and exit code; what you
-changed; what you could not do and why. If the gate is not green, say that
-first. A red gate is never "done", and neither is a green gate you reached by
-narrowing what is checked.
+changed; anything you changed that no probe covers; what you could not do and
+why. If the gate is not green, say that first. A red gate is never "done", and
+neither is a green gate you reached by narrowing what is checked.
