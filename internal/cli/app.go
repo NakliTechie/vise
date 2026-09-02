@@ -363,14 +363,40 @@ func writeJSONWithExit(w io.Writer, value any, exit int) int {
 }
 
 func writeOutcomeJSON(w io.Writer, outcome vise.Outcome, extra map[string]any) int {
-	data, _ := json.Marshal(outcome)
+	// A verdict that cannot be serialized must not be reported as the verdict.
+	// A non-finite metric delta is the reachable case: json.Marshal refuses it,
+	// and silently dropping the error would print an incomplete object under a
+	// green exit code — the one failure an agent has no way to notice.
+	data, err := json.Marshal(outcome)
+	if err != nil {
+		_ = writeJSON(w, encodingFailure(outcome.Cmd, err))
+		return vise.ExitHarness
+	}
 	var object map[string]any
-	_ = json.Unmarshal(data, &object)
+	if err := json.Unmarshal(data, &object); err != nil {
+		_ = writeJSON(w, encodingFailure(outcome.Cmd, err))
+		return vise.ExitHarness
+	}
 	for key, value := range extra {
 		object[key] = value
 	}
-	_ = writeJSON(w, object)
+	if exit := writeJSON(w, object); exit != vise.ExitOK {
+		return exit
+	}
 	return outcome.Exit
+}
+
+// encodingFailure is the outcome vise reports when it cannot report the real
+// one: harness class, so the caller repairs rather than trusting a verdict.
+func encodingFailure(command string, err error) map[string]any {
+	return map[string]any{
+		"v": 1, "cmd": command, "exit": vise.ExitHarness, "verdict": "indeterminate",
+		"classes": []string{"harness"},
+		"failures": map[string]any{
+			"encoding": map[string]any{"class": "harness", "detail": "the verdict could not be encoded as JSON: " + err.Error()},
+		},
+		"next": vise.Next{Action: "fix_probe", Detail: "a value in the outcome cannot be represented in JSON; a metric that printed a non-finite number is the usual cause"},
+	}
 }
 
 // addCapture reports an observation in JSON. Output larger than the capture

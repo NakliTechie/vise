@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -856,5 +857,41 @@ func TestHelpAnswersJSONToo(t *testing.T) {
 	exit, stdout, _ = cliRun(t, root, "--help")
 	if exit != 0 || !strings.Contains(stdout, "deterministic behavior locks") {
 		t.Fatalf("human help: %d %q", exit, stdout)
+	}
+}
+
+func TestAnUnencodableVerdictIsReportedAsHarness(t *testing.T) {
+	// A metric delta of +Inf cannot be JSON: reporting it as a green verdict
+	// with a missing field is the one failure a caller cannot detect.
+	outcome := core.NewOutcome("gate")
+	outcome.Counts.Declared = 1
+	outcome.Metrics = map[string]core.MetricDelta{
+		"complexity": {Base: 1, Now: math.Inf(1), Delta: math.Inf(1), Direction: "down", Enforce: "none"},
+	}
+	outcome.Finalize()
+
+	var out bytes.Buffer
+	exit := writeOutcomeJSON(&out, outcome, nil)
+	if exit != core.ExitHarness {
+		t.Fatalf("exit = %d, want harness", exit)
+	}
+	value := parseCLIJSON(t, out.String())
+	failures, _ := value["failures"].(map[string]any)
+	encoding, _ := failures["encoding"].(map[string]any)
+	if value["verdict"] != "indeterminate" || encoding == nil || !strings.Contains(encoding["detail"].(string), "could not be encoded") {
+		t.Fatalf("value = %#v", value)
+	}
+
+	// An ordinary outcome still round-trips and keeps its own exit code.
+	plain := core.NewOutcome("gate")
+	plain.Counts.Declared = 1
+	plain.AddFailure("p", core.Failure{Class: "behavior", Detail: "differs"})
+	plain.Finalize()
+	out.Reset()
+	if exit := writeOutcomeJSON(&out, plain, map[string]any{"extra": true}); exit != core.ExitBehavior {
+		t.Fatalf("plain exit = %d", exit)
+	}
+	if value := parseCLIJSON(t, out.String()); value["verdict"] != "red" || value["extra"] != true {
+		t.Fatalf("plain value = %#v", value)
 	}
 }
