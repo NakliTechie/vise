@@ -34,7 +34,12 @@ lang = "C"
 seed = "1729"
 network = "declared-off"
 
-# Advanced: fingerprint tool versions that affect probe output.
+# Name the version of every tool a probe runs. Without this a compiler or
+# formatter can change under the baseline and the first red looks like a
+# behavior change, which is the most expensive way to learn that it was not.
+# vise doctor reports this as missing until you uncomment it, because on a
+# repository an agent works in it is not optional. Left commented only because
+# the right commands are yours, not vise's.
 # [env]
 # fingerprint = ["sh --version | head -1", "git --version"]
 

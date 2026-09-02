@@ -78,7 +78,7 @@ func checkFingerprint(manifest Manifest) []DoctorFinding {
 	return []DoctorFinding{{
 		Check:  "env-fingerprint",
 		Detail: "the manifest declares no [env] fingerprint, so a toolchain change is invisible to the gate",
-		Remedy: "add [env] fingerprint = [\"<the version command for every tool a probe runs>\"]",
+		Remedy: "uncomment the [env] fingerprint block vise init writes, and name the version command for every tool a probe runs",
 	}}
 }
 
