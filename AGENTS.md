@@ -99,8 +99,12 @@ Rerunning until it passes is the one thing you must not do. Stop and report.
 ## Rules you do not break
 
 1. **Never edit `vise.toml`, `vise.lock`, `.vise/blobs/`, or
-   `.vise/journal.jsonl`.** These are the judge. Editing them is tampering, and
-   the tool notices.
+   `.vise/journal.jsonl`.** These are the judge. Be clear about what happens if
+   you do: vise cannot authenticate its caller, so it will simply believe the
+   edited baseline and report green. What catches it is the human reading
+   `git diff`, and CI comparing the printed `lock:` hash against the one
+   recomputed from the trusted branch. Editing them does not fool the judge so
+   much as remove it, which is worse than the failure you were trying to avoid.
 2. **Never run `vise record`.** Freezing a baseline is an operator action. If
    you believe the baseline is wrong, say so and stop.
 3. **Never weaken a probe** to make it pass — not by narrowing what it observes,
