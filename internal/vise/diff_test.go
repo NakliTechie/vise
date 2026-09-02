@@ -1,6 +1,7 @@
 package vise
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -85,5 +86,41 @@ func TestFirstDiffLeavesOrdinaryLinesAlone(t *testing.T) {
 	}
 	if strings.Contains(diff, "rune") {
 		t.Fatalf("an ordinary line was annotated:\n%s", diff)
+	}
+}
+
+// A divergence in output that is not valid UTF-8 cannot be rendered as lines,
+// so it falls to a byte preview. Nothing tested that branch, and returning ""
+// from it would have reported "no difference" for two observations that
+// differ — a red gate rendering as though nothing were wrong.
+func TestFirstDiffDescribesABinaryDivergence(t *testing.T) {
+	expected := []byte{0x00, 0xff, 0xfe, 0x01}
+	got := []byte{0x00, 0xff, 0xfe, 0x02}
+
+	diff := FirstDiff("stdout", expected, got)
+	if diff == "" {
+		t.Fatal("two different binary observations rendered as no difference")
+	}
+	if !strings.Contains(diff, "stdout differs") {
+		t.Fatalf("the diff does not say what differs: %q", diff)
+	}
+
+	// Identical binary output is still no difference.
+	if diff := FirstDiff("stdout", expected, expected); diff != "" {
+		t.Fatalf("identical binary output rendered a difference: %q", diff)
+	}
+
+	// And a long binary observation is bounded like everything else. The
+	// preview holds 64 bytes a side and escapes each unprintable one to four
+	// characters, so the ceiling is a few hundred bytes and not a fraction of
+	// the observation.
+	long := append(bytes.Repeat([]byte{0xff}, 4096), 0x01)
+	other := append(bytes.Repeat([]byte{0xff}, 4096), 0x02)
+	rendered := FirstDiff("stdout", long, other)
+	if len(rendered) > 1000 {
+		t.Fatalf("a binary diff of two 4097-byte observations rendered %d bytes", len(rendered))
+	}
+	if !strings.Contains(rendered, "4097 bytes total") {
+		t.Fatalf("the diff does not say how long the observation was: %q", rendered)
 	}
 }

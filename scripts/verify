@@ -186,7 +186,14 @@ verify_readiness() {
 
   # A read-only command must answer while a run holds the state lock, and an
   # unknown command must be refused before it can wait on one.
+  # Clear the lock file init left behind, then confirm status does not
+  # recreate it. Taking the state lock creates the file, so its absence
+  # afterwards is an exact test of the lock-free property.
+  rm -f "$repo/.vise/run.lock"
   expect_exit 0 sh -c "cd '$repo' && '$VERIFY_BIN' status --json >/dev/null"
+  test -e "$repo/.vise/run.lock" && fail readiness "status created the state lock; it is supposed to take none"
+  expect_exit 0 sh -c "cd '$repo' && '$VERIFY_BIN' doctor --json >/dev/null"
+  test -e "$repo/.vise/run.lock" && fail readiness "doctor created the state lock; it is supposed to take none"
   expect_exit 2 sh -c "cd '$repo' && '$VERIFY_BIN' no-such-command >/dev/null 2>&1"
   summary readiness pass
 }
@@ -198,7 +205,7 @@ verify_initialization() {
   test -f "$repo/vise.toml" || fail initialization "init did not create vise.toml"
   grep -q '.vise/journal.jsonl' "$repo/.gitignore" || fail initialization "init did not wire journal state into .gitignore"
   test -f "$repo/AGENTS.md" || fail initialization "init did not install the agent contract"
-  grep -q 'Never run .vise record' "$repo/AGENTS.md" || fail initialization "the installed agent contract is missing its rules"
+  cmp -s "$repo/AGENTS.md" "$VISE_ROOT/AGENTS.md" || fail initialization "the installed agent contract is not the repository's AGENTS.md"
   printf 'ours\n' > "$repo/AGENTS.md"
   rm "$repo/vise.toml"
   (cd "$repo" && "$VERIFY_BIN" init --json) >/dev/null
@@ -349,9 +356,14 @@ EOF
   mv "$repo/vise.next" "$repo/vise.toml"
   git -C "$repo" commit -qam "weaken the metric policy"
   expect_vise_json_exit review 2 'metric definition changed' "$repo" gate
+  # Outside the repository: a copy inside it makes the tree dirty, and record
+  # refuses a dirty tree, so the preview under test would never run.
+  cp "$repo/.vise/journal.jsonl" "$VERIFY_RUN/review-journal.before"
   preview=$(cd "$repo" && "$VERIFY_BIN" record --preview --json)
   printf '%s\n' "$preview" | grep -q 'definition changed since the recorded baseline' || fail review "preview hid the metric policy change"
-  test "$(grep -c '"e":"record"' "$repo/.vise/journal.jsonl")" -eq 1 || fail review "preview wrote a journal event"
+  # The whole journal, not a count of one event name: a preview that appended
+  # a differently-named event left the count unchanged and passed.
+  cmp -s "$VERIFY_RUN/review-journal.before" "$repo/.vise/journal.jsonl" || fail review "preview changed the journal"
   candidate=$(printf '%s\n' "$preview" | sed -n 's/.*"candidate":"\(sha256:[0-9a-f]*\)".*/\1/p')
   test -n "$candidate" || fail review "preview returned no candidate digest"
   expect_vise_json_exit review 2 'differs from the accepted' "$repo" record --accept sha256:0000000000000000000000000000000000000000000000000000000000000000
