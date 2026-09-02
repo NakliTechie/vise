@@ -833,3 +833,28 @@ func TestStatusWritesNothingAtAll(t *testing.T) {
 		t.Fatalf(".vise exists after status: %v", err)
 	}
 }
+
+func TestHelpAnswersJSONToo(t *testing.T) {
+	root := t.TempDir()
+	exit, stdout, _ := cliRun(t, root, "--help", "--json")
+	value := parseCLIJSON(t, stdout)
+	commands, _ := value["commands"].(map[string]any)
+	if exit != 0 || value["cmd"] != "help" || commands["gate"] == nil {
+		t.Fatalf("help --json: exit=%d value=%#v", exit, value)
+	}
+	if _, ok := value["global_options"]; !ok {
+		t.Fatalf("help --json omitted the global options: %#v", value)
+	}
+
+	exit, stdout, _ = cliRun(t, root, "record", "--help", "--json")
+	value = parseCLIJSON(t, stdout)
+	if exit != 0 || value["command"] != "record" || !strings.Contains(value["usage"].(string), "--preview") {
+		t.Fatalf("record --help --json: exit=%d value=%#v", exit, value)
+	}
+
+	// The human rendering is unchanged, so it stays usable as a probe surface.
+	exit, stdout, _ = cliRun(t, root, "--help")
+	if exit != 0 || !strings.Contains(stdout, "deterministic behavior locks") {
+		t.Fatalf("human help: %d %q", exit, stdout)
+	}
+}

@@ -49,6 +49,9 @@ func stopProbeOnSignal() {
 func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 	args, jsonMode := removeGlobalJSON(args)
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		if jsonMode {
+			return writeJSON(stdout, helpDocument(""))
+		}
 		printHelp(stdout)
 		return vise.ExitOK
 	}
@@ -68,6 +71,9 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 	}
 	command := args[0]
 	if hasHelp(args[1:]) {
+		if jsonMode {
+			return writeJSON(stdout, helpDocument(command))
+		}
 		printCommandHelp(stdout, command)
 		return vise.ExitOK
 	}
@@ -456,18 +462,47 @@ Run 'vise <command> --help' for command-specific help.
 `)
 }
 
+// commandUsage is the one source for both renderings of help, so the JSON and
+// the human text cannot drift apart.
+var commandUsage = map[string]string{
+	"init":   "Usage: vise init [--json]\nWrites a commented starter manifest and local-state .gitignore entries.\n",
+	"record": "Usage: vise record [--allow-dirty] [--i-reviewed-the-diff] [--preview | --accept DIGEST] [--json]\nRuns two full suite passes and atomically writes the behavior baseline.\n--preview shows the candidate diff and digest without writing; --accept writes only that candidate.\n",
+	"verify": "Usage: vise verify [--probe ID] [--json]\nReplays all probes or one judged probe against vise.lock.\n",
+	"gate":   "Usage: vise gate [--probe ID] [--quiet] [--json]\nRuns verification and emits the refactor-loop verdict.\n",
+	"run":    "Usage: vise run <probe-id> [--json]\nExecutes a probe raw without reading or changing vise.lock.\n",
+	"status": "Usage: vise status [--json]\nReports manifest, lock, fingerprint, proposals, and the last five journal events.\n",
+}
+
 func printCommandHelp(w io.Writer, command string) {
-	text := map[string]string{
-		"init":   "Usage: vise init [--json]\nWrites a commented starter manifest and local-state .gitignore entries.\n",
-		"record": "Usage: vise record [--allow-dirty] [--i-reviewed-the-diff] [--preview | --accept DIGEST] [--json]\nRuns two full suite passes and atomically writes the behavior baseline.\n--preview shows the candidate diff and digest without writing; --accept writes only that candidate.\n",
-		"verify": "Usage: vise verify [--probe ID] [--json]\nReplays all probes or one judged probe against vise.lock.\n",
-		"gate":   "Usage: vise gate [--probe ID] [--quiet] [--json]\nRuns verification and emits the refactor-loop verdict.\n",
-		"run":    "Usage: vise run <probe-id> [--json]\nExecutes a probe raw without reading or changing vise.lock.\n",
-		"status": "Usage: vise status [--json]\nReports manifest, lock, fingerprint, proposals, and the last five journal events.\n",
-	}
-	if help, ok := text[command]; ok {
+	if help, ok := commandUsage[command]; ok {
 		fmt.Fprint(w, help)
 		return
 	}
 	printHelp(w)
+}
+
+// helpDocument answers `--json` for help. Every command answers --json, and
+// help is not the exception the README would otherwise have to apologise for.
+func helpDocument(command string) map[string]any {
+	document := map[string]any{
+		"v":    1,
+		"cmd":  "help",
+		"exit": 0,
+		"next": vise.Next{Action: "proceed", Detail: "help reported"},
+	}
+	if usage, ok := commandUsage[command]; ok {
+		document["command"] = command
+		document["usage"] = strings.TrimSpace(usage)
+		return document
+	}
+	commands := make(map[string]string, len(commandUsage))
+	for name, usage := range commandUsage {
+		commands[name] = strings.TrimSpace(usage)
+	}
+	document["commands"] = commands
+	document["global_options"] = map[string]string{
+		"--json": "Replace human output with one JSON object",
+		"--help": "Show help without requiring a Git repository",
+	}
+	return document
 }

@@ -121,7 +121,7 @@ Shared exit-code vocabulary, one code per distinct next action:
 
 **Failure precedence** when classes co-occur (one exit code; all classes still listed in output): `4 > 2 > 3 > 1 > 5` — no behavior verdict from a broken harness, no diff verdict from a flaky probe, quality only after behavior holds.
 
-**`--json`** replaces the human rendering with exactly one object:
+**`--json`** replaces the human rendering with exactly one object, on every command including `help`:
 
 ```json
 { "v": 1, "cmd": "gate", "exit": 1, "verdict": "red",
