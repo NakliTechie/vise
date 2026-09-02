@@ -1,0 +1,132 @@
+#!/bin/sh
+# Build a vise-gated clone of this checkout, ready to hand to a coding agent.
+#
+# Every round of testing vise against real agents began by rebuilding this
+# target by hand, and every rebuild rediscovered the same half-dozen details:
+# vendor the dependencies so no probe needs the network, put the build cache
+# inside the checkout and ignore it, name the toolchain so nothing downloads,
+# keep the probe quiet on success, commit the baseline so a fresh clone can
+# gate. Getting one wrong costs an hour of diagnosing the agent's sandbox.
+#
+# Usage: scripts/dogfood [target-directory]
+set -eu
+
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+VISE_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
+TOOLCHAIN=go$(awk '$1 == "go" { print $2; exit }' "$VISE_ROOT/go.mod")
+TARGET=${1:-${TMPDIR:-/tmp}/vise-dogfood}
+
+step() { printf 'dogfood: %s\n' "$1"; }
+die() { printf 'dogfood: %s\n' "$1" >&2; exit 1; }
+
+[ -e "$TARGET" ] && die "$TARGET already exists; remove it or name another directory"
+
+step "building vise from $VISE_ROOT"
+BIN=$TARGET.bin
+mkdir -p "$BIN"
+( cd -- "$VISE_ROOT" && GOTOOLCHAIN=$TOOLCHAIN go build -o "$BIN/vise" ./cmd/vise ) \
+  || die "cannot build vise from this checkout"
+
+step "cloning into $TARGET"
+git clone -q -- "$VISE_ROOT" "$TARGET" || die "clone failed"
+cd -- "$TARGET" || die "cannot enter $TARGET"
+
+step "vendoring dependencies (an agent sandbox has no network)"
+GOTOOLCHAIN=$TOOLCHAIN GOFLAGS='' go mod vendor >/dev/null 2>&1 \
+  || die "go mod vendor failed"
+
+step "writing the probe wrapper and manifest"
+cat > probe-cli.sh <<'PROBE'
+#!/bin/sh
+# Build this checkout quietly and run it with the given arguments.
+#
+# Quiet on success, loud on failure: a probe must judge the output it means to
+# freeze, not incidental noise from the toolchain. Inside an agent sandbox the
+# Go build emits permission warnings it never emits in a terminal, and a probe
+# that freezes those is stable for its author and flaky for everyone else.
+#
+# Everything stays inside the workspace: vendored modules (no network), a build
+# cache under the checkout (no writes outside it), a named toolchain (no
+# download). An agent sandbox denies all three.
+set -eu
+BIN="$VISE_TMP/vise"
+if ! GOCACHE="$PWD/.gocache" GOFLAGS=-mod=vendor GOTOOLCHAIN=TOOLCHAIN_PLACEHOLDER \
+     go build -o "$BIN" ./cmd/vise 2>"$VISE_TMP/build.err"; then
+  cat "$VISE_TMP/build.err" >&2
+  exit 1
+fi
+exec "$BIN" "$@"
+PROBE
+sed "s/TOOLCHAIN_PLACEHOLDER/$TOOLCHAIN/" probe-cli.sh > probe-cli.sh.tmp
+mv probe-cli.sh.tmp probe-cli.sh
+chmod +x probe-cli.sh
+
+cat > vise.toml <<MANIFEST
+[vise]
+version = 1
+
+[stubs]
+tz = "UTC"
+lang = "C"
+seed = "1729"
+network = "declared-off"
+
+# Fingerprint the toolchain the probes pin, not whatever is first on PATH.
+[env]
+fingerprint = ["GOTOOLCHAIN=$TOOLCHAIN go version"]
+
+[[probe]]
+id = "cli-help"
+run = "./probe-cli.sh --help"
+timeout = 300
+deps = ["probe-cli.sh"]
+
+[[probe]]
+id = "cli-version"
+run = "./probe-cli.sh version"
+timeout = 300
+deps = ["probe-cli.sh"]
+
+# An error path is observable behavior too, and the one most likely to be
+# quietly reworded by a refactor. The trailing branch keeps the probe's own
+# exit at 0; what is frozen is the message and the exit code vise printed.
+[[probe]]
+id = "cli-unknown-command"
+run = "./probe-cli.sh no-such-command 2>&1 || printf 'exit=%s\\n' $?"
+timeout = 300
+deps = ["probe-cli.sh"]
+MANIFEST
+
+# The build cache line is load-bearing, not housekeeping: vise compares the
+# whole work tree around every judged run, so an unignored cache is a stray a
+# probe wrote, and every gate would be a harness error.
+cat >> .gitignore <<'IGNORE'
+.vise/journal.jsonl
+.vise/run.lock
+.vise/tmp/
+.gocache/
+IGNORE
+
+step "committing the harness"
+git add -A >/dev/null
+git -c user.email=dogfood@vise.invalid -c user.name=dogfood \
+    commit -qm "Vendor dependencies and add agent-ready probes" >/dev/null
+
+step "recording the baseline (two full passes)"
+"$BIN/vise" record >/dev/null || die "record failed; run '$BIN/vise record' in $TARGET to see why"
+git add -A >/dev/null
+git -c user.email=dogfood@vise.invalid -c user.name=dogfood \
+    commit -qm "Record behavior baseline" >/dev/null
+
+step "checking the repository is fit to hand to an agent"
+"$BIN/vise" doctor
+
+step "cold gate — nothing inherited from this shell"
+env -i HOME="$HOME" PATH="$(dirname -- "$(command -v go)"):/usr/bin:/bin" \
+    "$BIN/vise" gate --quiet \
+  || die "the cold gate is not green; an agent would inherit this failure"
+
+printf '\n'
+step "ready: $TARGET"
+step "vise binary: $BIN/vise"
+step "hand it to an agent with the task, and AGENTS.md is already at its root"

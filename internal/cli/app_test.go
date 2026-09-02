@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	core "github.com/NakliTechie/vise/internal/vise"
 )
@@ -977,5 +978,59 @@ func TestEveryCommandAppearsInBothRenderingsOfHelp(t *testing.T) {
 	}
 	if len(document.Commands) != len(commands) {
 		t.Errorf("JSON help lists %d commands, the table has %d", len(document.Commands), len(commands))
+	}
+}
+
+// The moment you most want to ask what is happening is while something is
+// happening. status and doctor report a situation without changing it, so
+// neither may queue behind a record or a gate that holds the state lock.
+func TestReadOnlyCommandsDoNotWaitForARunInProgress(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "printf hello")
+	held, err := core.AcquireStateLock(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+
+	for _, command := range []string{"status", "doctor"} {
+		done := make(chan int, 1)
+		go func() {
+			var out, errOut bytes.Buffer
+			done <- Run([]string{command, "--json"}, root, &out, &errOut)
+		}()
+		select {
+		case exit := <-done:
+			if exit != 0 {
+				t.Fatalf("%s exited %d while the lock was held", command, exit)
+			}
+		case <-time.After(20 * time.Second):
+			t.Fatalf("%s blocked on the state lock", command)
+		}
+	}
+}
+
+// A typo used to reach for the state lock before anyone checked the word was a
+// command, so `vise recrod` waited as long as the running suite. Found by a
+// probe that ran an unknown command inside a record.
+func TestAnUnknownCommandIsRefusedBeforeTheStateLock(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "printf hello")
+	held, err := core.AcquireStateLock(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+
+	done := make(chan int, 1)
+	go func() {
+		var out, errOut bytes.Buffer
+		done <- Run([]string{"no-such-command"}, root, &out, &errOut)
+	}()
+	select {
+	case exit := <-done:
+		if exit == 0 {
+			t.Fatal("an unknown command exited 0")
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("an unknown command blocked on the state lock")
 	}
 }

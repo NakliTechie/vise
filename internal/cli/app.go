@@ -96,7 +96,17 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 	// unchanged by asking it what its situation is. Concurrency is safe without
 	// one — the lockfile is replaced by atomic rename, so a reader sees the old
 	// generation or the new one, and a torn journal tail is already tolerated.
-	if command != "status" {
+	// An unknown command must be refused before anything blocks on it. The
+	// state lock is held for the length of a record or a gate, so reaching for
+	// it first turned a typo into a wait as long as the probe suite — found by
+	// a probe that ran `vise no-such-command` inside a `vise record`.
+	if !isKnownCommand(command) {
+		return renderSimpleError("vise", fmt.Sprintf("unknown command %q; run 'vise --help'", command), jsonMode, stdout, stderr)
+	}
+	// status and doctor read the situation and write nothing, so they must not
+	// queue behind a run in progress: the moment you most want to ask what is
+	// happening is while something is happening.
+	if !readOnlyCommands[command] {
 		stateLock, err := vise.AcquireStateLock(root)
 		if err != nil {
 			return renderSimpleError(command, err.Error(), jsonMode, stdout, stderr)
@@ -137,8 +147,19 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 		renderStatus(stdout, report)
 		return vise.ExitOK
 	default:
+		// Unreachable: isKnownCommand above rejects anything not in the table.
 		return renderSimpleError("vise", fmt.Sprintf("unknown command %q; run 'vise --help'", command), jsonMode, stdout, stderr)
 	}
+}
+
+// readOnlyCommands take no state lock. Each one reports a situation without
+// changing it, which is only true if it also creates nothing — see the tests
+// that assert a repository which has never run vise is unchanged by asking.
+var readOnlyCommands = map[string]bool{"status": true, "doctor": true}
+
+func isKnownCommand(name string) bool {
+	_, ok := commandUsageFor(name)
+	return ok
 }
 
 func runInit(args []string, root string, jsonMode bool, stdout, stderr io.Writer) int {
