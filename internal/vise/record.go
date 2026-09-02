@@ -27,6 +27,11 @@ type RecordResult struct {
 	Candidate string
 }
 
+type recordSelfTestResult struct {
+	probes  map[string]RunResult
+	metrics map[string]MetricResult
+}
+
 func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOptions) RecordResult {
 	outcome := NewOutcome("record")
 	outcome.Counts.Declared = len(manifest.Probes) + len(manifest.Metrics)
@@ -68,62 +73,8 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		return result
 	}
 
-	runner := Runner{Root: root, Manifest: manifest}
-	firstProbes := make(map[string]RunResult, len(manifest.Probes))
-	firstMetrics := make(map[string]MetricResult, len(manifest.Metrics))
-	for _, probe := range manifest.Probes {
-		run := runner.RunProbe(probe, true)
-		if run.HarnessError != "" {
-			result.Outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: run.HarnessError})
-		} else {
-			firstProbes[probe.ID] = run
-		}
-	}
-	for _, metric := range manifest.Metrics {
-		run := runner.RunMetric(metric)
-		if run.HarnessError != "" {
-			result.Outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: run.HarnessError})
-		} else {
-			firstMetrics[metric.ID] = run
-		}
-	}
-	if result.Outcome.Counts.Harness > 0 {
-		result.Outcome.Finalize()
-		result.Outcome.Counts.Pass = 0 // a baseline needs both passes; none was frozen
-		return result
-	}
-
-	for _, probe := range manifest.Probes {
-		run := runner.RunProbe(probe, true)
-		if run.HarnessError != "" {
-			result.Outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: run.HarnessError})
-			continue
-		}
-		if !RunResultsEqual(firstProbes[probe.ID], run) {
-			result.Outcome.AddFailure(probe.ID, Failure{
-				Class:  "flake",
-				Detail: "record self-test diverged across two full-suite passes",
-				Diff:   DiffRunResults(firstProbes[probe.ID], run),
-			})
-		}
-	}
-	for _, metric := range manifest.Metrics {
-		run := runner.RunMetric(metric)
-		if run.HarnessError != "" {
-			result.Outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: run.HarnessError})
-			continue
-		}
-		first := firstMetrics[metric.ID]
-		if first.Value != run.Value || first.ToolVersion != run.ToolVersion {
-			result.Outcome.AddFailure(metric.ID, Failure{Class: "flake", Detail: "metric diverged across two full-suite passes"})
-		}
-	}
-	if result.Outcome.Counts.Harness > 0 || result.Outcome.Counts.Flaky > 0 {
-		result.Outcome.Finalize()
-		result.Outcome.Counts.Pass = 0 // a baseline needs both passes; none was frozen
-		if result.Outcome.Counts.Harness == 0 {
-			result.Outcome.Next = Next{Action: "fix_probe", Detail: "make the named probes deterministic (normalize timestamps, ordering, temp paths, seeds), then rerun vise record"}
-		}
+	selfTest, ok := runRecordSelfTest(root, manifest, &result.Outcome)
+	if !ok {
 		return result
 	}
 
@@ -145,7 +96,7 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 			result.Outcome = harnessOnly("record", probe.ID, err.Error())
 			return result
 		}
-		entry := AddObservationBlobs(blobs, firstProbes[probe.ID])
+		entry := AddObservationBlobs(blobs, selfTest.probes[probe.ID])
 		entry.RunHash = runHash
 		entry.Deps = deps
 		entry.RecordedCommit = commit
@@ -157,7 +108,7 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 			result.Outcome = harnessOnly("record", metric.ID, err.Error())
 			return result
 		}
-		run := firstMetrics[metric.ID]
+		run := selfTest.metrics[metric.ID]
 		lock.Metrics[metric.ID] = MetricLock{RunHash: runHash, Value: run.Value, ToolVersion: run.ToolVersion}
 	}
 	if len(lock.Metrics) == 0 {
@@ -210,6 +161,71 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 	result.Outcome.Lock = lockHash
 	result.Outcome.Finalize()
 	return result
+}
+
+func runRecordSelfTest(root string, manifest Manifest, outcome *Outcome) (recordSelfTestResult, bool) {
+	runner := Runner{Root: root, Manifest: manifest}
+	first := recordSelfTestResult{
+		probes:  make(map[string]RunResult, len(manifest.Probes)),
+		metrics: make(map[string]MetricResult, len(manifest.Metrics)),
+	}
+	for _, probe := range manifest.Probes {
+		run := runner.RunProbe(probe, true)
+		if run.HarnessError != "" {
+			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: run.HarnessError})
+		} else {
+			first.probes[probe.ID] = run
+		}
+	}
+	for _, metric := range manifest.Metrics {
+		run := runner.RunMetric(metric)
+		if run.HarnessError != "" {
+			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: run.HarnessError})
+		} else {
+			first.metrics[metric.ID] = run
+		}
+	}
+	if outcome.Counts.Harness > 0 {
+		outcome.Finalize()
+		outcome.Counts.Pass = 0 // a baseline needs both passes; none was frozen
+		return recordSelfTestResult{}, false
+	}
+
+	for _, probe := range manifest.Probes {
+		run := runner.RunProbe(probe, true)
+		if run.HarnessError != "" {
+			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: run.HarnessError})
+			continue
+		}
+		if !RunResultsEqual(first.probes[probe.ID], run) {
+			outcome.AddFailure(probe.ID, Failure{
+				Class:  "flake",
+				Detail: "record self-test diverged across two full-suite passes",
+				Diff:   DiffRunResults(first.probes[probe.ID], run),
+			})
+		}
+	}
+	for _, metric := range manifest.Metrics {
+		run := runner.RunMetric(metric)
+		if run.HarnessError != "" {
+			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: run.HarnessError})
+			continue
+		}
+		firstMetric := first.metrics[metric.ID]
+		if firstMetric.Value != run.Value || firstMetric.ToolVersion != run.ToolVersion {
+			outcome.AddFailure(metric.ID, Failure{Class: "flake", Detail: "metric diverged across two full-suite passes"})
+		}
+	}
+	if outcome.Counts.Harness > 0 || outcome.Counts.Flaky > 0 {
+		outcome.Finalize()
+		outcome.Counts.Pass = 0 // a baseline needs both passes; none was frozen
+		if outcome.Counts.Harness == 0 {
+			outcome.Next = Next{Action: "fix_probe", Detail: "make the named probes deterministic (normalize timestamps, ordering, temp paths, seeds), then rerun vise record"}
+		}
+		return recordSelfTestResult{}, false
+	}
+
+	return first, true
 }
 
 func RunResultsEqual(a, b RunResult) bool {
