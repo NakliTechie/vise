@@ -291,12 +291,12 @@ func TestProbeStartedAfterInterruptIsKilledOnRegistration(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Fatalf("probe ran for %v after an interrupt", elapsed)
 	}
-	if result.Exit == 0 && result.HarnessError == "" {
-		t.Fatalf("probe was not killed: %#v", result)
+	if !strings.Contains(result.HarnessError, "interrupted before the probe started") {
+		t.Fatalf("probe was started after an interrupt: %#v", result)
 	}
 	data, err := os.ReadFile(filepath.Join(root, "child.pid"))
 	if err != nil {
-		return // the shell died before writing the pid; nothing survived
+		return // the probe never started; nothing to reap
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {

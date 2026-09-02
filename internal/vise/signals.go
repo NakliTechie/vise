@@ -1,6 +1,7 @@
 package vise
 
 import (
+	"sync"
 	"sync/atomic"
 	"syscall"
 )
@@ -18,8 +19,20 @@ var interrupted atomic.Bool
 
 func setActiveProbeGroup(pgid int) { activeProbeGroup.Store(int64(pgid)) }
 
-// MarkInterrupted records that vise is exiting on a signal.
-func MarkInterrupted() { interrupted.Store(true) }
+// probeLifecycle orders a signal against a probe start: runShell holds it
+// from before cmd.Start until the group is registered, and the signal path
+// holds it while it sets the flag and kills, so a signal either prevents the
+// start or reaches a registered group — never the gap between.
+var probeLifecycle sync.Mutex
+
+// InterruptProbes records that vise is exiting on a signal and kills the
+// running probe's process group, if any, under the lifecycle lock.
+func InterruptProbes() {
+	probeLifecycle.Lock()
+	defer probeLifecycle.Unlock()
+	interrupted.Store(true)
+	KillActiveProbeGroup()
+}
 
 // KillActiveProbeGroup SIGKILLs the running probe's process group, if any.
 // Callers invoke it from a signal handler before exiting so an interrupted

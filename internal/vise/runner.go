@@ -201,16 +201,18 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	probeLifecycle.Lock()
+	if interrupted.Load() {
+		probeLifecycle.Unlock()
+		return RunResult{HarnessError: "vise was interrupted before the probe started"}
+	}
 	if err := cmd.Start(); err != nil {
+		probeLifecycle.Unlock()
 		return RunResult{HarnessError: fmt.Sprintf("launch probe: %v", err)}
 	}
 	setActiveProbeGroup(cmd.Process.Pid)
+	probeLifecycle.Unlock()
 	defer setActiveProbeGroup(0)
-	if interrupted.Load() {
-		// The signal handler ran between Start and registration; it found no
-		// group to kill, so this probe would have outlived vise.
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()

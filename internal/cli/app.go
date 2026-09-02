@@ -36,8 +36,7 @@ func stopProbeOnSignal() {
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-signals
-		vise.MarkInterrupted()
-		vise.KillActiveProbeGroup()
+		vise.InterruptProbes()
 		code := 128
 		if number, ok := sig.(syscall.Signal); ok {
 			code += int(number)

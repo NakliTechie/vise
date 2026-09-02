@@ -277,7 +277,7 @@ EOF
   expect_vise_json_exit review 2 'metric definition changed' "$repo" gate
   preview=$(cd "$repo" && "$VERIFY_BIN" record --preview --json)
   printf '%s\n' "$preview" | grep -q 'definition changed since the recorded baseline' || fail review "preview hid the metric policy change"
-  test ! -e "$repo/.vise/journal.jsonl" || ! grep -q '"e":"record".*"e":"record"' "$repo/.vise/journal.jsonl" || fail review "preview wrote a journal event"
+  test "$(grep -c '"e":"record"' "$repo/.vise/journal.jsonl")" -eq 1 || fail review "preview wrote a journal event"
   candidate=$(printf '%s\n' "$preview" | sed -n 's/.*"candidate":"\(sha256:[0-9a-f]*\)".*/\1/p')
   test -n "$candidate" || fail review "preview returned no candidate digest"
   expect_vise_json_exit review 2 'differs from the accepted' "$repo" record --accept sha256:0000000000000000000000000000000000000000000000000000000000000000
