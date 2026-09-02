@@ -18,7 +18,15 @@ set -eu
 BIN="$VISE_TMP/app"
 if ! GOCACHE="$PWD/.gocache" GOFLAGS=-mod=vendor GOTOOLCHAIN=go1.25.8 \
      go build -o "$BIN" ./cmd/app 2>"$VISE_TMP/build.err"; then
-  cat "$VISE_TMP/build.err" >&2
+  # Print only the compiler's own diagnostics. A build failure is deterministic
+  # — the code either compiles or it does not — but the toolchain's other
+  # chatter is not: sandbox permission warnings, cache notices, and download
+  # lines vary between callers and between runs. Letting those into the
+  # observation makes two passes of the same broken code disagree, and vise
+  # reports that as a flake. The agent contract says stop and report on a
+  # flake, so a plain compile error would end the session instead of telling
+  # the agent to fix the code it just wrote.
+  grep -E '(^#|\.go:)' "$VISE_TMP/build.err" >&2 || cat "$VISE_TMP/build.err" >&2
   exit 1
 fi
 exec "$BIN" "$@"

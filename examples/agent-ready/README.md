@@ -29,6 +29,7 @@ have nothing to do with the task.
 | vendored dependencies | the sandbox has no network; a fetch fails only for the agent |
 | build cache under the checkout | the sandbox denies writes outside the workspace |
 | that cache in `.gitignore` | vise treats a file Git neither tracks nor ignores as a stray a probe wrote |
+| filtering the build's failure output | toolchain chatter differs between two runs, so a plain compile error is reported as a flake, and the contract tells the agent to stop rather than fix it |
 | named toolchain | `go.mod` requiring a version triggers a download |
 | quiet-on-success wrapper | sandbox warnings land in the frozen bytes and turn the gate red |
 | fingerprint matching the pin | catches a real toolchain change instead of PATH ordering |

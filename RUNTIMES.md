@@ -67,6 +67,34 @@ gate that named a divergence the author could not reproduce.
 - If a probe merges stderr into stdout, it has doubled the surface the host can
   write to. Merge deliberately, not by habit.
 
+## A build failure is deterministic; the toolchain's account of it is not
+
+A probe that builds before it runs usually wraps the build so its output is
+discarded on success and printed on failure. The second half is the trap. The
+compiler's own diagnostics are deterministic — the code compiles or it does
+not — but everything else on that stream is not: sandbox permission warnings,
+cache notices, download lines, all of which vary by caller and sometimes
+between two runs by the same caller.
+
+vise runs a diverging probe twice to tell a consistent difference from an
+unstable one. If the two failed builds print different chatter, the observation
+differs between the passes and the verdict is **flake**, not red. That is the
+worst possible answer: the agent contract tells an agent to stop and report on
+a flake, so a plain compile error ends the session instead of telling the agent
+to fix the code it just wrote.
+
+Print the compiler's lines and nothing else:
+
+```sh
+if ! go build -o "$BIN" ./cmd/app 2>"$VISE_TMP/build.err"; then
+  grep -E '(^#|\.go:)' "$VISE_TMP/build.err" >&2 || cat "$VISE_TMP/build.err" >&2
+  exit 1
+fi
+```
+
+The fallback matters: if nothing matches, show everything rather than failing
+silently with an empty explanation.
+
 ## The normalizer is a probe too
 
 A probe that normalizes its own output is only as deterministic as the
