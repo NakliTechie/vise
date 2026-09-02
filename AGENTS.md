@@ -119,6 +119,19 @@ Rerunning until it passes is the one thing you must not do. Stop and report.
 
 Reaching for any of these means the answer is to revert your own change instead.
 
+## When the task and the rules conflict
+
+Some tasks cannot be completed without doing something these rules forbid.
+Making the gate faster by narrowing a probe. Changing output the baseline
+freezes. Removing a check that fails. Recognize that early rather than late:
+name the rule the task would require you to break, say what an operator could do
+instead — re-record a baseline, change the manifest, accept a slower gate — and
+stop.
+
+An hour spent looking for a way around the gate is worse than one minute spent
+saying the task needs an operator. You are not failing the task by reporting
+this; you are doing the only useful thing left.
+
 ## When you finish
 
 State plainly, in this order: the gate's final verdict and exit code; what you
