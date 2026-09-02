@@ -359,6 +359,14 @@ runs before and after every probe. No probe exercised tracked-file mutation
 detection, so a defect introduced there would have gated green. The Go test
 suite covered it; the gate could not.
 
+A green gate is also not the same as a good idea. An agent asked to make the gate
+faster here bought its speed by reimplementing Git's ref resolution in Go, to
+avoid launching `git rev-parse`. Tests green, gate green — and rejected, because
+the probes drive a plain repository and exercise none of the packed-ref,
+worktree, or override paths that reimplementation endangers. The gate reports
+that observed behaviour is unchanged for the paths it walks. Whether the change
+is wise stays a human question.
+
 So: before trusting a green verdict on a change, ask which probe would have gone
 red if the change were wrong. If the answer is "none", the gate is not the check
 you want here — a unit test is, and the probe set has a gap worth filling.
