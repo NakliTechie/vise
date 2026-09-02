@@ -135,3 +135,37 @@ func TestManifestCannotOverrideTheTempDirectory(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestProposalsGetTheValidationProbesGet(t *testing.T) {
+	// Proposals are agent-written and probe-shaped. One an operator could not
+	// promote should be refused when it is drafted, not when it is promoted.
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"escaping dependency", "[[probe]]\nid='p'\nrun='true'\ndeps=['../outside.txt']\n", "path must remain inside the repository"},
+		{"artifact targeting evaluator state", "[[probe]]\nid='p'\nrun='true'\nfiles=['.vise/blobs/x']\n", "artifacts cannot target evaluator state"},
+		{"artifact targeting git metadata", "[[probe]]\nid='p'\nrun='true'\nfiles=['.GIT/index']\n", "artifacts cannot target Git metadata"},
+		{"reserved environment variable", "[[probe]]\nid='p'\nrun='true'\nenv={PATH='/tmp'}\n", "reserved variable PATH"},
+		{"duplicate declared path", "[[probe]]\nid='p'\nrun='true'\ndeps=['a.txt','./a.txt']\n", "duplicates"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTestFile(t, root, ".vise/proposals.toml", test.body)
+			_, err := LoadProposals(root)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want it to name %q", err, test.want)
+			}
+		})
+	}
+
+	// A well-formed proposal still loads.
+	root := t.TempDir()
+	writeTestFile(t, root, ".vise/proposals.toml", "[[probe]]\nid='escaped-defect'\nrun='./repro.sh'\ndeps=['fixtures/in.txt']\nfiles=['out/result.txt']\n")
+	proposals, err := LoadProposals(root)
+	if err != nil || len(proposals.Probes) != 1 || proposals.Probes[0].Timeout != 30 {
+		t.Fatalf("proposals = %#v, %v", proposals, err)
+	}
+}

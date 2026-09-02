@@ -154,36 +154,7 @@ func (m Manifest) Validate(root string) error {
 			return fmt.Errorf("duplicate id %q in %s and %s", probe.ID, prior, where)
 		}
 		seen[probe.ID] = where
-		if strings.TrimSpace(probe.Run) == "" {
-			return fmt.Errorf("%s.run must not be empty", where)
-		}
-		if probe.Timeout < 1 || probe.Timeout > 86400 {
-			return fmt.Errorf("%s.timeout must be between 1 and 86400 seconds", where)
-		}
-		for _, path := range probe.Deps {
-			if err := ValidateRelativePath(root, path, false); err != nil {
-				return fmt.Errorf("%s path %q: %w", where, path, err)
-			}
-		}
-		seenPaths := make(map[string]string)
-		for _, path := range probe.Deps {
-			clean := filepath.ToSlash(filepath.Clean(path))
-			if prior, ok := seenPaths[clean]; ok {
-				return fmt.Errorf("%s path %q duplicates %s", where, path, prior)
-			}
-			seenPaths[clean] = "deps"
-		}
-		for _, path := range probe.Files {
-			if err := ValidateArtifactPath(root, path); err != nil {
-				return fmt.Errorf("%s artifact %q: %w", where, path, err)
-			}
-			clean := filepath.ToSlash(filepath.Clean(path))
-			if prior, ok := seenPaths[clean]; ok {
-				return fmt.Errorf("%s artifact %q duplicates %s", where, path, prior)
-			}
-			seenPaths[clean] = "files"
-		}
-		if err := validateEnv(probe.Env, where); err != nil {
+		if err := validateProbeShape(root, probe, where); err != nil {
 			return err
 		}
 	}
@@ -213,6 +184,42 @@ func (m Manifest) Validate(root string) error {
 		}
 	}
 	return nil
+}
+
+// validateProbeShape checks everything about a probe except its identity: the
+// command, the timeout, the paths it consumes and produces, and its
+// environment. Proposals are probe-shaped and agent-written, so they go through
+// exactly this — a proposal an operator could not promote is a proposal that
+// should have been refused when it was drafted.
+func validateProbeShape(root string, probe Probe, where string) error {
+	if strings.TrimSpace(probe.Run) == "" {
+		return fmt.Errorf("%s.run must not be empty", where)
+	}
+	if probe.Timeout < 1 || probe.Timeout > 86400 {
+		return fmt.Errorf("%s.timeout must be between 1 and 86400 seconds", where)
+	}
+	seenPaths := make(map[string]string)
+	for _, path := range probe.Deps {
+		if err := ValidateRelativePath(root, path, false); err != nil {
+			return fmt.Errorf("%s path %q: %w", where, path, err)
+		}
+		clean := filepath.ToSlash(filepath.Clean(path))
+		if prior, ok := seenPaths[clean]; ok {
+			return fmt.Errorf("%s path %q duplicates %s", where, path, prior)
+		}
+		seenPaths[clean] = "deps"
+	}
+	for _, path := range probe.Files {
+		if err := ValidateArtifactPath(root, path); err != nil {
+			return fmt.Errorf("%s artifact %q: %w", where, path, err)
+		}
+		clean := filepath.ToSlash(filepath.Clean(path))
+		if prior, ok := seenPaths[clean]; ok {
+			return fmt.Errorf("%s artifact %q duplicates %s", where, path, prior)
+		}
+		seenPaths[clean] = "files"
+	}
+	return validateEnv(probe.Env, where)
 }
 
 func validateID(id, where string) error {
@@ -290,11 +297,8 @@ func LoadProposals(root string) (Proposals, error) {
 			return Proposals{}, fmt.Errorf("duplicate proposal id %q", probe.ID)
 		}
 		seen[probe.ID] = true
-		if strings.TrimSpace(probe.Run) == "" {
-			return Proposals{}, fmt.Errorf("%s.run must not be empty", where)
-		}
-		if probe.Timeout < 1 || probe.Timeout > 86400 {
-			return Proposals{}, fmt.Errorf("%s.timeout must be between 1 and 86400 seconds", where)
+		if err := validateProbeShape(root, *probe, where); err != nil {
+			return Proposals{}, err
 		}
 	}
 	return proposals, nil

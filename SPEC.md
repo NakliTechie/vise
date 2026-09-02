@@ -181,7 +181,7 @@ vise itself enforces **`rerun` at most once**: the third consecutive `gate` or `
 
 ### 5.1 The proposal flow (escaped defects become probes)
 
-When the driving agent discovers uncovered behavior — an escaped defect, a gap the diff revealed — it **drafts** a probe into `.vise/proposals.toml` (same schema as `[[probe]]`, agent-writable, judged by nobody). `vise status` reports the count of pending proposals (`pending_proposals`); the ids live in the file. A malformed proposals file is reported as `proposal_error` and never changes the status `state` or `next` action. The operator reviews, moves accepted entries into `vise.toml`, and — for a defect — records **after the fix lands**, as an acknowledged baseline (recording before the fix would freeze the defective output; codex review, finding 9). The doctrine gets a gesture; the judge stays operator-owned.
+When the driving agent discovers uncovered behavior — an escaped defect, a gap the diff revealed — it **drafts** a probe into `.vise/proposals.toml` (same schema as `[[probe]]`, agent-writable, judged by nobody, but validated exactly as a probe is — a proposal an operator could not promote is refused when it is drafted). `vise status` reports the count of pending proposals (`pending_proposals`); the ids live in the file. A malformed proposals file is reported as `proposal_error` and never changes the status `state` or `next` action. The operator reviews, moves accepted entries into `vise.toml`, and — for a defect — records **after the fix lands**, as an acknowledged baseline (recording before the fix would freeze the defective output; codex review, finding 9). The doctrine gets a gesture; the judge stays operator-owned.
 
 ### 5.2 The dependency closure
 
