@@ -160,41 +160,47 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	}
 
 	if opts.ProbeID == "" && outcome.Counts.Harness == 0 {
-		for _, metric := range manifest.Metrics {
-			expected := lock.Metrics[metric.ID]
-			first := runner.RunMetric(metric)
-			if first.HarnessError != "" {
-				outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: first.HarnessError})
-				continue
-			}
-			if first.ToolVersion != expected.ToolVersion {
-				outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: "metric tool version differs from recording"})
-				continue
-			}
-			if first.Value != expected.Value {
-				second := runner.RunMetric(metric)
-				if second.HarnessError != "" {
-					outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: second.HarnessError})
-					continue
-				}
-				if first.Value != second.Value || first.ToolVersion != second.ToolVersion {
-					outcome.AddFailure(metric.ID, Failure{Class: "flake", Detail: "metric changed across the single retry"})
-					result.Flaky = append(result.Flaky, metric.ID)
-					continue
-				}
-			}
-			delta := MetricDelta{Base: expected.Value, Now: first.Value, Delta: first.Value - expected.Value, Direction: metric.Direction, Enforce: metric.Enforce}
-			outcome.Metrics[metric.ID] = delta
-			regressed := metric.Enforce == "no-regress" && ((metric.Direction == "down" && first.Value > expected.Value) || (metric.Direction == "up" && first.Value < expected.Value))
-			if regressed {
-				outcome.AddFailure(metric.ID, Failure{Class: "metric", Detail: fmt.Sprintf("metric regressed from %g to %g", expected.Value, first.Value)})
-			}
-		}
+		result.Flaky = append(result.Flaky, evaluateMetrics(&outcome, runner, manifest.Metrics, lock.Metrics)...)
 	}
 	outcome.Finalize()
 	result.Outcome = outcome
 	sort.Strings(result.Flaky)
 	return result
+}
+
+func evaluateMetrics(outcome *Outcome, runner Runner, metrics []Metric, expectedMetrics map[string]MetricLock) []string {
+	var flaky []string
+	for _, metric := range metrics {
+		expected := expectedMetrics[metric.ID]
+		first := runner.RunMetric(metric)
+		if first.HarnessError != "" {
+			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: first.HarnessError})
+			continue
+		}
+		if first.ToolVersion != expected.ToolVersion {
+			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: "metric tool version differs from recording"})
+			continue
+		}
+		if first.Value != expected.Value {
+			second := runner.RunMetric(metric)
+			if second.HarnessError != "" {
+				outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: second.HarnessError})
+				continue
+			}
+			if first.Value != second.Value || first.ToolVersion != second.ToolVersion {
+				outcome.AddFailure(metric.ID, Failure{Class: "flake", Detail: "metric changed across the single retry"})
+				flaky = append(flaky, metric.ID)
+				continue
+			}
+		}
+		delta := MetricDelta{Base: expected.Value, Now: first.Value, Delta: first.Value - expected.Value, Direction: metric.Direction, Enforce: metric.Enforce}
+		outcome.Metrics[metric.ID] = delta
+		regressed := metric.Enforce == "no-regress" && ((metric.Direction == "down" && first.Value > expected.Value) || (metric.Direction == "up" && first.Value < expected.Value))
+		if regressed {
+			outcome.AddFailure(metric.ID, Failure{Class: "metric", Detail: fmt.Sprintf("metric regressed from %g to %g", expected.Value, first.Value)})
+		}
+	}
+	return flaky
 }
 
 func selectedProbes(manifest Manifest, id string) ([]Probe, error) {
