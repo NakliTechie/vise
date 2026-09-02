@@ -46,16 +46,18 @@ func TestStatusStatePrecedence(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		mutate    func(t *testing.T, root string)
-		wantState string
-		wantIn    string
+		name       string
+		mutate     func(t *testing.T, root string)
+		wantState  string
+		wantIn     string
+		wantAction string
 	}{
 		{
-			name:      "environment drift beats baseline drift",
-			mutate:    func(t *testing.T, root string) { driftFingerprint(t, root); driftBaseline(t, root) },
-			wantState: "environment-drift",
-			wantIn:    "restore the recorded toolchain",
+			name:       "environment drift beats baseline drift",
+			mutate:     func(t *testing.T, root string) { driftFingerprint(t, root); driftBaseline(t, root) },
+			wantState:  "environment-drift",
+			wantAction: "human",
+			wantIn:     "restore the recorded toolchain",
 		},
 		{
 			name: "an empty manifest beats environment drift",
@@ -63,8 +65,9 @@ func TestStatusStatePrecedence(t *testing.T) {
 				driftFingerprint(t, root)
 				writeTestFile(t, root, "vise.toml", manifest("", "cat tool-version"))
 			},
-			wantState: "harness-error",
-			wantIn:    "declares no [[probe]]",
+			wantState:  "harness-error",
+			wantAction: "human",
+			wantIn:     "declares no [[probe]]",
 		},
 		{
 			name: "a broken journal beats environment drift",
@@ -75,8 +78,9 @@ func TestStatusStatePrecedence(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantState: "harness-error",
-			wantIn:    "repair the local journal",
+			wantState:  "harness-error",
+			wantAction: "human",
+			wantIn:     "repair the local journal",
 		},
 		{
 			name: "a failing fingerprint command beats baseline drift",
@@ -86,22 +90,25 @@ func TestStatusStatePrecedence(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantState: "harness-error",
-			wantIn:    "repair the environment fingerprint command",
+			wantState:  "harness-error",
+			wantAction: "human",
+			wantIn:     "repair the environment fingerprint command",
 		},
 		{
 			name: "malformed proposals never change the verdict",
 			mutate: func(t *testing.T, root string) {
 				writeTestFile(t, root, ".vise/proposals.toml", "not = [valid\n")
 			},
-			wantState: "ready",
-			wantIn:    "run vise gate",
+			wantState:  "ready",
+			wantAction: "proceed",
+			wantIn:     "run vise gate",
 		},
 		{
-			name:      "baseline drift alone reports itself",
-			mutate:    driftBaseline,
-			wantState: "baseline-drift",
-			wantIn:    "vise.toml and vise.lock disagree",
+			name:       "baseline drift alone reports itself",
+			mutate:     driftBaseline,
+			wantState:  "baseline-drift",
+			wantAction: "human",
+			wantIn:     "vise.toml and vise.lock disagree",
 		},
 	}
 
@@ -115,6 +122,12 @@ func TestStatusStatePrecedence(t *testing.T) {
 			}
 			if !strings.Contains(report.Next.Detail, test.wantIn) {
 				t.Fatalf("next detail %q does not name %q", report.Next.Detail, test.wantIn)
+			}
+			// The action, not only the prose. An agent branches on the action,
+			// and changing environment drift's action to "proceed" — carry on
+			// through a moved toolchain — left this test green.
+			if report.Next.Action != test.wantAction {
+				t.Fatalf("next action = %q, want %q", report.Next.Action, test.wantAction)
 			}
 			if report.Exit != ExitOK {
 				t.Fatalf("status must always exit 0, got %d", report.Exit)

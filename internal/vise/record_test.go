@@ -213,7 +213,9 @@ func TestTheReviewDiffDescribesARemovedProbeAsFullyAsAnAddedOne(t *testing.T) {
 	if removed == "" || added == "" {
 		t.Fatalf("diff did not describe both probes:\n%s", diff)
 	}
-	for _, field := range []string{"1 file(s)", "recorded at " + probe.RecordedCommit} {
+	// Every field, not the two the finding was about. Dropping stdout from the
+	// removed-probe line left the earlier version of this test green.
+	for _, field := range []string{"exit 0", probe.Stdout, probe.Stderr, "1 file(s)", "recorded at " + probe.RecordedCommit} {
 		if !strings.Contains(added, field) {
 			t.Fatalf("the added line lost %q: %s", field, added)
 		}
@@ -297,9 +299,19 @@ func TestAnAddedOrRemovedArtifactIsNotReportedAsACorruptBlob(t *testing.T) {
 		t.Fatalf("the added artifact is not mentioned at all:\n%s", diff)
 	}
 
-	// And the same in reverse: an artifact that goes away.
+	if !strings.Contains(diff, "added") {
+		t.Fatalf("an added artifact is not described as added:\n%s", diff)
+	}
+
+	// And the same in reverse: an artifact that goes away. Asserting the word,
+	// not only the absence of "unreadable" — silently printing nothing at all
+	// also avoids that word, and leaves the reviewer unaware the artifact is
+	// gone.
 	reverse := LockfileDiff(root, newLock, oldLock, map[string][]byte{hash: content})
 	if strings.Contains(reverse, "unreadable") {
 		t.Fatalf("a removed artifact was reported as a corrupt blob:\n%s", reverse)
+	}
+	if !strings.Contains(reverse, "out/new.txt") || !strings.Contains(reverse, "removed") {
+		t.Fatalf("a removed artifact is not described as removed:\n%s", reverse)
 	}
 }

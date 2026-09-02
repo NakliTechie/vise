@@ -160,8 +160,23 @@ func TestDoctorWritesNothing(t *testing.T) {
 	if before.Tracked != after.Tracked || len(before.ChangedUntracked(after)) > 0 {
 		t.Fatalf("doctor changed the checkout: %v", before.ChangedUntracked(after))
 	}
-	if _, err := os.Stat(filepath.Join(root, ".vise", "run.lock")); err == nil {
-		t.Fatal("doctor created .vise/run.lock")
+	if _, err := os.Stat(filepath.Join(root, ".vise")); err == nil {
+		t.Fatal("doctor created vise state in a repository that never ran vise")
+	}
+	// The work-tree snapshot above deliberately excludes vise's own local
+	// state, so it cannot see a write to the journal or the run lock. Without
+	// this, making doctor append a journal event left the test green.
+	digestBefore, err := evaluatorStateDigest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	Doctor(root)
+	digestAfter, err := evaluatorStateDigest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if digestBefore != digestAfter {
+		t.Fatal("doctor wrote to the manifest, lockfile, blobs, or journal")
 	}
 }
 
@@ -238,8 +253,14 @@ func TestDoctorFindingsUseStableCheckNames(t *testing.T) {
 func TestDoctorNamesAnExpensiveWorkTreeSnapshot(t *testing.T) {
 	root := testGitRepo(t)
 	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"true\"]\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
-	for i := 0; i < snapshotFileBudget+1; i++ {
+	// A literal count, not one derived from the budget: a fixture sized from
+	// the constant under test moves with it, so lowering the budget to 1 left
+	// this green while proving nothing.
+	for i := 0; i < 2001; i++ {
 		writeTestFile(t, root, filepath.Join("deps", "pkg"+strconv.Itoa(i)+".txt"), "x")
+	}
+	if snapshotFileBudget != 2000 {
+		t.Fatalf("snapshotFileBudget is %d; this fixture is sized for 2000 and must be resized deliberately", snapshotFileBudget)
 	}
 
 	report := Doctor(root)
@@ -376,5 +397,19 @@ func TestDoctorAsksAboutTheBlobsTheLockfileReferences(t *testing.T) {
 		if finding.Check == "baseline-committed" {
 			t.Fatalf("an uncommitted orphan blob was reported: %s", finding.Detail)
 		}
+	}
+
+	// And a blob the lockfile does reference, uncommitted, must be reported —
+	// without this the check could examine nothing at all and stay green.
+	testGit(t, root, "rm", "-r", "-q", "--cached", filepath.Join(".vise", "blobs"))
+	testGit(t, root, "commit", "-qm", "drop the blobs")
+	var detail string
+	for _, finding := range Doctor(root).Findings {
+		if finding.Check == "baseline-committed" {
+			detail = finding.Detail
+		}
+	}
+	if !strings.Contains(detail, "not committed") {
+		t.Fatalf("uncommitted referenced blobs went unreported: %q", detail)
 	}
 }

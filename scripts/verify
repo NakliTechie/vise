@@ -110,6 +110,33 @@ expect_exit() {
   fi
 }
 
+# expect_single_json_object asserts that --json emits exactly one JSON object
+# and nothing else. A mutation that appended a line of prose after the object
+# survived every feature here, because the checks grepped for a substring and a
+# corrupted payload still contains it.
+expect_single_json_object() {
+  feature=$1
+  repo=$2
+  shift 2
+  set +e
+  output=$(cd "$repo" && "$VERIFY_BIN" "$@" --json)
+  got=$?
+  set -e
+  if test "$got" -ne 0; then
+    printf '%s\n' "$output" >&2
+    fail "$feature" "expected exit 0 from: $* --json"
+  fi
+  lines=$(printf '%s\n' "$output" | wc -l | tr -d ' ')
+  if test "$lines" -ne 1; then
+    printf '%s\n' "$output" >&2
+    fail "$feature" "$* --json emitted $lines lines; the contract is one object"
+  fi
+  case $output in
+    '{'*'}') ;;
+    *) printf '%s\n' "$output" >&2; fail "$feature" "$* --json is not a single JSON object" ;;
+  esac
+}
+
 expect_vise_json_exit() {
   feature=$1
   want=$2
@@ -130,7 +157,9 @@ expect_vise_json_exit() {
 verify_orientation() {
   "$VERIFY_BIN" --help | grep -q 'deterministic behavior locks' || fail orientation "help omitted the product description"
   "$VERIFY_BIN" version --json | grep -q '"version":"0.3.0-dev"' || fail orientation "version JSON is missing"
+  expect_single_json_object orientation "$VISE_ROOT" version
   outside=$(mktemp -d "$VERIFY_RUN/orientation.XXXXXX")
+  expect_single_json_object orientation "$outside" status
   (cd "$outside" && "$VERIFY_BIN" status --json) | grep -q '"state":"no-git"' || fail orientation "status outside Git did not explain the missing repository"
   summary orientation pass
 }
@@ -217,12 +246,23 @@ verify_baseline() {
   repo=$(new_repo baseline)
   write_baseline_fixture "$repo"
   commit_fixture "$repo"
-  (cd "$repo" && "$VERIFY_BIN" record --json) | grep -q '"verdict":"green"' || fail baseline "record did not create a baseline"
+  # Every step asserts the exit code, not only the text. Piping vise into grep
+  # checks grep's exit status and discards vise's, which is how a mutation that
+  # made `gate` always exit nonzero passed this feature.
+  expect_vise_json_exit baseline 0 '"verdict":"green"' "$repo" record
   test -f "$repo/vise.lock" || fail baseline "record did not create vise.lock"
-  (cd "$repo" && "$VERIFY_BIN" status --json) | grep -q '"state":"ready"' || fail baseline "status did not report a ready baseline"
-  (cd "$repo" && "$VERIFY_BIN" run behavior) | grep -q 'value=alpha' || fail baseline "raw probe run returned the wrong output"
-  (cd "$repo" && "$VERIFY_BIN" verify --json) | grep -q '"verdict":"green"' || fail baseline "verify rejected unchanged behavior"
-  (cd "$repo" && "$VERIFY_BIN" gate --quiet) | grep -q 'GATE GREEN' || fail baseline "gate did not emit the green verdict"
+  expect_vise_json_exit baseline 0 '"state":"ready"' "$repo" status
+  expect_single_json_object baseline "$repo" status
+  expect_exit 0 sh -c "cd '$repo' && '$VERIFY_BIN' run behavior >'$repo/run.out'"
+  grep -q 'value=alpha' "$repo/run.out" || fail baseline "raw probe run returned the wrong output"
+  expect_vise_json_exit baseline 0 '"verdict":"green"' "$repo" verify
+  expect_single_json_object baseline "$repo" verify
+  expect_vise_json_exit baseline 0 '"verdict":"green"' "$repo" gate
+  # Exit code and text asserted separately. Piping into grep checks grep's
+  # status, so a mutation making gate always exit nonzero passed this feature
+  # while its own output still said GATE GREEN.
+  expect_exit 0 sh -c "cd '$repo' && '$VERIFY_BIN' gate --quiet >'$repo/gate.out'"
+  grep -q 'GATE GREEN' "$repo/gate.out" || fail baseline "gate did not emit the green verdict"
   test "$(cat "$repo/out/result.txt")" = alpha || fail baseline "declared artifact was not captured"
   summary baseline pass
 }

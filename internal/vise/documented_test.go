@@ -3,7 +3,6 @@ package vise
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -22,43 +21,33 @@ func TestEveryDoctorCheckIsDocumented(t *testing.T) {
 	}
 }
 
-// Every check name Doctor emits must be in the registry the guard reads.
-// Without this, a check added to the code and not to the list leaves the guard
-// passing while the new surface is undocumented — which is the failure the
-// guard exists to prevent, reproduced one level up.
-func TestDoctorChecksRegistryMatchesWhatDoctorEmits(t *testing.T) {
-	emitted := map[string]bool{}
-	collect := func(report DoctorReport) {
-		for _, finding := range report.Findings {
-			emitted[finding.Check] = true
+// Every finding a registered check produces must carry the name it was
+// registered under. Renaming the emitted string used to leave the
+// documentation guard checking a name nothing emitted any more, and passing.
+func TestEachDoctorCheckEmitsTheNameItIsRegisteredUnder(t *testing.T) {
+	// A repository with as many gaps open at once as static checks can see.
+	root := testGitRepo(t)
+	writeTestFile(t, root, ".gitignore", "node_modules/\n")
+	writeTestFile(t, root, "wrapper.sh", "#!/bin/sh\nprintf %s \"$VISE_TMP\"\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"sh wrapper.sh\"\nenv = { CACHE = \"/opt/elsewhere\" }\n")
+	for i := 0; i < 2001; i++ {
+		writeTestFile(t, root, filepath.Join("deps", "pkg"+strconv.Itoa(i)+".txt"), "x")
+	}
+	manifest, _, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, check := range doctorRegistry {
+		findings := check.Run(root, manifest)
+		if len(findings) == 0 {
+			t.Errorf("%s produced no finding in a repository with every gap open, so nothing here proves it runs", check.Name)
+			continue
 		}
-	}
-
-	// A repository with every static gap open at once.
-	bare := testGitRepo(t)
-	writeTestFile(t, bare, ".gitignore", "node_modules/\n")
-	writeTestFile(t, bare, "wrapper.sh", "#!/bin/sh\nprintf %s \"$VISE_TMP\"\n")
-	writeTestFile(t, bare, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"sh wrapper.sh\"\nenv = { CACHE = \"/opt/elsewhere\" }\n")
-	for i := 0; i < snapshotFileBudget+1; i++ {
-		writeTestFile(t, bare, filepath.Join("deps", "pkg"+strconv.Itoa(i)+".txt"), "x")
-	}
-	collect(Doctor(bare))
-
-	broken := testGitRepo(t)
-	writeTestFile(t, broken, "vise.toml", "not = [valid\n")
-	collect(Doctor(broken))
-
-	// git-work-tree is emitted by the CLI, which owns the no-repository path.
-	emitted["git-work-tree"] = true
-
-	for check := range emitted {
-		if !slices.Contains(DoctorChecks, check) {
-			t.Errorf("Doctor emitted %q and DoctorChecks does not list it, so nothing requires it to be documented", check)
-		}
-	}
-	for _, check := range DoctorChecks {
-		if !emitted[check] {
-			t.Logf("note: %q is registered and was not emitted by these fixtures", check)
+		for _, finding := range findings {
+			if finding.Check != check.Name {
+				t.Errorf("the %s check emitted a finding named %q", check.Name, finding.Check)
+			}
 		}
 	}
 }

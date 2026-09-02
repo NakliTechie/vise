@@ -35,23 +35,40 @@ type DoctorReport struct {
 	Next     Next            `json:"next"`
 }
 
-// DoctorChecks is every check name Doctor can emit, as data.
+// doctorCheck pairs a check's name with the function that performs it.
 //
-// It exists so the test that requires each one to be documented cannot go
-// stale: a hand-copied list in a test is a list that stops matching the code
-// the moment somebody adds a check, and then the guard passes while the new
-// surface is undocumented — which is the exact failure the guard is for.
-var DoctorChecks = []string{
-	"env-fingerprint",
-	"portable-paths",
-	"declared-inputs",
-	"baseline-committed",
-	"local-state-ignored",
-	"agent-contract",
-	"snapshot-cost",
-	"manifest",
-	"git-work-tree",
+// A hand-maintained list beside a hand-written call chain is two things that
+// drift: deleting a call left the "is it documented" guard passing, and
+// renaming the emitted name left it checking the old one. The registry is the
+// chain — Doctor iterates it — and a test asserts every finding carries the
+// name it was registered under.
+type doctorCheck struct {
+	Name string
+	Run  func(root string, manifest Manifest) []DoctorFinding
 }
+
+var doctorRegistry = []doctorCheck{
+	{"env-fingerprint", func(_ string, m Manifest) []DoctorFinding { return checkFingerprint(m) }},
+	{"portable-paths", func(_ string, m Manifest) []DoctorFinding { return checkPortablePaths(m) }},
+	{"declared-inputs", checkUndeclaredScripts},
+	{"baseline-committed", func(root string, _ Manifest) []DoctorFinding { return checkBaselineCommitted(root) }},
+	{"local-state-ignored", func(root string, _ Manifest) []DoctorFinding { return checkLocalStateIgnored(root) }},
+	{"agent-contract", func(root string, _ Manifest) []DoctorFinding { return checkAgentContract(root) }},
+	{"snapshot-cost", func(root string, _ Manifest) []DoctorFinding { return checkSnapshotCost(root) }},
+}
+
+// DoctorChecks is every check name Doctor can emit: the registry, plus the two
+// the registry cannot hold — "manifest", which replaces all of them when
+// vise.toml will not parse, and "git-work-tree", which the CLI emits before a
+// repository is even resolved.
+var DoctorChecks = func() []string {
+	names := []string{"manifest", "git-work-tree"}
+	for _, check := range doctorRegistry {
+		names = append(names, check.Name)
+	}
+	sort.Strings(names)
+	return names
+}()
 
 // Doctor inspects the checkout without running a probe or writing anything.
 func Doctor(root string) DoctorReport {
@@ -68,13 +85,9 @@ func Doctor(root string) DoctorReport {
 		return report
 	}
 
-	report.Findings = append(report.Findings, checkFingerprint(manifest)...)
-	report.Findings = append(report.Findings, checkPortablePaths(manifest)...)
-	report.Findings = append(report.Findings, checkUndeclaredScripts(root, manifest)...)
-	report.Findings = append(report.Findings, checkBaselineCommitted(root)...)
-	report.Findings = append(report.Findings, checkLocalStateIgnored(root)...)
-	report.Findings = append(report.Findings, checkAgentContract(root)...)
-	report.Findings = append(report.Findings, checkSnapshotCost(root)...)
+	for _, check := range doctorRegistry {
+		report.Findings = append(report.Findings, check.Run(root, manifest)...)
+	}
 	report.finish()
 	return report
 }

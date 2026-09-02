@@ -166,7 +166,7 @@ func buildFingerprintComparison(root string, manifest Manifest, lock Lockfile, r
 	if err != nil {
 		report.State = "harness-error"
 		report.Lock.Error = err.Error()
-		report.Next = Next{Action: NextFixProbe, Detail: "repair the environment fingerprint command"}
+		report.Next = Next{Action: NextHuman, Detail: "repair the environment fingerprint command in vise.toml; an agent may not write it"}
 		return
 	}
 	matches := FingerprintEqual(fingerprint, lock.Fingerprint)
