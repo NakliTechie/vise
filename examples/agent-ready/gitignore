@@ -1,0 +1,15 @@
+# Copy these lines into the repository's .gitignore.
+#
+# The first three are vise's own per-checkout state: the journal, the run lock,
+# and the probe scratch. `vise init` appends them for you.
+.vise/journal.jsonl
+.vise/run.lock
+.vise/tmp/
+
+# The build cache the probe wrapper writes. This one is load-bearing, not
+# housekeeping: vise compares the whole work tree around every judged run, and
+# a file Git neither tracks nor ignores is a harness error. An ignored path is
+# the one place a probe is allowed to write, and that is exactly what a build
+# cache is. Without this line every probe here fails on its first run with
+# "wrote files git neither tracks nor ignores".
+.gocache/
