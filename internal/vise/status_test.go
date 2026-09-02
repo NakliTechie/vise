@@ -1,6 +1,8 @@
 package vise
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -84,5 +86,27 @@ func TestStatusReportsTrackedArtifactAsDrift(t *testing.T) {
 	report := BuildStatus(root)
 	if report.State != "baseline-drift" || !strings.Contains(strings.Join(report.Lock.Drift, "\n"), `build: declared artifact "out/result.txt" is tracked by git`) {
 		t.Fatalf("tracked artifact status = %#v", report)
+	}
+}
+
+func TestStatusReportsGitInspectionFailureAsDrift(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n[[probe]]\nid = \"build\"\nrun = \"mkdir -p out; printf x > out/result.txt; printf stable\"\nfiles = [\"out/result.txt\"]\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "manifest")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+	index := filepath.Join(root, ".git", "index")
+	if err := os.WriteFile(index, []byte("corrupt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := BuildStatus(root)
+	if report.State == "ready" || !strings.Contains(strings.Join(report.Lock.Drift, "\n"), "cannot inspect declared artifacts") {
+		t.Fatalf("report = %#v", report)
 	}
 }
