@@ -35,6 +35,8 @@ vise status
 vise init
 ```
 
+[GUIDE.md](GUIDE.md) walks one full campaign with the real output of every command, including the recovery paths (flakes, drift, accepting a new baseline).
+
 `vise init` writes a commented `vise.toml`. Replace the example with at least one deterministic probe. A minimal CLI probe looks like this:
 
 ```toml
@@ -147,4 +149,4 @@ shellcheck scripts/verify
 govulncheck ./...
 ```
 
-The full feature inventory and known traps live in [`verify/features/`](verify/features/README.md).
+The full feature inventory and known traps live in [`verify/features/`](verify/features/README.md); the command-by-command walkthrough is [GUIDE.md](GUIDE.md).
