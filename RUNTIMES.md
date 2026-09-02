@@ -67,6 +67,41 @@ gate that named a divergence the author could not reproduce.
 - If a probe merges stderr into stdout, it has doubled the surface the host can
   write to. Merge deliberately, not by habit.
 
+## Output that depends on live state: build the state inside the probe
+
+Some of the output most worth freezing is the output that changes every time
+you look at it. `vise status` prints the journal tail, so it differs after
+every run. A review diff names commits and content hashes, so it differs in
+every clone.
+
+The instinct is to declare it unfreezable. The better move is to stop pointing
+the probe at the live repository and have it build a small one of its own,
+inside `$VISE_TMP`, where the state is whatever the probe put there:
+
+```sh
+WORK="$VISE_TMP/scratch"
+mkdir -p "$WORK" && cd "$WORK"
+git init -q . && git config user.email probe@example.invalid && git config user.name probe
+printf '[vise]\nversion = 1\n[[probe]]\nid = "only"\nrun = "printf one"\n' > vise.toml
+git add -A && git commit -qm base
+"$BIN" record > /dev/null
+"$BIN" status 2>&1 | sed -E 's/[0-9a-f]{64}/HASH/g; s/[0-9a-f]{40}/COMMIT/g'
+```
+
+The scratch directory is wiped after the run, so nothing leaks into the
+checkout. What is frozen is every line the command prints and the order it
+prints them in, with the values that cannot be stable normalised away. That is
+usually the part you actually care about: a renderer is much more likely to
+lose a line than to invent a hash.
+
+Two cautions, both learned the hard way. The normaliser is itself a probe (see
+below), and a probe built this way can freeze the wrong thing entirely without
+looking any different: the first version of the review-diff probe here forgot
+that `record` refuses a dirty tree, froze that refusal instead of a diff, and
+passed green while covering nothing. Break the code the probe is supposed to
+watch and confirm the gate goes red. A probe that has never gone red is not
+known to be watching anything.
+
 ## A build failure is deterministic; the toolchain's account of it is not
 
 A probe that builds before it runs usually wraps the build so its output is
