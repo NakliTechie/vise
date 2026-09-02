@@ -55,7 +55,34 @@ type StatusReport struct {
 func BuildStatus(root string) StatusReport {
 	report := StatusReport{V: LockVersion, Cmd: "status", Exit: ExitOK, State: "not-initialized", Next: Next{Action: "record_first", Detail: "run vise init, declare probes, and record a baseline"}}
 	manifest, manifestBytes, manifestErr := buildManifestStatus(root, &report)
+	buildLockStatus(root, manifest, manifestBytes, manifestErr, &report)
+	buildProposalsStatus(root, &report)
+	buildJournalStatus(root, &report)
+	return report
+}
 
+func buildProposalsStatus(root string, report *StatusReport) {
+	// proposals.toml is agent-writable and judges nothing, so a malformed file
+	// is reported but never changes the state or the next action.
+	proposals, err := LoadProposals(root)
+	if err != nil {
+		report.ProposalError = err.Error()
+	} else {
+		report.PendingProposals = len(proposals.Probes)
+	}
+}
+
+func buildJournalStatus(root string, report *StatusReport) {
+	journal, err := ReadJournal(root, 5)
+	if err != nil {
+		report.State = "harness-error"
+		report.Next = Next{Action: "fix_probe", Detail: "repair the local journal"}
+	} else {
+		report.Journal = journal
+	}
+}
+
+func buildLockStatus(root string, manifest Manifest, manifestBytes []byte, manifestErr error, report *StatusReport) {
 	lock, lockBytes, lockErr := LoadLockfile(root)
 	if lockErr != nil {
 		if os.IsNotExist(lockErr) {
@@ -119,23 +146,6 @@ func BuildStatus(root string) StatusReport {
 			}
 		}
 	}
-
-	// proposals.toml is agent-writable and judges nothing, so a malformed file
-	// is reported but never changes the state or the next action.
-	proposals, err := LoadProposals(root)
-	if err != nil {
-		report.ProposalError = err.Error()
-	} else {
-		report.PendingProposals = len(proposals.Probes)
-	}
-	journal, err := ReadJournal(root, 5)
-	if err != nil {
-		report.State = "harness-error"
-		report.Next = Next{Action: "fix_probe", Detail: "repair the local journal"}
-	} else {
-		report.Journal = journal
-	}
-	return report
 }
 
 func buildManifestStatus(root string, report *StatusReport) (Manifest, []byte, error) {
