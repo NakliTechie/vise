@@ -425,6 +425,27 @@ committed wrapper the repository controls:
 exec "${VISE_BIN:-vise}" gate "$@"
 ```
 
+**Expect the host to write into your observations.** A probe freezes bytes, and
+the machine adds its own. In an agent sandbox macOS could not resolve its temp
+directory, so every `git` call inside a probe printed
+`git: warning: confstr() failed ...` into the recorded output: invisible in a
+terminal, eight extra lines in the sandbox, and a red gate naming a divergence
+its author could not reproduce. vise pins `TMPDIR` to the probe's own scratch,
+which removes that one at the source, but the shape recurs. Two habits help:
+normalize or drop host chatter, and remember a filter only covers the commands
+you actually pipe through it — the `git init` beside the pipeline is where the
+noise gets in.
+
+**Let the agent run the gate before you give it work.** The cheapest possible
+handover test is one turn:
+
+> Run `vise gate --json` and report the exit code and verdict. Change nothing.
+
+If the agent's answer differs from yours, stop and fix that before assigning
+anything. Every environment failure in this project's dogfood — the missing
+toolchain, the denied cache, the host warnings, the stale binary — would have
+surfaced in that one turn instead of consuming a whole session.
+
 **One agent, one worktree.** Give each agent its own `git worktree` and do not
 commit into it while it is running. Mid-flight commits move the baseline under
 the agent, which then reasons about a repository that no longer exists — an
