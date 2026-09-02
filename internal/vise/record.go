@@ -33,135 +33,266 @@ type recordSelfTestResult struct {
 	metrics map[string]MetricResult
 }
 
+type recordRun struct {
+	root          string
+	manifest      Manifest
+	manifestBytes []byte
+	opts          RecordOptions
+	result        RecordResult
+	dirty         bool
+	oldLock       Lockfile
+	hasOld        bool
+	fingerprint   Fingerprint
+	commit        string
+	selfTest      recordSelfTestResult
+	lock          Lockfile
+	blobs         map[string][]byte
+	lockBytes     []byte
+	lockHash      string
+}
+
 func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOptions) RecordResult {
+	record := newRecordRun(root, manifest, manifestBytes, opts)
+	if !record.checkManifest() {
+		return record.result
+	}
+	if !record.checkWorkingTree() {
+		return record.result
+	}
+	if !record.loadBaselineForReview() {
+		return record.result
+	}
+	if !record.captureEnvironment() {
+		return record.result
+	}
+	if !record.resolveHead() {
+		return record.result
+	}
+	if !record.runSelfTest() {
+		return record.result
+	}
+	if !record.assembleLockfile() {
+		return record.result
+	}
+	if !record.computeCandidate() {
+		return record.result
+	}
+	// Every other step returns true to continue; this one returns true to
+	// stop, so it is named for what its answer means. A preview is a complete
+	// outcome, not a failure — it is the one early return that is success.
+	if record.finishedAfterPreview() {
+		return record.result
+	}
+	if !record.checkAcceptance() {
+		return record.result
+	}
+	if !record.reviewOverwrite() {
+		return record.result
+	}
+	if !record.writeGeneration() {
+		return record.result
+	}
+	if !record.computeTamperHash() {
+		return record.result
+	}
+	if !record.appendJournal() {
+		return record.result
+	}
+	record.finalize()
+	return record.result
+}
+
+func newRecordRun(root string, manifest Manifest, manifestBytes []byte, opts RecordOptions) *recordRun {
 	outcome := NewOutcome("record")
 	outcome.Counts.Declared = len(manifest.Probes) + len(manifest.Metrics)
-	result := RecordResult{Outcome: outcome}
-	if len(manifest.Probes) == 0 {
-		result.Outcome = harnessWithNext("record", "manifest", "manifest must declare at least one [[probe]] before recording", Next{Action: NextFixProbe, Detail: "declare at least one probe in vise.toml, commit the harness, then rerun vise record"})
-		return result
-	}
+	return &recordRun{root: root, manifest: manifest, manifestBytes: manifestBytes, opts: opts, result: RecordResult{Outcome: outcome}}
+}
 
-	dirty, err := GitDirty(root)
+func (r *recordRun) checkManifest() bool {
+	if len(r.manifest.Probes) == 0 {
+		r.result.Outcome = harnessWithNext("record", "manifest", "manifest must declare at least one [[probe]] before recording", Next{Action: NextFixProbe, Detail: "declare at least one probe in vise.toml, commit the harness, then rerun vise record"})
+		return false
+	}
+	return true
+}
+
+func (r *recordRun) checkWorkingTree() bool {
+	dirty, err := GitDirty(r.root)
 	if err != nil {
-		result.Outcome = harnessOnly("record", "git", err.Error())
-		return result
+		r.result.Outcome = harnessOnly("record", "git", err.Error())
+		return false
 	}
-	if dirty && !opts.AllowDirty {
-		result.Outcome = harnessWithNext("record", "working-tree", "record requires a clean working tree; commit or stash changes, or pass --allow-dirty", Next{Action: NextHuman, Detail: "commit or stash the current tree, or rerun record with --allow-dirty"})
-		return result
+	r.dirty = dirty
+	if dirty && !r.opts.AllowDirty {
+		r.result.Outcome = harnessWithNext("record", "working-tree", "record requires a clean working tree; commit or stash changes, or pass --allow-dirty", Next{Action: NextHuman, Detail: "commit or stash the current tree, or rerun record with --allow-dirty"})
+		return false
 	}
+	return true
+}
 
-	oldLock, _, oldErr := LoadLockfile(root)
-	hasOld := oldErr == nil
+func (r *recordRun) loadBaselineForReview() bool {
+	oldLock, _, oldErr := LoadLockfile(r.root)
+	r.hasOld = oldErr == nil
 	if oldErr != nil && !os.IsNotExist(oldErr) {
-		result.Outcome = harnessOnly("record", "vise.lock", oldErr.Error())
-		return result
+		r.result.Outcome = harnessOnly("record", "vise.lock", oldErr.Error())
+		return false
 	}
-	if hasOld && !opts.ReviewedDiff && !opts.Preview && opts.Accept == "" {
-		result.Outcome = harnessWithNext("record", "operator-review", "vise.lock already exists; preview the behavior diff with --preview and accept its digest with --accept, or rerun with --i-reviewed-the-diff", Next{Action: NextHuman, Detail: "run record --preview, review the diff, then record --accept <digest>; or rerun with --i-reviewed-the-diff to review and write in one step"})
-		return result
+	r.oldLock = oldLock
+	if r.hasOld && !r.opts.ReviewedDiff && !r.opts.Preview && r.opts.Accept == "" {
+		r.result.Outcome = harnessWithNext("record", "operator-review", "vise.lock already exists; preview the behavior diff with --preview and accept its digest with --accept, or rerun with --i-reviewed-the-diff", Next{Action: NextHuman, Detail: "run record --preview, review the diff, then record --accept <digest>; or rerun with --i-reviewed-the-diff to review and write in one step"})
+		return false
 	}
+	return true
+}
 
-	fingerprint, err := captureStableFingerprint(root, manifest)
+func (r *recordRun) captureEnvironment() bool {
+	fingerprint, err := captureStableFingerprint(r.root, r.manifest)
 	if err != nil {
-		result.Outcome = harnessWithNext("record", "fingerprint", err.Error(), Next{Action: NextFixProbe, Detail: "repair the environment fingerprint command, then rerun record"})
-		return result
+		r.result.Outcome = harnessWithNext("record", "fingerprint", err.Error(), Next{Action: NextFixProbe, Detail: "repair the environment fingerprint command, then rerun record"})
+		return false
 	}
-	commit, err := GitHead(root)
-	if err != nil {
-		result.Outcome = harnessOnly("record", "git", err.Error())
-		return result
-	}
+	r.fingerprint = fingerprint
+	return true
+}
 
-	selfTest, ok := runRecordSelfTest(root, manifest, &result.Outcome)
+func (r *recordRun) resolveHead() bool {
+	commit, err := GitHead(r.root)
+	if err != nil {
+		r.result.Outcome = harnessOnly("record", "git", err.Error())
+		return false
+	}
+	r.commit = commit
+	return true
+}
+
+func (r *recordRun) runSelfTest() bool {
+	selfTest, ok := runRecordSelfTest(r.root, r.manifest, &r.result.Outcome)
 	if !ok {
-		return result
+		return false
 	}
+	r.selfTest = selfTest
+	return true
+}
 
+func (r *recordRun) assembleLockfile() bool {
 	lock := Lockfile{
 		V:           LockVersion,
-		Fingerprint: fingerprint,
-		Probes:      make(map[string]ProbeLock, len(manifest.Probes)),
-		Metrics:     make(map[string]MetricLock, len(manifest.Metrics)),
+		Fingerprint: r.fingerprint,
+		Probes:      make(map[string]ProbeLock, len(r.manifest.Probes)),
+		Metrics:     make(map[string]MetricLock, len(r.manifest.Metrics)),
 	}
 	blobs := make(map[string][]byte)
-	for _, probe := range manifest.Probes {
+	for _, probe := range r.manifest.Probes {
 		runHash, err := ProbeRunHash(probe)
 		if err != nil {
-			result.Outcome = harnessOnly("record", probe.ID, err.Error())
-			return result
+			r.result.Outcome = harnessOnly("record", probe.ID, err.Error())
+			return false
 		}
-		deps, err := HashDependencies(root, probe.Deps)
+		deps, err := HashDependencies(r.root, probe.Deps)
 		if err != nil {
-			result.Outcome = harnessOnly("record", probe.ID, err.Error())
-			return result
+			r.result.Outcome = harnessOnly("record", probe.ID, err.Error())
+			return false
 		}
-		entry := AddObservationBlobs(blobs, selfTest.probes[probe.ID])
+		entry := AddObservationBlobs(blobs, r.selfTest.probes[probe.ID])
 		entry.RunHash = runHash
 		entry.Deps = deps
-		entry.RecordedCommit = firstFrozenAt(oldLock.Probes[probe.ID], entry, commit)
+		entry.RecordedCommit = firstFrozenAt(r.oldLock.Probes[probe.ID], entry, r.commit)
 		lock.Probes[probe.ID] = entry
 	}
-	for _, metric := range manifest.Metrics {
+	for _, metric := range r.manifest.Metrics {
 		runHash, err := MetricRunHash(metric)
 		if err != nil {
-			result.Outcome = harnessOnly("record", metric.ID, err.Error())
-			return result
+			r.result.Outcome = harnessOnly("record", metric.ID, err.Error())
+			return false
 		}
-		run := selfTest.metrics[metric.ID]
+		run := r.selfTest.metrics[metric.ID]
 		lock.Metrics[metric.ID] = MetricLock{RunHash: runHash, Value: run.Value, ToolVersion: run.ToolVersion}
 	}
 	if len(lock.Metrics) == 0 {
 		lock.Metrics = nil
 	}
+	r.lock = lock
+	r.blobs = blobs
+	return true
+}
 
-	candidateBytes, err := CanonicalJSON(lock)
+func (r *recordRun) computeCandidate() bool {
+	candidateBytes, err := CanonicalJSON(r.lock)
 	if err != nil {
-		result.Outcome = harnessOnly("record", "persistence", err.Error())
-		return result
+		r.result.Outcome = harnessOnly("record", "persistence", err.Error())
+		return false
 	}
-	result.Candidate = HashBytes(candidateBytes)
-	if hasOld {
-		result.ReviewDiff = LockfileDiff(root, oldLock, lock, blobs)
+	r.result.Candidate = HashBytes(candidateBytes)
+	if r.hasOld {
+		r.result.ReviewDiff = LockfileDiff(r.root, r.oldLock, r.lock, r.blobs)
 	}
-	if opts.Preview {
-		// Nothing is written: no blobs, no lock, no journal event.
-		result.Outcome.Counts.Pass = result.Outcome.Counts.Declared
-		result.Outcome.Finalize()
-		result.Outcome.Next = Next{Action: NextHuman, Detail: "review the diff, then freeze it with record --accept " + result.Candidate}
-		return result
+	return true
+}
+
+// finishedAfterPreview reports whether --preview already produced the whole
+// answer. It writes no blobs, no lockfile, and no journal event.
+func (r *recordRun) finishedAfterPreview() bool {
+	if !r.opts.Preview {
+		return false
 	}
-	if opts.Accept != "" && opts.Accept != result.Candidate {
-		result.Outcome = harnessWithNext("record", "operator-review", "candidate "+result.Candidate+" differs from the accepted "+opts.Accept+"; the tree or environment changed since the preview", Next{Action: NextHuman, Detail: "rerun record --preview and review the new diff"})
-		return result
+	// Nothing is written: no blobs, no lock, no journal event.
+	r.result.Outcome.Counts.Pass = r.result.Outcome.Counts.Declared
+	r.result.Outcome.Finalize()
+	r.result.Outcome.Next = Next{Action: NextHuman, Detail: "review the diff, then freeze it with record --accept " + r.result.Candidate}
+	return true
+}
+
+func (r *recordRun) checkAcceptance() bool {
+	if r.opts.Accept != "" && r.opts.Accept != r.result.Candidate {
+		r.result.Outcome = harnessWithNext("record", "operator-review", "candidate "+r.result.Candidate+" differs from the accepted "+r.opts.Accept+"; the tree or environment changed since the preview", Next{Action: NextHuman, Detail: "rerun record --preview and review the new diff"})
+		return false
 	}
-	if hasOld && opts.BeforeOverwrite != nil {
-		if err := opts.BeforeOverwrite(result.ReviewDiff); err != nil {
-			result.Outcome = harnessOnly("record", "operator-review", err.Error())
-			return result
+	return true
+}
+
+func (r *recordRun) reviewOverwrite() bool {
+	if r.hasOld && r.opts.BeforeOverwrite != nil {
+		if err := r.opts.BeforeOverwrite(r.result.ReviewDiff); err != nil {
+			r.result.Outcome = harnessOnly("record", "operator-review", err.Error())
+			return false
 		}
 	}
-	lockBytes, err := WriteGeneration(root, lock, blobs)
-	if err != nil {
-		result.Outcome = harnessOnly("record", "persistence", err.Error())
-		return result
-	}
-	lockHash, err := TamperHash(root, manifestBytes, lockBytes)
-	if err != nil {
-		result.Outcome = harnessOnly("record", "tamper-hash", err.Error())
-		return result
-	}
-	declared := len(manifest.Probes) + len(manifest.Metrics)
-	counts := Counts{Declared: declared, Pass: declared}
-	if err := AppendJournal(root, JournalEvent{Event: "record", Commit: commit, Dirty: dirty, Counts: &counts, Lock: lockHash}); err != nil {
-		result.Outcome = harnessOnly("record", "journal", "baseline was written but journal append failed: "+err.Error())
-		return result
-	}
+	return true
+}
 
-	result.Outcome.Lock = lockHash
-	result.Outcome.Finalize()
-	return result
+func (r *recordRun) writeGeneration() bool {
+	lockBytes, err := WriteGeneration(r.root, r.lock, r.blobs)
+	if err != nil {
+		r.result.Outcome = harnessOnly("record", "persistence", err.Error())
+		return false
+	}
+	r.lockBytes = lockBytes
+	return true
+}
+
+func (r *recordRun) computeTamperHash() bool {
+	lockHash, err := TamperHash(r.root, r.manifestBytes, r.lockBytes)
+	if err != nil {
+		r.result.Outcome = harnessOnly("record", "tamper-hash", err.Error())
+		return false
+	}
+	r.lockHash = lockHash
+	return true
+}
+
+func (r *recordRun) appendJournal() bool {
+	declared := len(r.manifest.Probes) + len(r.manifest.Metrics)
+	counts := Counts{Declared: declared, Pass: declared}
+	if err := AppendJournal(r.root, JournalEvent{Event: "record", Commit: r.commit, Dirty: r.dirty, Counts: &counts, Lock: r.lockHash}); err != nil {
+		r.result.Outcome = harnessOnly("record", "journal", "baseline was written but journal append failed: "+err.Error())
+		return false
+	}
+	return true
+}
+
+func (r *recordRun) finalize() {
+	r.result.Outcome.Lock = r.lockHash
+	r.result.Outcome.Finalize()
 }
 
 func runRecordSelfTest(root string, manifest Manifest, outcome *Outcome) (recordSelfTestResult, bool) {
