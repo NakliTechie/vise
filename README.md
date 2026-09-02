@@ -130,12 +130,13 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 vise doctor
 ```
 
-Six checks, each one a setup failure that cost a session when vise was first
+Seven checks, each one a setup failure that cost a session when vise was first
 handed to real coding agents: a toolchain nobody fingerprinted, a probe naming
 a path that exists only on your machine, a harness wrapper a probe runs
 without declaring it as an input, a baseline that was never committed so a fresh clone
-cannot gate, vise's own local state left unignored, and a repository with no
-written rules for the agent. Every finding names its remedy. It runs no probe,
+cannot gate, vise's own local state left unignored, a repository with no
+written rules for the agent, and an untracked, unignored file set large enough
+to make every gate slow for no visible reason. Every finding names its remedy. It runs no probe,
 writes nothing, and always exits 0.
 
 The failures are invisible from where you sit and expensive from where the

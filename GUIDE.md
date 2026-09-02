@@ -380,7 +380,7 @@ other case, and that one has a setup step people skip. These lessons come from
 running real coding agents against a vise-gated clone of vise itself.
 
 **Run `vise doctor` first.** It is the short version of this whole section:
-six static checks, each one a failure that actually cost a session here, each
+seven static checks, each one a failure that actually cost a session here, each
 with its remedy attached.
 
 ```text

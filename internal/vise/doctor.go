@@ -55,6 +55,7 @@ func Doctor(root string) DoctorReport {
 	report.Findings = append(report.Findings, checkBaselineCommitted(root)...)
 	report.Findings = append(report.Findings, checkLocalStateIgnored(root)...)
 	report.Findings = append(report.Findings, checkAgentContract(root)...)
+	report.Findings = append(report.Findings, checkSnapshotCost(root)...)
 	report.finish()
 	return report
 }
@@ -279,5 +280,46 @@ func checkAgentContract(root string) []DoctorFinding {
 		Check:  "agent-contract",
 		Detail: "no AGENTS.md at the repository root, so an agent working here has no written rules",
 		Remedy: "run vise init, which writes the agent contract without overwriting an existing one",
+	}}
+}
+
+// snapshotFileBudget and snapshotByteBudget bound what the work-tree snapshot
+// can cost before it is worth an operator's attention.
+//
+// vise hashes every untracked, unignored file before and after each judged
+// run, so the cost is proportional to that set — twice per probe, times the
+// probe count, times two passes at record. A checkout with a dependency
+// directory nobody ignored turns that into a gate that is mysteriously slow,
+// and slow is the failure mode nobody reports as a bug. The numbers are the
+// point at which the cost stops being noise on ordinary hardware, not a limit:
+// nothing refuses to run, doctor just says what is happening.
+const (
+	snapshotFileBudget = 2000
+	snapshotByteBudget = 16 << 20
+)
+
+func checkSnapshotCost(root string) []DoctorFinding {
+	paths, err := gitUntrackedPaths(root)
+	if err != nil {
+		return nil
+	}
+	var bytes int64
+	counted := 0
+	for _, rel := range paths {
+		if isViseLocalState(rel) {
+			continue
+		}
+		counted++
+		if info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel))); err == nil && info.Mode().IsRegular() {
+			bytes += info.Size()
+		}
+	}
+	if counted <= snapshotFileBudget && bytes <= snapshotByteBudget {
+		return nil
+	}
+	return []DoctorFinding{{
+		Check:  "snapshot-cost",
+		Detail: fmt.Sprintf("%d files totalling %d bytes are untracked and unignored; vise hashes all of them before and after every probe run", counted, bytes),
+		Remedy: "add the generated ones to .gitignore, or commit the ones that belong in the repository; an ignored path is also the only place a probe may write",
 	}}
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -225,5 +226,39 @@ func TestDoctorFindingsUseStableCheckNames(t *testing.T) {
 	}
 	if !seen["manifest"] {
 		t.Error("a manifest that will not parse produced no manifest finding")
+	}
+}
+
+// The work-tree snapshot hashes every untracked, unignored file twice per
+// probe run. A checkout with a dependency directory nobody ignored turns that
+// into a gate that is slow for no visible reason, and slow is the failure mode
+// nobody reports as a bug.
+func TestDoctorNamesAnExpensiveWorkTreeSnapshot(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"true\"]\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
+	for i := 0; i < snapshotFileBudget+1; i++ {
+		writeTestFile(t, root, filepath.Join("deps", "pkg"+strconv.Itoa(i)+".txt"), "x")
+	}
+
+	report := Doctor(root)
+	var found *DoctorFinding
+	for i := range report.Findings {
+		if report.Findings[i].Check == "snapshot-cost" {
+			found = &report.Findings[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("no snapshot-cost finding; got %v", doctorChecks(report))
+	}
+	if !strings.Contains(found.Remedy, ".gitignore") {
+		t.Fatalf("remedy %q does not name the fix", found.Remedy)
+	}
+
+	// Ignored is the answer, so an ignored tree must not be counted.
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\ndeps/\n")
+	for _, finding := range Doctor(root).Findings {
+		if finding.Check == "snapshot-cost" {
+			t.Fatalf("an ignored tree was still counted: %s", finding.Detail)
+		}
 	}
 }
