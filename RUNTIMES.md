@@ -49,6 +49,28 @@ Three tiers of handling, in order of preference:
 **Browser / DOM** (LocalMind class)
 - Font metrics, GPU rasterization, animation timing — why DOM probes are Parked. Today's honest form: probe the app's *logic* via a headless JS entry point; leave pixel/GPU truth to `/live-check-nt`.
 
+## The normalizer is a probe too
+
+A probe that normalizes its own output is only as deterministic as the
+normalizer, and a normalizer that silently stops matching is worse than none:
+the probe keeps passing until the day the unmatched value changes.
+
+- **BSD vs GNU `sed`.** macOS `sed` has no `\b`, no `\d`, no `\+`, and treats
+  `-i` differently. A pattern like `s/\b[0-9a-f]{40}\b/COMMIT/g` matches
+  nothing on macOS and everything you wanted on Linux — a probe that is
+  deterministic on CI and flaky on a laptop, or the reverse. Write POSIX ERE
+  (`sed -E 's/[0-9a-f]{40}/COMMIT/g'`), or use `awk`, or normalize inside the
+  program you are probing.
+- **Order your substitutions.** Replace the longest, most specific pattern
+  first: a rule for 64-hex digests must run before a rule for 40-hex ones, or
+  the second clips the first.
+- **Prove the normalizer.** `record` runs two full passes and fails the freeze
+  when they differ, which is exactly how a broken normalizer surfaces — the
+  divergence names the value that got through. Read it as "my normalizer
+  missed this", not "vise is being difficult".
+- **`LC_ALL=C` is already pinned** by vise's stub env, so collation in `sort` is
+  stable; do not re-set it to something else inside a probe.
+
 ## Processes vise cannot reach
 
 Every guard vise has over a running probe is a process-group guard: the timeout kill, the post-exit sweep, the one-second pipe close. An ordinary background child stays in the group and the sweep kills it — `sleep 30 &`, a plain double fork, and `nohup` alike (`nohup` only ignores SIGHUP; it does not change session). What escapes is a child that starts a **new session**: `setsid`, or a daemonize idiom that calls it — the shape a Spring preloader or a detaching `rails server` uses. vise cannot kill that child; it still refuses the run if the run changed evaluator state, and still catches a tracked-file write that lands before the tracked-tree check, but a write that lands after it is invisible. Rules for probe authors: start nothing you do not `wait` for, redirect anything you background (`>/dev/null 2>&1 &`) so it cannot hold the probe's pipes, and never let a probe leave a detached process behind. SPEC §2.2 states the boundary.
