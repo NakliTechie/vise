@@ -121,6 +121,7 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 | `vise gate [--quiet]` | The refactor-loop verdict, journaled. |
 | `vise run <probe-id>` | Execute one probe raw. Exit mirrors the probe. |
 | `vise status` | The whole situation in one bounded read. Always exit 0. |
+| `vise version` | The version, and with `--json` the build revision. |
 
 ## What it holds, and what it cannot
 
