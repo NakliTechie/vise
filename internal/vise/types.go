@@ -23,6 +23,29 @@ type Next struct {
 	Detail string `json:"detail"`
 }
 
+// The closed next.action vocabulary. An agent branches on these, so the set is
+// part of the contract: adding a seventh means every caller that switches on
+// the field silently falls through to its default, and the agent's next move
+// becomes "I do not know". They are constants so a typo is a compile error,
+// and TestEveryNextActionIsInTheClosedVocabulary scans the source for any
+// literal that slipped past them.
+//
+// SPEC reserves a seventh, `rerun`, which v0.3 never emits. It gets no
+// constant here on purpose: a value an agent can never receive should not be
+// declarable, and a constant nothing emits is a promise of a branch that
+// never fires.
+const (
+	NextProceed       = "proceed"        // green; take the next step
+	NextRevert        = "revert"         // behavior or a metric moved; undo the change
+	NextFixProbe      = "fix_probe"      // the harness is broken; repair it, never the code under test
+	NextHuman         = "human"          // nothing the agent may decide; stop and report
+	NextRecordFirst   = "record_first"   // no baseline exists; an operator records one
+	NextQuarantineAck = "quarantine_ack" // an observation was unstable; stop unless policy tolerates indeterminate
+)
+
+// KnownNextActions is the vocabulary as data, for the tests that police it.
+var KnownNextActions = []string{NextProceed, NextRevert, NextFixProbe, NextHuman, NextRecordFirst, NextQuarantineAck}
+
 type Counts struct {
 	Declared int `json:"declared"`
 	Pass     int `json:"pass"`
@@ -75,7 +98,7 @@ func NewOutcome(cmd string) Outcome {
 		Exit:     ExitOK,
 		Failures: make(map[string]Failure),
 		Metrics:  make(map[string]MetricDelta),
-		Next:     Next{Action: "proceed", Detail: "all declared checks matched"},
+		Next:     Next{Action: NextProceed, Detail: "all declared checks matched"},
 	}
 }
 
@@ -132,27 +155,27 @@ func (o *Outcome) Finalize() {
 	switch {
 	case o.Exit == ExitNotInitialized:
 		o.Verdict = "indeterminate"
-		o.Next = Next{Action: "record_first", Detail: "initialize the repository and record a behavior baseline"}
+		o.Next = Next{Action: NextRecordFirst, Detail: "initialize the repository and record a behavior baseline"}
 	case o.Counts.Harness > 0:
 		o.Exit = ExitHarness
 		o.Verdict = "indeterminate"
-		o.Next = Next{Action: "fix_probe", Detail: "repair the harness or restore its declared inputs, then rerun"}
+		o.Next = Next{Action: NextFixProbe, Detail: "repair the harness or restore its declared inputs, then rerun"}
 	case o.Counts.Flaky > 0:
 		o.Exit = ExitIndeterminate
 		o.Verdict = "indeterminate"
-		o.Next = Next{Action: "quarantine_ack", Detail: "the operator must resolve or explicitly tolerate the indeterminate verdict"}
+		o.Next = Next{Action: NextQuarantineAck, Detail: "the operator must resolve or explicitly tolerate the indeterminate verdict"}
 	case o.Counts.Behavior > 0:
 		o.Exit = ExitBehavior
 		o.Verdict = "red"
-		o.Next = Next{Action: "revert", Detail: "revert the unintended behavior change or ask an operator to accept a new baseline"}
+		o.Next = Next{Action: NextRevert, Detail: "revert the unintended behavior change or ask an operator to accept a new baseline"}
 	case o.Counts.Metric > 0:
 		o.Exit = ExitMetric
 		o.Verdict = "red"
-		o.Next = Next{Action: "revert", Detail: "revert the quality regression or change the operator-owned metric policy"}
+		o.Next = Next{Action: NextRevert, Detail: "revert the quality regression or change the operator-owned metric policy"}
 	default:
 		o.Exit = ExitOK
 		o.Verdict = "green"
-		o.Next = Next{Action: "proceed", Detail: "all declared checks matched"}
+		o.Next = Next{Action: NextProceed, Detail: "all declared checks matched"}
 	}
 	if len(o.Failures) == 0 {
 		o.Failures = nil

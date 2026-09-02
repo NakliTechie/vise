@@ -53,7 +53,7 @@ type StatusReport struct {
 }
 
 func BuildStatus(root string) StatusReport {
-	report := StatusReport{V: LockVersion, Cmd: "status", Exit: ExitOK, State: "not-initialized", Next: Next{Action: "record_first", Detail: "run vise init, declare probes, and record a baseline"}}
+	report := StatusReport{V: LockVersion, Cmd: "status", Exit: ExitOK, State: "not-initialized", Next: Next{Action: NextRecordFirst, Detail: "run vise init, declare probes, and record a baseline"}}
 	manifest, manifestBytes, manifestErr := buildManifestStatus(root, &report)
 	buildLockStatus(root, manifest, manifestBytes, manifestErr, &report)
 	buildProposalsStatus(root, &report)
@@ -76,7 +76,7 @@ func buildJournalStatus(root string, report *StatusReport) {
 	journal, err := ReadJournal(root, 5)
 	if err != nil {
 		report.State = "harness-error"
-		report.Next = Next{Action: "fix_probe", Detail: "repair the local journal"}
+		report.Next = Next{Action: NextFixProbe, Detail: "repair the local journal"}
 	} else {
 		report.Journal = journal
 	}
@@ -90,7 +90,7 @@ func buildLockStatus(root string, manifest Manifest, manifestBytes []byte, manif
 		} else {
 			report.Lock = StatusLock{Present: true, Valid: false, Error: lockErr.Error()}
 			report.State = "harness-error"
-			report.Next = Next{Action: "fix_probe", Detail: "restore a valid vise.lock, then rerun status"}
+			report.Next = Next{Action: NextFixProbe, Detail: "restore a valid vise.lock, then rerun status"}
 		}
 	} else {
 		report.Lock = StatusLock{Present: true, Valid: true, Probes: len(lock.Probes), Metrics: len(lock.Metrics)}
@@ -107,16 +107,16 @@ func buildLockStatus(root string, manifest Manifest, manifestBytes []byte, manif
 			if err != nil {
 				report.State = "harness-error"
 				report.Lock.Error = err.Error()
-				report.Next = Next{Action: "fix_probe", Detail: "repair the environment fingerprint command"}
+				report.Next = Next{Action: NextFixProbe, Detail: "repair the environment fingerprint command"}
 			} else {
 				matches := FingerprintEqual(fingerprint, lock.Fingerprint)
 				report.Lock.FingerprintMatch = &matches
 				if matches {
 					report.State = "ready"
-					report.Next = Next{Action: "proceed", Detail: "run vise gate before the next refactor step"}
+					report.Next = Next{Action: NextProceed, Detail: "run vise gate before the next refactor step"}
 				} else {
 					report.State = "environment-drift"
-					report.Next = Next{Action: "human", Detail: "restore the recorded toolchain or ask an operator to re-record"}
+					report.Next = Next{Action: NextHuman, Detail: "restore the recorded toolchain or ask an operator to re-record"}
 				}
 			}
 			hash, err := TamperHash(root, manifestBytes, lockBytes)
@@ -125,24 +125,24 @@ func buildLockStatus(root string, manifest Manifest, manifestBytes []byte, manif
 			} else {
 				report.State = "harness-error"
 				report.Lock.Error = err.Error()
-				report.Next = Next{Action: "fix_probe", Detail: "restore a valid vise.lock and referenced blobs"}
+				report.Next = Next{Action: NextFixProbe, Detail: "restore a valid vise.lock and referenced blobs"}
 			}
 			report.Lock.Drift = baselineDrift(root, manifest, lock)
 			if len(report.Lock.Drift) > 0 && report.State == "ready" {
 				report.State = "baseline-drift"
-				report.Next = Next{Action: "human", Detail: "vise.toml and vise.lock disagree (" + report.Lock.Drift[0] + "); restore the manifest or ask an operator to re-record"}
+				report.Next = Next{Action: NextHuman, Detail: "vise.toml and vise.lock disagree (" + report.Lock.Drift[0] + "); restore the manifest or ask an operator to re-record"}
 			}
 			if report.State == "ready" {
 				if refused, detail := nextGateRefused(root, manifest, report.Lock.Hash); refused {
 					report.State = "rerun-refused"
-					report.Next = Next{Action: "human", Detail: "the next gate is refused (" + detail + "); commit, re-record, or change the manifest"}
+					report.Next = Next{Action: NextHuman, Detail: "the next gate is refused (" + detail + "); commit, re-record, or change the manifest"}
 				}
 			}
 			if len(manifest.Probes) == 0 && report.State != "harness-error" {
 				// A lock beside a manifest with no probes judges nothing; gate
 				// refuses it, so status must not promise proceed.
 				report.State = "harness-error"
-				report.Next = Next{Action: "fix_probe", Detail: "manifest declares no [[probe]]; declare at least one probe in vise.toml and record a baseline"}
+				report.Next = Next{Action: NextFixProbe, Detail: "manifest declares no [[probe]]; declare at least one probe in vise.toml and record a baseline"}
 			}
 		}
 	}
@@ -156,15 +156,15 @@ func buildManifestStatus(root string, report *StatusReport) (Manifest, []byte, e
 		} else {
 			report.Manifest = StatusManifest{Present: true, Valid: false, Error: manifestErr.Error()}
 			report.State = "harness-error"
-			report.Next = Next{Action: "fix_probe", Detail: "repair vise.toml, then rerun status"}
+			report.Next = Next{Action: NextFixProbe, Detail: "repair vise.toml, then rerun status"}
 		}
 	} else {
 		report.Manifest = StatusManifest{Present: true, Valid: true, Probes: len(manifest.Probes), Metrics: len(manifest.Metrics)}
 		report.State = "unrecorded"
 		if len(manifest.Probes) == 0 {
-			report.Next = Next{Action: "fix_probe", Detail: "declare at least one probe in vise.toml, commit the harness, then run vise record"}
+			report.Next = Next{Action: NextFixProbe, Detail: "declare at least one probe in vise.toml, commit the harness, then run vise record"}
 		} else {
-			report.Next = Next{Action: "record_first", Detail: "commit the harness, then run vise record"}
+			report.Next = Next{Action: NextRecordFirst, Detail: "commit the harness, then run vise record"}
 		}
 	}
 	return manifest, manifestBytes, manifestErr

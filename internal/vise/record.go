@@ -38,7 +38,7 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 	outcome.Counts.Declared = len(manifest.Probes) + len(manifest.Metrics)
 	result := RecordResult{Outcome: outcome}
 	if len(manifest.Probes) == 0 {
-		result.Outcome = harnessWithNext("record", "manifest", "manifest must declare at least one [[probe]] before recording", "fix_probe", "declare at least one probe in vise.toml, commit the harness, then rerun vise record")
+		result.Outcome = harnessWithNext("record", "manifest", "manifest must declare at least one [[probe]] before recording", Next{Action: NextFixProbe, Detail: "declare at least one probe in vise.toml, commit the harness, then rerun vise record"})
 		return result
 	}
 
@@ -48,7 +48,7 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		return result
 	}
 	if dirty && !opts.AllowDirty {
-		result.Outcome = harnessWithNext("record", "working-tree", "record requires a clean working tree; commit or stash changes, or pass --allow-dirty", "human", "commit or stash the current tree, or rerun record with --allow-dirty")
+		result.Outcome = harnessWithNext("record", "working-tree", "record requires a clean working tree; commit or stash changes, or pass --allow-dirty", Next{Action: NextHuman, Detail: "commit or stash the current tree, or rerun record with --allow-dirty"})
 		return result
 	}
 
@@ -59,13 +59,13 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		return result
 	}
 	if hasOld && !opts.ReviewedDiff && !opts.Preview && opts.Accept == "" {
-		result.Outcome = harnessWithNext("record", "operator-review", "vise.lock already exists; preview the behavior diff with --preview and accept its digest with --accept, or rerun with --i-reviewed-the-diff", "human", "run record --preview, review the diff, then record --accept <digest>; or rerun with --i-reviewed-the-diff to review and write in one step")
+		result.Outcome = harnessWithNext("record", "operator-review", "vise.lock already exists; preview the behavior diff with --preview and accept its digest with --accept, or rerun with --i-reviewed-the-diff", Next{Action: NextHuman, Detail: "run record --preview, review the diff, then record --accept <digest>; or rerun with --i-reviewed-the-diff to review and write in one step"})
 		return result
 	}
 
 	fingerprint, err := captureStableFingerprint(root, manifest)
 	if err != nil {
-		result.Outcome = harnessWithNext("record", "fingerprint", err.Error(), "fix_probe", "repair the environment fingerprint command, then rerun record")
+		result.Outcome = harnessWithNext("record", "fingerprint", err.Error(), Next{Action: NextFixProbe, Detail: "repair the environment fingerprint command, then rerun record"})
 		return result
 	}
 	commit, err := GitHead(root)
@@ -129,11 +129,11 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		// Nothing is written: no blobs, no lock, no journal event.
 		result.Outcome.Counts.Pass = result.Outcome.Counts.Declared
 		result.Outcome.Finalize()
-		result.Outcome.Next = Next{Action: "human", Detail: "review the diff, then freeze it with record --accept " + result.Candidate}
+		result.Outcome.Next = Next{Action: NextHuman, Detail: "review the diff, then freeze it with record --accept " + result.Candidate}
 		return result
 	}
 	if opts.Accept != "" && opts.Accept != result.Candidate {
-		result.Outcome = harnessWithNext("record", "operator-review", "candidate "+result.Candidate+" differs from the accepted "+opts.Accept+"; the tree or environment changed since the preview", "human", "rerun record --preview and review the new diff")
+		result.Outcome = harnessWithNext("record", "operator-review", "candidate "+result.Candidate+" differs from the accepted "+opts.Accept+"; the tree or environment changed since the preview", Next{Action: NextHuman, Detail: "rerun record --preview and review the new diff"})
 		return result
 	}
 	if hasOld && opts.BeforeOverwrite != nil {
@@ -221,7 +221,7 @@ func runRecordSelfTest(root string, manifest Manifest, outcome *Outcome) (record
 		outcome.Finalize()
 		outcome.Counts.Pass = 0 // a baseline needs both passes; none was frozen
 		if outcome.Counts.Harness == 0 {
-			outcome.Next = Next{Action: "fix_probe", Detail: "make the named probes deterministic (normalize timestamps, ordering, temp paths, seeds), then rerun vise record"}
+			outcome.Next = Next{Action: NextFixProbe, Detail: "make the named probes deterministic (normalize timestamps, ordering, temp paths, seeds), then rerun vise record"}
 		}
 		return recordSelfTestResult{}, false
 	}
@@ -249,9 +249,9 @@ func harnessOnly(cmd, id, detail string) Outcome {
 	return outcome
 }
 
-func harnessWithNext(cmd, id, detail, action, nextDetail string) Outcome {
+func harnessWithNext(cmd, id, detail string, next Next) Outcome {
 	outcome := harnessOnly(cmd, id, detail)
-	outcome.Next = Next{Action: action, Detail: nextDetail}
+	outcome.Next = next
 	return outcome
 }
 

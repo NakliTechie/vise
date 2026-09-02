@@ -60,7 +60,7 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 			return renderSimpleError("version", "version accepts no arguments", jsonMode, stdout, stderr)
 		}
 		if jsonMode {
-			response := map[string]any{"v": 1, "cmd": "version", "exit": 0, "version": Version, "next": vise.Next{Action: "proceed", Detail: "version reported"}}
+			response := map[string]any{"v": 1, "cmd": "version", "exit": 0, "version": Version, "next": vise.Next{Action: vise.NextProceed, Detail: "version reported"}}
 			for key, value := range buildIdentity() {
 				response[key] = value
 			}
@@ -81,7 +81,7 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 	root, err := vise.GitRoot(cwd)
 	if err != nil {
 		if command == "status" {
-			report := vise.StatusReport{V: 1, Cmd: "status", Exit: 0, State: "no-git", Next: vise.Next{Action: "fix_probe", Detail: err.Error()}}
+			report := vise.StatusReport{V: 1, Cmd: "status", Exit: 0, State: "no-git", Next: vise.Next{Action: vise.NextFixProbe, Detail: err.Error()}}
 			if jsonMode {
 				report.Tool = toolIdentity()
 				return writeJSON(stdout, report)
@@ -175,7 +175,7 @@ func runInit(args []string, root string, jsonMode bool, stdout, stderr io.Writer
 		"cmd":     "init",
 		"exit":    0,
 		"created": created,
-		"next":    vise.Next{Action: "fix_probe", Detail: "uncomment and configure at least one probe, then run vise record"},
+		"next":    vise.Next{Action: vise.NextFixProbe, Detail: "uncomment and configure at least one probe, then run vise record"},
 	}
 	if jsonMode {
 		return writeJSON(stdout, response)
@@ -334,7 +334,7 @@ func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Write
 	if jsonMode {
 		response := map[string]any{
 			"v": 1, "cmd": "run", "exit": result.Exit, "probe": probe.ID,
-			"files": hashFiles(result.Files), "next": vise.Next{Action: "proceed", Detail: "raw probe execution finished"},
+			"files": hashFiles(result.Files), "next": vise.Next{Action: vise.NextProceed, Detail: "raw probe execution finished"},
 		}
 		addCapture(response, "stdout", result.Stdout)
 		addCapture(response, "stderr", result.Stderr)
@@ -426,7 +426,7 @@ func encodingFailure(command string, err error) map[string]any {
 		"failures": map[string]any{
 			"encoding": map[string]any{"class": "harness", "detail": "the verdict could not be encoded as JSON: " + err.Error()},
 		},
-		"next": vise.Next{Action: "fix_probe", Detail: "a value in the outcome cannot be represented in JSON; a metric that printed a non-finite number is the usual cause"},
+		"next": vise.Next{Action: vise.NextFixProbe, Detail: "a value in the outcome cannot be represented in JSON; a metric that printed a non-finite number is the usual cause"},
 	}
 }
 
@@ -562,7 +562,7 @@ func helpDocument(command string) map[string]any {
 		"v":    1,
 		"cmd":  "help",
 		"exit": 0,
-		"next": vise.Next{Action: "proceed", Detail: "help reported"},
+		"next": vise.Next{Action: vise.NextProceed, Detail: "help reported"},
 	}
 	if usage, ok := commandUsageFor(command); ok {
 		document["command"] = command

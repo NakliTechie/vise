@@ -136,7 +136,7 @@ Shared exit-code vocabulary, one code per distinct next action:
   "next": { "action": "revert", "detail": "unintended behavior change in cli-help; if intended, a human runs vise record" } }
 ```
 
-Passing probes appear only in `counts` (§0.4). `next.action` is a **closed vocabulary**: `proceed` · `revert` · `fix_probe` · `rerun` · `record_first` · `quarantine_ack` · `human` (`rerun` is reserved and not emitted in v0.3). Exactly one action; alternatives (like the intended-change path) live in `detail`. Free text lives only in `detail`.
+Passing probes appear only in `counts` (§0.4). `next.action` is a **closed vocabulary**: `proceed` · `revert` · `fix_probe` · `rerun` · `record_first` · `quarantine_ack` · `human` (`rerun` is reserved and not emitted in v0.3, so it has no constant in the code: a value an agent can never receive should not be declarable). The vocabulary is enforced, not merely documented — each action is a named constant, so a typo does not compile, and a test refuses any action literal that appears beside them or any declared action nothing emits. Exactly one action; alternatives (like the intended-change path) live in `detail`. Free text lives only in `detail`.
 
 ### 4.1 The flake protocol (fail-closed)
 

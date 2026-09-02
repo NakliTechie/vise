@@ -111,7 +111,7 @@ func prepareVerifyChecks(manifest Manifest, probeID string, outcome *Outcome) ([
 	if len(manifest.Probes) == 0 {
 		// Green requires every declared probe to pass; with none declared there
 		// is nothing to judge, and a 0/0 green would be a verdict without a judge.
-		failure := harnessWithNext("verify", "manifest", "manifest declares no [[probe]]; nothing can be judged", "fix_probe", "declare at least one probe in vise.toml and record a baseline")
+		failure := harnessWithNext("verify", "manifest", "manifest declares no [[probe]]; nothing can be judged", Next{Action: NextFixProbe, Detail: "declare at least one probe in vise.toml and record a baseline"})
 		return nil, nil, &failure
 	}
 	selected, checkSet, err := selectVerifyChecks(manifest, probeID)
@@ -133,7 +133,7 @@ func checkVerifyRerunLimit(root string, state verifyState, checkSet []string) (*
 		return nil, false
 	}
 	blocked := harnessOnly("verify", "rerun-limit", detail)
-	blocked.Next = Next{Action: "human", Detail: "operator intervention is required before another rerun"}
+	blocked.Next = Next{Action: NextHuman, Detail: "operator intervention is required before another rerun"}
 	return &blocked, true
 }
 
@@ -158,7 +158,7 @@ func validateVerifyInputs(root string, outcome *Outcome, manifest Manifest, lock
 
 	outcome.Finalize()
 	if _, ok := outcome.Failures["fingerprint"]; ok {
-		outcome.Next = Next{Action: "human", Detail: "restore the recorded toolchain or ask an operator to re-record on this machine"}
+		outcome.Next = Next{Action: NextHuman, Detail: "restore the recorded toolchain or ask an operator to re-record on this machine"}
 	}
 	// No probe ran, so nothing passed; the count must not imply otherwise.
 	outcome.Counts.Pass = 0

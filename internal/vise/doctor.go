@@ -62,10 +62,10 @@ func (r *DoctorReport) finish() {
 	sort.SliceStable(r.Findings, func(i, j int) bool { return r.Findings[i].Check < r.Findings[j].Check })
 	r.Ready = len(r.Findings) == 0
 	if r.Ready {
-		r.Next = Next{Action: "proceed", Detail: "the repository is ready to hand to an agent"}
+		r.Next = Next{Action: NextProceed, Detail: "the repository is ready to hand to an agent"}
 		return
 	}
-	r.Next = Next{Action: "human", Detail: fmt.Sprintf("%d finding(s) an operator should resolve before an agent works here", len(r.Findings))}
+	r.Next = Next{Action: NextHuman, Detail: fmt.Sprintf("%d finding(s) an operator should resolve before an agent works here", len(r.Findings))}
 }
 
 // checkFingerprint: an unfingerprinted toolchain moves without saying so. The
