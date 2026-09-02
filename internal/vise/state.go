@@ -120,9 +120,12 @@ func CaptureFingerprint(root string, manifest Manifest) (Fingerprint, error) {
 			return Fingerprint{}, fmt.Errorf("fingerprint %q: %s", command, result.HarnessError)
 		}
 		if result.Exit != 0 {
-			return Fingerprint{}, fmt.Errorf("fingerprint %q exited %d: %s", command, result.Exit, strings.TrimSpace(string(result.Stderr)))
+			return Fingerprint{}, fmt.Errorf("fingerprint %q exited %d: %s", command, result.Exit, strings.TrimSpace(string(result.Stderr.Prefix)))
 		}
-		fingerprint.Env[command] = strings.TrimSpace(string(result.Stdout))
+		if result.Stdout.Truncated() {
+			return Fingerprint{}, fmt.Errorf("fingerprint %q printed more than %d bytes", command, CaptureLimit)
+		}
+		fingerprint.Env[command] = strings.TrimSpace(string(result.Stdout.Prefix))
 	}
 	after, err := GitTrackedSnapshot(root)
 	if err != nil {
@@ -163,6 +166,9 @@ func LoadLockfile(root string) (Lockfile, []byte, error) {
 	if err != nil {
 		return Lockfile{}, nil, err
 	}
+	if err := rejectDuplicateJSONKeys(data); err != nil {
+		return Lockfile{}, nil, fmt.Errorf("parse vise.lock: %w", err)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var lock Lockfile
@@ -181,6 +187,9 @@ func LoadLockfile(root string) (Lockfile, []byte, error) {
 	}
 	if err := validateLockfileHashes(lock); err != nil {
 		return Lockfile{}, nil, err
+	}
+	if err := validateLockfileSchema(lock); err != nil {
+		return Lockfile{}, nil, fmt.Errorf("vise.lock: %w", err)
 	}
 	return lock, data, nil
 }
@@ -272,19 +281,19 @@ func WriteBlobs(root string, blobs map[string][]byte) error {
 // leaves the old file intact and any residue where state is expected, never
 // an untracked stray beside vise.lock.
 func atomicWrite(root, path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := persistence.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	staging, err := stateScratchDir(root)
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(staging, "write-*")
+	tmp, err := persistence.CreateStaged(staging, "write-*")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer persistence.Remove(tmpName)
 	if err := tmp.Chmod(mode); err != nil {
 		_ = tmp.Close()
 		return err
@@ -300,14 +309,17 @@ func atomicWrite(root, path string, data []byte, mode os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	// Until this rename the target still holds the previous generation; after
+	// it, the new one. There is no moment where it holds neither, so the
+	// rename is the commit point.
+	if err := persistence.Rename(tmpName, path); err != nil {
 		return err
 	}
-	dirHandle, err := os.Open(filepath.Dir(path))
-	if err == nil {
-		_ = dirHandle.Sync()
-		_ = dirHandle.Close()
-	}
+	// Flushing the directory entry is a durability upgrade on an already
+	// committed write. Reporting its failure would tell the caller the
+	// baseline was not written when it was — the same lie a failed prune used
+	// to tell (SPEC §3.1) — so it is best effort.
+	_ = persistence.SyncDir(filepath.Dir(path))
 	return nil
 }
 
@@ -369,28 +381,29 @@ func BlobData(root, hash string, large bool) ([]byte, bool, error) {
 func AddObservationBlobs(blobs map[string][]byte, result RunResult) ProbeLock {
 	probe := ProbeLock{
 		Exit:       result.Exit,
-		Stdout:     HashBytes(result.Stdout),
-		Stderr:     HashBytes(result.Stderr),
+		Stdout:     result.Stdout.Hash,
+		Stderr:     result.Stderr.Hash,
 		Files:      make(map[string]string, len(result.Files)),
 		FilesLarge: make(map[string]bool),
 	}
-	if len(result.Stdout) > MaxBlobSize {
+	// An observation larger than the capture bound was never held whole, so
+	// it is hash-only in the lockfile and its diff degrades to hashes.
+	if data, complete := result.Stdout.Complete(); complete {
+		blobs[probe.Stdout] = append([]byte(nil), data...)
+	} else {
 		probe.StdoutLarge = true
-	} else {
-		blobs[probe.Stdout] = append([]byte(nil), result.Stdout...)
 	}
-	if len(result.Stderr) > MaxBlobSize {
+	if data, complete := result.Stderr.Complete(); complete {
+		blobs[probe.Stderr] = append([]byte(nil), data...)
+	} else {
 		probe.StderrLarge = true
-	} else {
-		blobs[probe.Stderr] = append([]byte(nil), result.Stderr...)
 	}
-	for path, data := range result.Files {
-		hash := HashBytes(data)
-		probe.Files[path] = hash
-		if len(data) > MaxBlobSize {
-			probe.FilesLarge[path] = true
+	for path, capture := range result.Files {
+		probe.Files[path] = capture.Hash
+		if data, complete := capture.Complete(); complete {
+			blobs[capture.Hash] = append([]byte(nil), data...)
 		} else {
-			blobs[hash] = append([]byte(nil), data...)
+			probe.FilesLarge[path] = true
 		}
 	}
 	if len(probe.Files) == 0 {

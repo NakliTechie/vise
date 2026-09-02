@@ -20,7 +20,7 @@ func TestRunnerSanitizesEnvironment(t *testing.T) {
 	if result.HarnessError != "" {
 		t.Fatal(result.HarnessError)
 	}
-	if got := string(result.Stdout); got != "UTC|C|unset|declared" {
+	if got := string(result.Stdout.Prefix); got != "UTC|C|unset|declared" {
 		t.Fatalf("stdout = %q", got)
 	}
 }
@@ -34,7 +34,7 @@ func TestRunnerDeletesAndCapturesArtifacts(t *testing.T) {
 	if result.HarnessError != "" {
 		t.Fatal(result.HarnessError)
 	}
-	if got := string(result.Files["out/result.txt"]); got != "fresh" {
+	if got := string(result.Files["out/result.txt"].Prefix); got != "fresh" {
 		t.Fatalf("artifact = %q", got)
 	}
 }
@@ -127,7 +127,7 @@ func TestRunnerReturnsWhenDetachedChildHoldsStdout(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 4*time.Second {
 		t.Fatalf("probe took %v; vise waited on the detached child", elapsed)
 	}
-	if result.TimedOut || !strings.Contains(result.HarnessError, "background process") || string(result.Stdout) != "started" {
+	if result.TimedOut || !strings.Contains(result.HarnessError, "background process") || string(result.Stdout.Prefix) != "started" {
 		t.Fatalf("result = %#v", result)
 	}
 
@@ -207,7 +207,7 @@ func TestProbeScratchLivesUnderViseTmpAndIsWiped(t *testing.T) {
 	if result.HarnessError != "" || result.Exit != 0 {
 		t.Fatalf("result = %#v", result)
 	}
-	scratch := string(result.Stdout)
+	scratch := string(result.Stdout.Prefix)
 	if !strings.HasPrefix(scratch, filepath.Join(root, ".vise", "tmp")+string(filepath.Separator)) {
 		t.Fatalf("VISE_TMP = %q, want it under .vise/tmp", scratch)
 	}
@@ -226,7 +226,7 @@ func TestRunnerKillsLeftoverGroupMembersAfterTheShellExits(t *testing.T) {
 	// soon as the shell exits; the child must still not survive the run.
 	probe := Probe{ID: "leftover", Run: "(sleep 1; printf late > late.txt) >/dev/null 2>&1 & printf done", Timeout: 10}
 	result := (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, true)
-	if result.HarnessError != "" || string(result.Stdout) != "done" {
+	if result.HarnessError != "" || string(result.Stdout.Prefix) != "done" {
 		t.Fatalf("result = %#v", result)
 	}
 	time.Sleep(1500 * time.Millisecond)

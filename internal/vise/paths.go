@@ -86,6 +86,19 @@ func ensureDirectory(path string, mode os.FileMode) error {
 	return nil
 }
 
+// openRegularFile opens a path only when it is a regular file, so a probe
+// cannot point a declared artifact at a device or a symlink.
+func openRegularFile(path string) (*os.File, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s must be a regular file, not a symlink or special file", path)
+	}
+	return os.Open(path)
+}
+
 func readRegularFile(path string) ([]byte, error) {
 	info, err := os.Lstat(path)
 	if err != nil {

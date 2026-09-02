@@ -324,11 +324,11 @@ func stringMapEqual(a, b map[string]string) bool {
 }
 
 func RunMatchesLock(run RunResult, expected ProbeLock) bool {
-	if run.Exit != expected.Exit || HashBytes(run.Stdout) != expected.Stdout || HashBytes(run.Stderr) != expected.Stderr || len(run.Files) != len(expected.Files) {
+	if run.Exit != expected.Exit || run.Stdout.Hash != expected.Stdout || run.Stderr.Hash != expected.Stderr || len(run.Files) != len(expected.Files) {
 		return false
 	}
 	for path, hash := range expected.Files {
-		if HashBytes(run.Files[path]) != hash {
+		if run.Files[path].Hash != hash {
 			return false
 		}
 	}
@@ -341,13 +341,13 @@ func ExpectedFromLock(lock ProbeLock) *ExpectedActual {
 
 func ActualFromRun(run RunResult) *ExpectedActual {
 	files := make(map[string]string, len(run.Files))
-	for path, data := range run.Files {
-		files[path] = HashBytes(data)
+	for path, capture := range run.Files {
+		files[path] = capture.Hash
 	}
 	if len(files) == 0 {
 		files = nil
 	}
-	return &ExpectedActual{Exit: IntPtr(run.Exit), Stdout: HashBytes(run.Stdout), Stderr: HashBytes(run.Stderr), Files: files}
+	return &ExpectedActual{Exit: IntPtr(run.Exit), Stdout: run.Stdout.Hash, Stderr: run.Stderr.Hash, Files: files}
 }
 
 func JournalVerifyResult(root, command string, result VerifyResult) error {

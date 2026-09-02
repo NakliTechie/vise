@@ -21,7 +21,7 @@ func TestWriteGenerationRoundTripAndPrune(t *testing.T) {
 		t.Fatal(err)
 	}
 	lock := Lockfile{V: 1, Fingerprint: Fingerprint{OS: "test", Arch: "test"}, Probes: map[string]ProbeLock{
-		"p": {RunHash: runHash, RecordedCommit: "abc", Stdout: keepHash, Stderr: HashBytes(nil)},
+		"p": {RunHash: runHash, RecordedCommit: "3319316e4a7a5f1fb2e80de6f001a1355269464a", Stdout: keepHash, Stderr: HashBytes(nil)},
 	}}
 	data, err := WriteGeneration(root, lock, map[string][]byte{keepHash: keepData, HashBytes(nil): nil})
 	if err != nil {
@@ -49,7 +49,7 @@ func TestTamperHashIgnoresOrphanBlobsAndChecksReferencedContent(t *testing.T) {
 	hash := HashBytes(data)
 	runHash := HashBytes([]byte("run"))
 	lock := Lockfile{V: 1, Fingerprint: Fingerprint{OS: "test", Arch: "test"}, Probes: map[string]ProbeLock{
-		"p": {RunHash: runHash, RecordedCommit: "abc", Stdout: hash, Stderr: hash},
+		"p": {RunHash: runHash, RecordedCommit: "3319316e4a7a5f1fb2e80de6f001a1355269464a", Stdout: hash, Stderr: hash},
 	}}
 	lockBytes, err := CanonicalJSON(lock)
 	if err != nil {
@@ -120,7 +120,7 @@ func TestFingerprintRejectsTrackedMutation(t *testing.T) {
 func TestLargeObservationIsHashOnly(t *testing.T) {
 	blobs := make(map[string][]byte)
 	data := make([]byte, MaxBlobSize+1)
-	entry := AddObservationBlobs(blobs, RunResult{Stdout: data, Stderr: nil})
+	entry := AddObservationBlobs(blobs, RunResult{Stdout: CaptureBytes(data), Stderr: CaptureBytes(nil)})
 	if !entry.StdoutLarge {
 		t.Fatal("large marker missing")
 	}
@@ -462,7 +462,7 @@ func TestWriteGenerationSurvivesPruneFailure(t *testing.T) {
 	root := t.TempDir()
 	data := []byte("keep")
 	hash := HashBytes(data)
-	lock := Lockfile{V: 1, Probes: map[string]ProbeLock{"p": {RunHash: HashBytes([]byte("r")), Stdout: hash, Stderr: hash}}}
+	lock := Lockfile{V: 1, Probes: map[string]ProbeLock{"p": {RunHash: HashBytes([]byte("r")), RecordedCommit: "3319316e4a7a5f1fb2e80de6f001a1355269464a", Stdout: hash, Stderr: hash}}}
 	if err := WriteBlobs(root, map[string][]byte{HashBytes([]byte("orphan")): []byte("orphan")}); err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +479,7 @@ func TestWriteGenerationSurvivesPruneFailure(t *testing.T) {
 	defer os.Chmod(blobDir, 0o755)
 	// The lock is written and the generation succeeds even though the orphan
 	// cannot be pruned from a read-only directory.
-	lock.Probes["p"] = ProbeLock{RunHash: HashBytes([]byte("r2")), Stdout: hash, Stderr: hash}
+	lock.Probes["p"] = ProbeLock{RunHash: HashBytes([]byte("r2")), RecordedCommit: "3319316e4a7a5f1fb2e80de6f001a1355269464a", Stdout: hash, Stderr: hash}
 	if _, err := WriteGeneration(root, lock, map[string][]byte{hash: data}); err != nil {
 		t.Fatalf("generation failed on prune: %v", err)
 	}
