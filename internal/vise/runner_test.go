@@ -253,3 +253,30 @@ func TestProbeScratchRefusesSymlinkedTmp(t *testing.T) {
 		t.Fatalf("atomicWrite through a symlinked staging dir: %v", err)
 	}
 }
+
+func TestProbeThatTouchesEvaluatorStateIsHarness(t *testing.T) {
+	root := testGitRepo(t)
+	if err := AppendJournal(root, JournalEvent{Event: "flake", Commit: "c", Lock: "l", Probes: []string{"p"}}); err != nil {
+		t.Fatal(err)
+	}
+	for name, run := range map[string]string{
+		"journal":  "rm .vise/journal.jsonl; printf done",
+		"lockfile": "printf x > vise.lock; printf done",
+		"manifest": "printf '[vise]\\nversion = 1\\n' > vise.toml; printf done",
+	} {
+		probe := Probe{ID: name, Run: run, Timeout: 5}
+		result := (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, false)
+		if !strings.Contains(result.HarnessError, "probe modified vise state") {
+			t.Fatalf("%s: result = %#v", name, result)
+		}
+		os.Remove(filepath.Join(root, "vise.lock"))
+		os.Remove(filepath.Join(root, "vise.toml"))
+	}
+	if err := AppendJournal(root, JournalEvent{Event: "flake", Commit: "c", Lock: "l", Probes: []string{"p"}}); err != nil {
+		t.Fatal(err)
+	}
+	metric := Metric{ID: "m", Run: "rm -f .vise/journal.jsonl; printf 1", Timeout: 5, Direction: "down", Enforce: "none"}
+	if result := (Runner{Root: root, Manifest: testManifest()}).RunMetric(metric); !strings.Contains(result.HarnessError, "probe modified vise state") {
+		t.Fatalf("metric: %#v", result)
+	}
+}

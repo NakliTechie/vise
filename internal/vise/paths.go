@@ -42,7 +42,9 @@ func ValidateArtifactPath(root, path string) error {
 	if err := ValidateRelativePath(root, path, false); err != nil {
 		return err
 	}
-	clean := filepath.ToSlash(filepath.Clean(path))
+	// Compare case-insensitively: on APFS or NTFS ".GIT/index" is .git/index,
+	// and vise deletes declared artifacts before every run.
+	clean := strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
 	if clean == ".git" || strings.HasPrefix(clean, ".git/") {
 		return fmt.Errorf("artifacts cannot target Git metadata")
 	}

@@ -115,3 +115,15 @@ func TestLoadProposals(t *testing.T) {
 		t.Fatalf("proposals = %#v", proposals)
 	}
 }
+
+func TestArtifactPathExclusionsAreCaseInsensitive(t *testing.T) {
+	root := t.TempDir()
+	for _, path := range []string{".GIT/index", ".Git/HEAD", ".VISE/run.lock", ".Vise/blobs/x", "VISE.LOCK", "Vise.toml"} {
+		if err := ValidateArtifactPath(root, path); err == nil {
+			t.Fatalf("%q was accepted as an artifact", path)
+		}
+	}
+	if err := ValidateArtifactPath(root, "out/result.txt"); err != nil {
+		t.Fatalf("plain artifact rejected: %v", err)
+	}
+}
