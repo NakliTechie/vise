@@ -19,6 +19,15 @@ var interrupted atomic.Bool
 
 func setActiveProbeGroup(pgid int) { activeProbeGroup.Store(int64(pgid)) }
 
+// probeAboutToStart runs inside the lifecycle lock, between the interrupt
+// check and cmd.Start. It is nil in production and exists so a test can open
+// the exact window the lock closes: a signal arriving after a probe has been
+// cleared to start and before its process group is registered. Without the
+// lock the interrupt finds no group to kill and the probe outlives vise, which
+// is the failure the lock is for and which no ordinary test can reach —
+// removing the lock leaves every other test in this package green.
+var probeAboutToStart func()
+
 // probeLifecycle orders a signal against a probe start: runShell holds it
 // from before cmd.Start until the group is registered, and the signal path
 // holds it while it sets the flag and kills, so a signal either prevents the

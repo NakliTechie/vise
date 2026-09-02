@@ -505,3 +505,39 @@ func TestTheSnapshotSeesChangesThatLeaveContentAlone(t *testing.T) {
 		})
 	}
 }
+
+// The lifecycle lock exists for one window: a signal arriving after a probe
+// has been cleared to start and before its process group is registered.
+// Without the lock the interrupt finds no group, kills nothing, and the probe
+// outlives vise — still writing declared artifacts into a checkout nobody is
+// judging any more. Removing the lock leaves every other test in this package
+// green, so this one opens the window on purpose.
+func TestAnInterruptInTheStartWindowStillKillsTheProbe(t *testing.T) {
+	root := testGitRepo(t)
+	defer interrupted.Store(false)
+
+	entered := make(chan struct{})
+	probeAboutToStart = func() {
+		go func() {
+			close(entered)
+			InterruptProbes()
+		}()
+		// Give the goroutine time to reach the lock. With the lock held it
+		// waits there until the group is registered; without it, it runs to
+		// completion here and finds nothing to kill.
+		<-entered
+		time.Sleep(200 * time.Millisecond)
+	}
+	defer func() { probeAboutToStart = nil }()
+
+	probe := Probe{ID: "window", Run: "sleep 3; printf survived > survived.txt", Timeout: 30}
+	(Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, false)
+
+	// Well past the probe's own sleep. If it was killed, the file never
+	// appears; if it outlived the interrupt, it writes into a checkout vise
+	// has stopped watching.
+	time.Sleep(4 * time.Second)
+	if _, err := os.Stat(filepath.Join(root, "survived.txt")); err == nil {
+		t.Fatal("a probe interrupted in the start window kept running and wrote its artifact")
+	}
+}

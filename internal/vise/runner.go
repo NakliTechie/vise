@@ -196,6 +196,9 @@ func (r Runner) runShellUnguarded(id, command string, timeoutSeconds int, extra 
 		probeLifecycle.Unlock()
 		return RunResult{HarnessError: "vise was interrupted before the probe started"}
 	}
+	if probeAboutToStart != nil {
+		probeAboutToStart()
+	}
 	if err := cmd.Start(); err != nil {
 		probeLifecycle.Unlock()
 		return RunResult{HarnessError: fmt.Sprintf("launch probe: %v", err)}
