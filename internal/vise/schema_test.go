@@ -180,3 +180,18 @@ func TestLockfileAcceptsAWellFormedSchema(t *testing.T) {
 		t.Fatalf("lock = %#v", lock)
 	}
 }
+
+func TestLockfileFromANewerViseSaysSo(t *testing.T) {
+	root := t.TempDir()
+	body := `{"v":1,"fingerprint":{"os":"darwin","arch":"arm64","stubs":{"tz":"UTC","lang":"C","seed":"1729","network":"declared-off"}},"probes":{},"future_field":42}`
+	writeLockfile(t, root, body)
+	_, _, err := LoadLockfile(root)
+	if err == nil {
+		t.Fatal("a lockfile with an unknown field was accepted")
+	}
+	for _, want := range []string{`"future_field"`, "written by a newer vise", "upgrade", "vise version --json"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q lacks %q", err.Error(), want)
+		}
+	}
+}

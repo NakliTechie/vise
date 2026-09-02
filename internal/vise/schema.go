@@ -104,3 +104,18 @@ func validateLockfileSchema(lock Lockfile) error {
 	}
 	return nil
 }
+
+// unknownFieldPattern matches encoding/json's message for a field the current
+// struct does not have.
+var unknownFieldPattern = regexp.MustCompile(`unknown field "([^"]+)"`)
+
+// describeLockfileParseError turns a decoder error into something an operator
+// or an agent can act on. A field this binary does not know means the lockfile
+// was written by a newer vise, which is a tooling problem with a one-line fix —
+// not the malformed-state problem the raw JSON error suggests.
+func describeLockfileParseError(err error) error {
+	if match := unknownFieldPattern.FindStringSubmatch(err.Error()); match != nil {
+		return fmt.Errorf("vise.lock carries %q, which this vise does not know: the baseline was written by a newer vise, so upgrade this one (go install ./cmd/vise) and check `vise version --json` for the build you are running", match[1])
+	}
+	return fmt.Errorf("parse vise.lock: %w", err)
+}

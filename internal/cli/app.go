@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"unicode/utf8"
@@ -56,7 +57,11 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 			return renderSimpleError("version", "version accepts no arguments", jsonMode, stdout, stderr)
 		}
 		if jsonMode {
-			return writeJSON(stdout, map[string]any{"v": 1, "cmd": "version", "exit": 0, "version": Version, "next": vise.Next{Action: "proceed", Detail: "version reported"}})
+			response := map[string]any{"v": 1, "cmd": "version", "exit": 0, "version": Version, "next": vise.Next{Action: "proceed", Detail: "version reported"}}
+			for key, value := range buildIdentity() {
+				response[key] = value
+			}
+			return writeJSON(stdout, response)
 		}
 		fmt.Fprintln(stdout, "vise "+Version)
 		return vise.ExitOK
@@ -385,6 +390,32 @@ func hashFiles(files map[string]vise.Capture) map[string]string {
 		result[path] = capture.Hash
 	}
 	return result
+}
+
+// buildIdentity reports which build of vise this is. Two binaries built from
+// different commits carry the same Version string, which is exactly the
+// confusion that sends an agent hunting a phantom bug when the vise on its PATH
+// is older than the lockfile in front of it.
+func buildIdentity() map[string]any {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return nil
+	}
+	identity := map[string]any{}
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			identity["revision"] = setting.Value
+		case "vcs.time":
+			identity["built"] = setting.Value
+		case "vcs.modified":
+			identity["modified"] = setting.Value == "true"
+		}
+	}
+	if len(identity) == 0 {
+		return nil
+	}
+	return identity
 }
 
 func printHelp(w io.Writer) {

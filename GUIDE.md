@@ -409,6 +409,22 @@ env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/local/go/bin vise gate --quiet
 Green means the gate depends on nothing your shell was providing. Anything else
 means the agent will meet a harness error that has nothing to do with its task.
 
+**Make sure the agent's `vise` is the one you think it is.** The most expensive
+hour of this project's dogfood went to a stale `vise` earlier on the agent's
+`PATH` than the one the operator was using: same `0.3.0-dev` version string,
+built before a lockfile field existed, so the baseline would not parse. The
+agent diagnosed it correctly and was disbelieved. Three defences, in order:
+check `vise version --json` (it carries `revision` and `modified`), keep exactly
+one `vise` on the `PATH` the agent actually gets — remember a login shell
+re-reads its own profile and may reorder what you exported — and prefer a
+committed wrapper the repository controls:
+
+```sh
+#!/bin/sh
+# scripts/gate — the only gate command anyone should run here
+exec "${VISE_BIN:-vise}" gate "$@"
+```
+
 **One agent, one worktree.** Give each agent its own `git worktree` and do not
 commit into it while it is running. Mid-flight commits move the baseline under
 the agent, which then reasons about a repository that no longer exists — an

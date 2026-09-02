@@ -173,7 +173,7 @@ func LoadLockfile(root string) (Lockfile, []byte, error) {
 	decoder.DisallowUnknownFields()
 	var lock Lockfile
 	if err := decoder.Decode(&lock); err != nil {
-		return Lockfile{}, nil, fmt.Errorf("parse vise.lock: %w", err)
+		return Lockfile{}, nil, describeLockfileParseError(err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {

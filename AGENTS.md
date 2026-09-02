@@ -11,10 +11,15 @@ code, not the tests alone, not your confidence.
 ## First move, every session
 
 ```sh
-vise status --json
+vise version --json     # which build am I talking to?
+vise status --json      # what is the situation?
 ```
 
-It always exits 0 and reports the whole situation: whether a baseline exists,
+`version --json` carries `revision` and `modified`, so you can tell two builds
+apart — the `version` string alone cannot. Check it whenever the tool behaves
+oddly, and always when a lockfile will not parse.
+
+`status` always exits 0 and reports the whole situation: whether a baseline exists,
 whether it agrees with the manifest, whether the environment drifted, whether a
 rerun is refused, and exactly one `next.action`. Read it before you touch
 anything.
@@ -74,6 +79,7 @@ never to edit the code under test so the gate passes.
 | `probe modified vise state` | something you did wrote to the judge's own files | revert it |
 | `could not be launched` / `timed out` | the probe's command is broken | if your change broke the build, fix your change; if it was broken before you started, **stop and report** |
 | `is tracked by git` | a declared artifact is a tracked file | **stop and report** — the manifest needs an operator |
+| `written by a newer vise` | the `vise` on your PATH is older than the baseline | **stop and report**: the tool is stale, not the code. `vise version --json` names the build you are running |
 
 **If the gate was already failing before your first edit, you are blocked.**
 Say so immediately and stop. Do not spend the session investigating the

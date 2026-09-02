@@ -769,3 +769,23 @@ timeout = 60
 		t.Fatalf("gate on a bounded observation: %d", exit)
 	}
 }
+
+func TestVersionJSONIdentifiesTheBuild(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf stable")
+	exit, stdout, _ := cliRun(t, root, "version", "--json")
+	value := parseCLIJSON(t, stdout)
+	if exit != 0 || value["version"] != Version {
+		t.Fatalf("version --json: exit=%d value=%#v", exit, value)
+	}
+	// Built from a VCS checkout, the response must say which commit it is:
+	// two binaries with the same Version string are otherwise indistinguishable.
+	if _, ok := buildIdentity()["revision"]; ok {
+		if revision, _ := value["revision"].(string); len(revision) != 40 {
+			t.Fatalf("revision = %q, want a full object name", revision)
+		}
+	}
+	// Plain `vise version` stays stable so it remains usable as a probe.
+	if exit, stdout, _ := cliRun(t, root, "version"); exit != 0 || strings.TrimSpace(stdout) != "vise "+Version {
+		t.Fatalf("plain version: %d %q", exit, stdout)
+	}
+}
