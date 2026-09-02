@@ -251,7 +251,7 @@ func evaluateMetrics(outcome *Outcome, runner Runner, metrics []Metric, expected
 		}
 		delta := MetricDelta{Base: expected.Value, Now: first.Value, Delta: first.Value - expected.Value, Direction: metric.Direction, Enforce: metric.Enforce}
 		outcome.Metrics[metric.ID] = delta
-		regressed := metric.Enforce == "no-regress" && ((metric.Direction == "down" && first.Value > expected.Value) || (metric.Direction == "up" && first.Value < expected.Value))
+		regressed := metricRegressed(metric.Direction, metric.Enforce, expected.Value, first.Value)
 		if regressed {
 			outcome.AddFailure(metric.ID, Failure{Class: "metric", Detail: fmt.Sprintf("metric regressed from %g to %g", expected.Value, first.Value)})
 		}
@@ -453,4 +453,23 @@ func RerunLimitReached(root, commit, lockHash string, probeIDs []string) (bool, 
 		return true, "journal tail holds only unjudged events for this commit and lock; the rerun chain cannot be bounded", nil
 	}
 	return false, "", nil
+}
+
+// metricRegressed decides whether a metric moved the wrong way, which is the
+// whole difference between a quality gate and a random one. It is a named
+// function so it can be tested directly across both directions and both
+// enforcement settings: inverting the "up" case used to leave the suite green,
+// because every metric fixture in it counted downwards.
+func metricRegressed(direction, enforce string, base, now float64) bool {
+	if enforce != "no-regress" {
+		return false
+	}
+	switch direction {
+	case "down":
+		return now > base
+	case "up":
+		return now < base
+	default:
+		return false
+	}
 }

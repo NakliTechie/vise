@@ -166,6 +166,21 @@ func TestDoctorWritesNothing(t *testing.T) {
 	// The work-tree snapshot above deliberately excludes vise's own local
 	// state, so it cannot see a write to the journal or the run lock. Without
 	// this, making doctor append a journal event left the test green.
+	// Also against a repository that has recorded: a write guarded on ".vise
+	// already exists" is invisible to the virgin case above, and that is the
+	// case a real operator runs doctor in.
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "manifest")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+
 	digestBefore, err := evaluatorStateDigest(root)
 	if err != nil {
 		t.Fatal(err)
@@ -374,7 +389,7 @@ func TestDoctorNoticesTheCommittedBaselineIsNotTheOneHere(t *testing.T) {
 func TestDoctorAsksAboutTheBlobsTheLockfileReferences(t *testing.T) {
 	root := testGitRepo(t)
 	writeTestFile(t, root, "AGENTS.md", AgentContract)
-	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"git --version\"]\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"git --version\"]\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n[[probe]]\nid = \"q\"\nrun = \"printf q\"\n")
 	testGit(t, root, "add", ".")
 	testGit(t, root, "commit", "-qm", "harness")
 
@@ -401,8 +416,26 @@ func TestDoctorAsksAboutTheBlobsTheLockfileReferences(t *testing.T) {
 
 	// And a blob the lockfile does reference, uncommitted, must be reported —
 	// without this the check could examine nothing at all and stay green.
-	testGit(t, root, "rm", "-r", "-q", "--cached", filepath.Join(".vise", "blobs"))
-	testGit(t, root, "commit", "-qm", "drop the blobs")
+	// The orphan written above is untracked, so remove it before asking git to
+	// unstage the tracked ones.
+	if err := os.Remove(filepath.Join(root, ".vise", "blobs", strings.Repeat("a", 64))); err != nil {
+		t.Fatal(err)
+	}
+
+	// Uncommit all but the first blob. A check that inspects only one of them
+	// passed when the fixture had a single blob; this repository records two
+	// probes, so the survivor cannot be the one that is examined.
+	blobNames, err := os.ReadDir(filepath.Join(root, ".vise", "blobs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blobNames) < 2 {
+		t.Fatalf("fixture has %d blobs; this test needs at least two", len(blobNames))
+	}
+	for _, entry := range blobNames[1:] {
+		testGit(t, root, "rm", "-q", "--cached", filepath.Join(".vise", "blobs", entry.Name()))
+	}
+	testGit(t, root, "commit", "-qm", "drop most of the blobs")
 	var detail string
 	for _, finding := range Doctor(root).Findings {
 		if finding.Check == "baseline-committed" {
