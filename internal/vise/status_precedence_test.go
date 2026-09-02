@@ -1,0 +1,124 @@
+package vise
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// BuildStatus assembles four sections, each able to change the reported state.
+// When two apply at once only one wins, and which one is a contract an agent
+// depends on: it decides whether the next move is "re-record", "restore the
+// toolchain", or "repair the journal". The behavioural probe sees one state at
+// a time, so the precedence is pinned here.
+func TestStatusStatePrecedence(t *testing.T) {
+	// A manifest whose fingerprint command can be made to drift or fail.
+	manifest := func(probe, fingerprint string) string {
+		return "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n[env]\nfingerprint = [\"" + fingerprint + "\"]\n" + probe
+	}
+	stable := "[[probe]]\nid = \"stable\"\nrun = \"printf stable\"\n"
+
+	recorded := func(t *testing.T) string {
+		t.Helper()
+		root := testGitRepo(t)
+		writeTestFile(t, root, "tool-version", "v1")
+		writeTestFile(t, root, "vise.toml", manifest(stable, "cat tool-version"))
+		testGit(t, root, "add", ".")
+		testGit(t, root, "commit", "-qm", "manifest")
+		parsed, bytes, err := LoadManifest(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result := Record(root, parsed, bytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+			t.Fatalf("record: %#v", result.Outcome)
+		}
+		return root
+	}
+
+	driftFingerprint := func(t *testing.T, root string) {
+		t.Helper()
+		writeTestFile(t, root, "tool-version", "v2")
+	}
+	driftBaseline := func(t *testing.T, root string) {
+		t.Helper()
+		writeTestFile(t, root, "vise.toml", manifest(stable+"[[probe]]\nid = \"extra\"\nrun = \"printf extra\"\n", "cat tool-version"))
+	}
+
+	tests := []struct {
+		name      string
+		mutate    func(t *testing.T, root string)
+		wantState string
+		wantIn    string
+	}{
+		{
+			name:      "environment drift beats baseline drift",
+			mutate:    func(t *testing.T, root string) { driftFingerprint(t, root); driftBaseline(t, root) },
+			wantState: "environment-drift",
+			wantIn:    "restore the recorded toolchain",
+		},
+		{
+			name: "an empty manifest beats environment drift",
+			mutate: func(t *testing.T, root string) {
+				driftFingerprint(t, root)
+				writeTestFile(t, root, "vise.toml", manifest("", "cat tool-version"))
+			},
+			wantState: "harness-error",
+			wantIn:    "declares no [[probe]]",
+		},
+		{
+			name: "a broken journal beats environment drift",
+			mutate: func(t *testing.T, root string) {
+				driftFingerprint(t, root)
+				path := filepath.Join(root, ".vise", "journal.jsonl")
+				if err := os.WriteFile(path, []byte("{\"e\":\"torn\n{\"e\":\"gate\"}\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantState: "harness-error",
+			wantIn:    "repair the local journal",
+		},
+		{
+			name: "a failing fingerprint command beats baseline drift",
+			mutate: func(t *testing.T, root string) {
+				driftBaseline(t, root)
+				if err := os.Remove(filepath.Join(root, "tool-version")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantState: "harness-error",
+			wantIn:    "repair the environment fingerprint command",
+		},
+		{
+			name: "malformed proposals never change the verdict",
+			mutate: func(t *testing.T, root string) {
+				writeTestFile(t, root, ".vise/proposals.toml", "not = [valid\n")
+			},
+			wantState: "ready",
+			wantIn:    "run vise gate",
+		},
+		{
+			name:      "baseline drift alone reports itself",
+			mutate:    driftBaseline,
+			wantState: "baseline-drift",
+			wantIn:    "vise.toml and vise.lock disagree",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := recorded(t)
+			test.mutate(t, root)
+			report := BuildStatus(root)
+			if report.State != test.wantState {
+				t.Fatalf("state = %q, want %q (next: %s — %s)", report.State, test.wantState, report.Next.Action, report.Next.Detail)
+			}
+			if !strings.Contains(report.Next.Detail, test.wantIn) {
+				t.Fatalf("next detail %q does not name %q", report.Next.Detail, test.wantIn)
+			}
+			if report.Exit != ExitOK {
+				t.Fatalf("status must always exit 0, got %d", report.Exit)
+			}
+		})
+	}
+}
