@@ -451,6 +451,10 @@ commit into it while it is running. Mid-flight commits move the baseline under
 the agent, which then reasons about a repository that no longer exists — an
 error worth naming because it was made here, and it cost a whole run.
 
+A worked manifest and probe wrapper carrying all of this live in
+[`examples/agent-ready/`](examples/agent-ready/), with a table of which failure
+each guard prevents.
+
 **Write the rules down where the agent will read them.** An `AGENTS.md` at the
 repository root, naming the loop, the exit codes, and the four things never to
 touch, is what stands between a red gate and an agent that "fixes" the judge.

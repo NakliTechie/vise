@@ -1,0 +1,50 @@
+# An agent-ready manifest.
+#
+# Every line here exists because a real coding agent failed against a version
+# that lacked it. The failures were never about the code the agent was asked to
+# change; they were about the gate meaning something different for the agent
+# than for the operator. See GUIDE.md §12.
+
+[vise]
+version = 1
+
+[stubs]
+tz = "UTC"
+lang = "C"
+seed = "1729"
+network = "declared-off"
+
+# Fingerprint the toolchain the probes actually pin, not whatever happens to be
+# first on the caller's PATH. Plain `go version` reports what automatic
+# switching selected, which is a different fact.
+[env]
+fingerprint = ["GOTOOLCHAIN=go1.25.8 go version"]
+
+# The probe judges the program's stdout. The build that produces it runs through
+# a wrapper that is quiet on success and loud on failure, because an agent
+# sandbox emits warnings a terminal does not — and a probe that freezes warnings
+# is flaky for everyone but its author.
+#
+# The wrapper also keeps everything inside the workspace: vendored dependencies
+# (no network), a build cache under the checkout (no writes outside it), and a
+# named toolchain (no download). An agent sandbox denies all three.
+[[probe]]
+id = "cli-help"
+run = "./probe-cli.sh --help"
+timeout = 300
+deps = ["probe-cli.sh"]
+
+[[probe]]
+id = "cli-version"
+run = "./probe-cli.sh version"
+timeout = 300
+deps = ["probe-cli.sh"]
+
+# Declared artifacts must be untracked build outputs: vise deletes them before
+# every run and refuses to delete a tracked file.
+[[probe]]
+id = "render"
+run = "./probe-cli.sh render fixtures/input.json"
+timeout = 300
+deps = ["probe-cli.sh", "fixtures/input.json"]
+files = ["out/rendered.txt"]

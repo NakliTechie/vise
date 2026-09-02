@@ -1,0 +1,24 @@
+#!/bin/sh
+# Build this checkout quietly and run it with the given arguments.
+#
+# Quiet on success, loud on failure: the build's stderr is discarded when it
+# works and printed when it does not. A probe should judge the output it means
+# to freeze, not incidental noise from the toolchain — inside an agent sandbox
+# the toolchain says things it never says in a terminal.
+#
+# Everything stays inside the workspace:
+#   -mod=vendor    no module fetch, so no network
+#   GOCACHE=$PWD   no writes outside the checkout, which a sandbox denies
+#   GOTOOLCHAIN    named, so nothing is downloaded to satisfy go.mod
+#
+# GOCACHE must be an absolute path, so it is built from $PWD here rather than
+# declared in the manifest's env: vise runs every probe from the repository root.
+set -eu
+
+BIN="$VISE_TMP/app"
+if ! GOCACHE="$PWD/.gocache" GOFLAGS=-mod=vendor GOTOOLCHAIN=go1.25.8 \
+     go build -o "$BIN" ./cmd/app 2>"$VISE_TMP/build.err"; then
+  cat "$VISE_TMP/build.err" >&2
+  exit 1
+fi
+exec "$BIN" "$@"
