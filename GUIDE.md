@@ -347,6 +347,78 @@ The agent may draft a probe into `.vise/proposals.toml` (same schema as `[[probe
 
 `vise.toml`, `vise.lock`, `.vise/blobs/`, and the local `.vise/journal.jsonl` are the judge. vise cannot authenticate its caller: the agent harness must deny the gated agent writes to those paths and deny `vise record` during a campaign. The journal is on the list because the rerun limit is derived from it.
 
+## 12. Handing the repository to an agent
+
+Everything above assumes a human at the keyboard. The reason vise exists is the
+other case, and that one has a setup step people skip. These lessons come from
+running real coding agents against a vise-gated clone of vise itself.
+
+**Declare each probe's environment; do not inherit it.** vise sanitizes the
+environment down to `PATH`, `HOME`, and the stub set. Anything else your probe
+needs must be in the manifest, or the probe behaves differently for every
+caller — and an agent is a different caller:
+
+```toml
+[[probe]]
+id = "cli-help"
+run = "go run ./cmd/vise --help"
+env = { GOTOOLCHAIN = "go1.25.8", GOCACHE = "/path/to/cache", GOMODCACHE = "/path/to/mod" }
+```
+
+Without those pins the probe reached for a toolchain download, and inside the
+agent's sandbox there was no network. Every probe failed to launch, the agent
+saw nothing but harness errors, and none of it was about the code it had been
+asked to change.
+
+**A probe must not need the network.** Pin toolchains, warm the caches, vendor
+what you must. `network = "declared-off"` is a promise your probes make; a
+probe that downloads has broken it, and it will break first in the sandbox
+where agents live.
+
+**`PATH` cannot be pinned per probe** — it is reserved, and probes inherit the
+caller's. If a probe needs a specific tool version, pin it with a variable the
+tool understands, or fingerprint it so a different one is harness class rather
+than a false green.
+
+**Fingerprint what the probes actually use.** `[env] fingerprint = ["go version"]`
+observes the first `go` on the caller's `PATH`, which may not be the toolchain
+the probes pinned. It then reports drift that does not matter and misses drift
+that does. Fingerprint the same invocation:
+
+```toml
+[env]
+fingerprint = ["GOTOOLCHAIN=go1.25.8 go version"]
+```
+
+**Read the review diff before you freeze.** With the toolchain unresolvable, a
+probe produced a deterministic error message, and `record` froze it without
+complaint — a green gate over a build that does not build. The two-pass
+self-test cannot tell a deterministic failure from a deterministic success;
+only you can. `record --preview` and `--i-reviewed-the-diff` print exactly what
+is about to be frozen, and the first line of that diff said
+`go: go.mod requires go >= 1.25.8`.
+
+**Run a cold gate check before you hand the repository over.** The acceptance
+test for "this repository is ready for an agent" is one command, run from an
+environment stripped of everything your shell happens to carry:
+
+```sh
+env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/local/go/bin vise gate --quiet
+```
+
+Green means the gate depends on nothing your shell was providing. Anything else
+means the agent will meet a harness error that has nothing to do with its task.
+
+**One agent, one worktree.** Give each agent its own `git worktree` and do not
+commit into it while it is running. Mid-flight commits move the baseline under
+the agent, which then reasons about a repository that no longer exists — an
+error worth naming because it was made here, and it cost a whole run.
+
+**Write the rules down where the agent will read them.** An `AGENTS.md` at the
+repository root, naming the loop, the exit codes, and the four things never to
+touch, is what stands between a red gate and an agent that "fixes" the judge.
+This repository ships its own as a starting point.
+
 ## Command reference
 
 ```

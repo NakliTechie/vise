@@ -152,7 +152,8 @@ The feature inventory and the traps each one guards live in [`verify/features/`]
 
 ## Documents
 
-- [GUIDE.md](GUIDE.md) — one campaign end to end, with the real output of every command.
+- [AGENTS.md](AGENTS.md) — the rules for a coding agent working under the gate. Copy it into any repository you gate.
+- [GUIDE.md](GUIDE.md) — one campaign end to end, with the real output of every command, and how to hand a repository to an agent (§12).
 - [SPEC.md](SPEC.md) — the contract: manifest, lockfile, exit vocabulary, flake protocol, crash-safety ordering.
 - [RUNTIMES.md](RUNTIMES.md) — per-runtime determinism traps and where the boundary sits.
 - [RESEARCH.md](RESEARCH.md) — the evidence the design rests on.
