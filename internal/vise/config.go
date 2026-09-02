@@ -246,15 +246,6 @@ func (m Manifest) Probe(id string) (Probe, bool) {
 	return Probe{}, false
 }
 
-func (m Manifest) Metric(id string) (Metric, bool) {
-	for _, metric := range m.Metrics {
-		if metric.ID == id {
-			return metric, true
-		}
-	}
-	return Metric{}, false
-}
-
 func ProbeRunHash(probe Probe) (string, error) {
 	data, err := json.Marshal(probe)
 	if err != nil {

@@ -230,9 +230,10 @@ func WriteGeneration(root string, lock Lockfile, blobs map[string][]byte) ([]byt
 	if err := atomicWrite(root, filepath.Join(root, "vise.lock"), data, 0o644); err != nil {
 		return nil, fmt.Errorf("write vise.lock: %w", err)
 	}
-	if err := pruneBlobs(blobDir, referencedHashes(lock)); err != nil {
-		return nil, err
-	}
+	// The lockfile is committed at this point. Orphan blobs are harmless
+	// (SPEC §3.1) and the next record prunes them again, so a prune failure
+	// must not turn a written baseline into an exit-2 that looks unwritten.
+	_ = pruneBlobs(blobDir, referencedHashes(lock))
 	return data, nil
 }
 
@@ -485,12 +486,14 @@ func readJournalTail(root string) (events []JournalEvent, truncated bool, err er
 	if err := scanner.Err(); err != nil {
 		return nil, false, err
 	}
+	tornTail := info.Size() > 0 && !endsWithNewline(file, info.Size())
 	for i, line := range lines {
 		var event JournalEvent
 		if err := json.Unmarshal(line, &event); err != nil {
-			if i == len(lines)-1 {
+			if i == len(lines)-1 && tornTail {
 				// A torn final line is what an interrupted append leaves behind;
-				// the next append starts a fresh line, so the tail stays readable.
+				// the next append truncates it, so the tail stays readable. A
+				// newline-terminated malformed line is corruption and fails.
 				break
 			}
 			return nil, false, fmt.Errorf("parse journal: %w", err)
@@ -591,4 +594,12 @@ func truncateTornTail(file *os.File) error {
 		keep = start + int64(cut) + 1
 	}
 	return file.Truncate(keep)
+}
+
+func endsWithNewline(file *os.File, size int64) bool {
+	last := make([]byte, 1)
+	if _, err := file.ReadAt(last, size-1); err != nil {
+		return false
+	}
+	return last[0] == '\n'
 }

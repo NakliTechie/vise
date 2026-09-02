@@ -64,3 +64,28 @@ func TestLockfileDiffCoversFingerprintMetricsAndDeps(t *testing.T) {
 		t.Fatalf("unchanged diff = %q", diff)
 	}
 }
+
+func TestLockfileDiffShowsDefinitionChangesAndDescribesAdditions(t *testing.T) {
+	root := t.TempDir()
+	stdout := HashBytes([]byte("same"))
+	old := Lockfile{
+		Probes:  map[string]ProbeLock{"p": {RunHash: "sha256:aaaa", Exit: 0, Stdout: stdout, Stderr: stdout}},
+		Metrics: map[string]MetricLock{"m": {RunHash: "sha256:cccc", Value: 10}},
+	}
+	updated := Lockfile{
+		Probes:  map[string]ProbeLock{"p": {RunHash: "sha256:bbbb", Exit: 0, Stdout: stdout, Stderr: stdout}, "q": {Exit: 3, Stdout: stdout, Stderr: stdout, RecordedCommit: "abc"}},
+		Metrics: map[string]MetricLock{"m": {RunHash: "sha256:dddd", Value: 10}, "n": {Value: 4, ToolVersion: "v2"}},
+	}
+	diff := LockfileDiff(root, old, updated, nil)
+	for _, want := range []string{
+		"p definition changed since the recorded baseline (run_hash sha256:aaaa -> sha256:bbbb)",
+		"+ probe q (exit 3, stdout sha256:",
+		"recorded at abc)",
+		"m definition changed since the recorded baseline (run, direction, enforce, env, timeout, or version_cmd; run_hash sha256:cccc -> sha256:dddd)",
+		`+ metric n (value 4, tool_version "v2")`,
+	} {
+		if !strings.Contains(diff, want) {
+			t.Fatalf("diff %q lacks %q", diff, want)
+		}
+	}
+}

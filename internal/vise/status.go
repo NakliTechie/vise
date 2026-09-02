@@ -158,7 +158,11 @@ func baselineDrift(root string, manifest Manifest, lock Lockfile) []string {
 		if _, exists := outcome.Failures[probe.ID]; exists {
 			continue
 		}
-		if tracked, err := GitTrackedPaths(root, probe.Files); err == nil && len(tracked) > 0 {
+		tracked, err := GitTrackedPaths(root, probe.Files)
+		switch {
+		case err != nil:
+			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: "cannot inspect declared artifacts: " + err.Error()})
+		case len(tracked) > 0:
 			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: fmt.Sprintf("declared artifact %q is tracked by git; the next run will refuse it", tracked[0])})
 		}
 	}

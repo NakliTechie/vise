@@ -22,8 +22,6 @@ type RecordOptions struct {
 
 type RecordResult struct {
 	Outcome    Outcome
-	Lockfile   Lockfile
-	LockBytes  []byte
 	ReviewDiff string
 	// Candidate is the digest of the lockfile these passes would write.
 	Candidate string
@@ -172,7 +170,6 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		return result
 	}
 	result.Candidate = HashBytes(candidateBytes)
-	result.Lockfile = lock
 	if hasOld {
 		result.ReviewDiff = LockfileDiff(root, oldLock, lock, blobs)
 	}
@@ -207,15 +204,11 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 	counts := Counts{Declared: declared, Pass: declared}
 	if err := AppendJournal(root, JournalEvent{Event: "record", Commit: commit, Dirty: dirty, Counts: &counts, Lock: lockHash}); err != nil {
 		result.Outcome = harnessOnly("record", "journal", "baseline was written but journal append failed: "+err.Error())
-		result.Lockfile = lock
-		result.LockBytes = lockBytes
 		return result
 	}
 
 	result.Outcome.Lock = lockHash
 	result.Outcome.Finalize()
-	result.Lockfile = lock
-	result.LockBytes = lockBytes
 	return result
 }
 
@@ -265,10 +258,13 @@ func LockfileDiff(root string, oldLock, newLock Lockfile, newBlobs map[string][]
 		newProbe, newOK := newLock.Probes[id]
 		switch {
 		case !oldOK:
-			fmt.Fprintf(&b, "+ probe %s\n", id)
+			fmt.Fprintf(&b, "+ probe %s (exit %d, stdout %s, stderr %s, %d file(s), recorded at %s)\n", id, newProbe.Exit, newProbe.Stdout, newProbe.Stderr, len(newProbe.Files), newProbe.RecordedCommit)
 		case !newOK:
-			fmt.Fprintf(&b, "- probe %s\n", id)
+			fmt.Fprintf(&b, "- probe %s (exit %d, stdout %s, stderr %s)\n", id, oldProbe.Exit, oldProbe.Stdout, oldProbe.Stderr)
 		default:
+			if oldProbe.RunHash != newProbe.RunHash {
+				fmt.Fprintf(&b, "%s definition changed since the recorded baseline (run_hash %s -> %s); see git diff vise.toml\n", id, oldProbe.RunHash, newProbe.RunHash)
+			}
 			if oldProbe.Exit != newProbe.Exit {
 				fmt.Fprintf(&b, "%s exit: %d -> %d\n", id, oldProbe.Exit, newProbe.Exit)
 			}
@@ -313,10 +309,13 @@ func LockfileDiff(root string, oldLock, newLock Lockfile, newBlobs map[string][]
 		newMetric, newOK := newLock.Metrics[id]
 		switch {
 		case !oldOK:
-			fmt.Fprintf(&b, "+ metric %s\n", id)
+			fmt.Fprintf(&b, "+ metric %s (value %g, tool_version %q)\n", id, newMetric.Value, newMetric.ToolVersion)
 		case !newOK:
-			fmt.Fprintf(&b, "- metric %s\n", id)
+			fmt.Fprintf(&b, "- metric %s (value %g, tool_version %q)\n", id, oldMetric.Value, oldMetric.ToolVersion)
 		default:
+			if oldMetric.RunHash != newMetric.RunHash {
+				fmt.Fprintf(&b, "%s definition changed since the recorded baseline (run, direction, enforce, env, timeout, or version_cmd; run_hash %s -> %s); see git diff vise.toml\n", id, oldMetric.RunHash, newMetric.RunHash)
+			}
 			if oldMetric.Value != newMetric.Value {
 				fmt.Fprintf(&b, "%s value: %g -> %g\n", id, oldMetric.Value, newMetric.Value)
 			}

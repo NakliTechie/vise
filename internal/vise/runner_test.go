@@ -253,3 +253,60 @@ func TestProbeScratchRefusesSymlinkedTmp(t *testing.T) {
 		t.Fatalf("atomicWrite through a symlinked staging dir: %v", err)
 	}
 }
+
+func TestProbeThatTouchesEvaluatorStateIsHarness(t *testing.T) {
+	root := testGitRepo(t)
+	if err := AppendJournal(root, JournalEvent{Event: "flake", Commit: "c", Lock: "l", Probes: []string{"p"}}); err != nil {
+		t.Fatal(err)
+	}
+	for name, run := range map[string]string{
+		"journal":  "rm .vise/journal.jsonl; printf done",
+		"lockfile": "printf x > vise.lock; printf done",
+		"manifest": "printf '[vise]\\nversion = 1\\n' > vise.toml; printf done",
+	} {
+		probe := Probe{ID: name, Run: run, Timeout: 5}
+		result := (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, false)
+		if !strings.Contains(result.HarnessError, "probe modified vise state") {
+			t.Fatalf("%s: result = %#v", name, result)
+		}
+		os.Remove(filepath.Join(root, "vise.lock"))
+		os.Remove(filepath.Join(root, "vise.toml"))
+	}
+	if err := AppendJournal(root, JournalEvent{Event: "flake", Commit: "c", Lock: "l", Probes: []string{"p"}}); err != nil {
+		t.Fatal(err)
+	}
+	metric := Metric{ID: "m", Run: "rm -f .vise/journal.jsonl; printf 1", Timeout: 5, Direction: "down", Enforce: "none"}
+	if result := (Runner{Root: root, Manifest: testManifest()}).RunMetric(metric); !strings.Contains(result.HarnessError, "probe modified vise state") {
+		t.Fatalf("metric: %#v", result)
+	}
+}
+
+func TestProbeStartedAfterInterruptIsKilledOnRegistration(t *testing.T) {
+	root := testGitRepo(t)
+	interrupted.Store(true)
+	defer interrupted.Store(false)
+	probe := Probe{ID: "late", Run: "sleep 20 & echo $! > child.pid; wait", Timeout: 30}
+	start := time.Now()
+	result := (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, false)
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("probe ran for %v after an interrupt", elapsed)
+	}
+	if !strings.Contains(result.HarnessError, "interrupted before the probe started") {
+		t.Fatalf("probe was started after an interrupt: %#v", result)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "child.pid"))
+	if err != nil {
+		return // the probe never started; nothing to reap
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("child %d survived the interrupt", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

@@ -49,6 +49,10 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 			return RunResult{HarnessError: err.Error()}
 		}
 	}
+	stateBefore, err := evaluatorStateDigest(r.Root)
+	if err != nil {
+		return RunResult{HarnessError: err.Error()}
+	}
 	tracked, err := GitTrackedPaths(r.Root, probe.Files)
 	if err != nil {
 		return RunResult{HarnessError: err.Error()}
@@ -73,6 +77,13 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 
 	result := r.runShell(probe.ID, probe.Run, probe.Timeout, probe.Env)
 	if result.HarnessError != "" {
+		return result
+	}
+	if stateAfter, err := evaluatorStateDigest(r.Root); err != nil {
+		result.HarnessError = err.Error()
+		return result
+	} else if stateAfter != stateBefore {
+		result.HarnessError = evaluatorStateMutated
 		return result
 	}
 	result.Files = make(map[string][]byte, len(probe.Files))
@@ -116,9 +127,18 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 	if err != nil {
 		return MetricResult{HarnessError: err.Error()}
 	}
+	stateBefore, err := evaluatorStateDigest(r.Root)
+	if err != nil {
+		return MetricResult{HarnessError: err.Error()}
+	}
 	result := r.runShell(metric.ID, metric.Run, metric.Timeout, metric.Env)
 	if result.HarnessError != "" {
 		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: result.HarnessError}
+	}
+	if stateAfter, err := evaluatorStateDigest(r.Root); err != nil {
+		return MetricResult{HarnessError: err.Error()}
+	} else if stateAfter != stateBefore {
+		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: evaluatorStateMutated}
 	}
 	if result.Exit != 0 {
 		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: fmt.Sprintf("metric exited %d", result.Exit)}
@@ -181,10 +201,17 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	probeLifecycle.Lock()
+	if interrupted.Load() {
+		probeLifecycle.Unlock()
+		return RunResult{HarnessError: "vise was interrupted before the probe started"}
+	}
 	if err := cmd.Start(); err != nil {
+		probeLifecycle.Unlock()
 		return RunResult{HarnessError: fmt.Sprintf("launch probe: %v", err)}
 	}
 	setActiveProbeGroup(cmd.Process.Pid)
+	probeLifecycle.Unlock()
 	defer setActiveProbeGroup(0)
 
 	done := make(chan error, 1)

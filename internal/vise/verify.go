@@ -12,14 +12,11 @@ type VerifyOptions struct {
 }
 
 type VerifyResult struct {
-	Outcome       Outcome
-	Lockfile      Lockfile
-	LockBytes     []byte
-	ManifestBytes []byte
-	Flaky         []string
-	CheckSet      []string
-	Commit        string
-	Dirty         bool
+	Outcome  Outcome
+	Flaky    []string
+	CheckSet []string
+	Commit   string
+	Dirty    bool
 	// RerunRefused marks a verify that never ran because the rerun limit
 	// blocked it; such a result is not a judgment and must not be journaled.
 	RerunRefused bool
@@ -27,7 +24,7 @@ type VerifyResult struct {
 
 func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOptions) VerifyResult {
 	outcome := NewOutcome("verify")
-	result := VerifyResult{Outcome: outcome, ManifestBytes: manifestBytes}
+	result := VerifyResult{Outcome: outcome}
 	lock, lockBytes, err := LoadLockfile(root)
 	if os.IsNotExist(err) {
 		outcome.Exit = ExitNotInitialized
@@ -40,8 +37,6 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 		result.Outcome = harnessOnly("verify", "vise.lock", err.Error())
 		return result
 	}
-	result.Lockfile = lock
-	result.LockBytes = lockBytes
 	lockHash, err := TamperHash(root, manifestBytes, lockBytes)
 	if err != nil {
 		result.Outcome = harnessOnly("verify", "tamper-hash", err.Error())

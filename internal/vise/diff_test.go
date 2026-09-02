@@ -26,3 +26,12 @@ func TestFirstDiffShowsTrailingNewlineChange(t *testing.T) {
 		t.Fatalf("diff = %q", diff)
 	}
 }
+
+func TestFirstDiffDistinguishesEmptyFromOneNewline(t *testing.T) {
+	if diff := FirstDiff("stdout", []byte(""), []byte("\n")); diff == "" || !strings.Contains(diff, "@@ first divergence line 1 @@") || !strings.Contains(diff, "\n+") {
+		t.Fatalf("diff = %q", diff)
+	}
+	if diff := FirstDiff("stdout", []byte("\n"), []byte("")); diff == "" || !strings.Contains(diff, "\n-") {
+		t.Fatalf("diff = %q", diff)
+	}
+}

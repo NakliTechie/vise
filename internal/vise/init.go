@@ -51,6 +51,10 @@ func InitRepository(root string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
+	// Check the ignore file first so a refusal leaves nothing behind.
+	if err := rejectExistingSymlinkOrSpecial(filepath.Join(root, ".gitignore")); err != nil {
+		return fmt.Errorf("init refuses to rewrite .gitignore: %w", err)
+	}
 	if err := atomicWrite(root, manifestPath, []byte(StubManifest), 0o644); err != nil {
 		return err
 	}
@@ -62,7 +66,7 @@ func InitRepository(root string) error {
 
 func updateGitignore(root string) error {
 	path := filepath.Join(root, ".gitignore")
-	data, err := os.ReadFile(path)
+	data, err := readRegularFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
