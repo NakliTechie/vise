@@ -46,10 +46,10 @@ type Runner struct {
 const pipeCloseDelay = time.Second
 
 func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
-	var before string
+	var before WorkspaceSnapshot
 	if checkTracked {
 		var err error
-		before, err = GitTrackedSnapshot(r.Root)
+		before, err = GitWorkspaceSnapshot(r.Root, probe.Files)
 		if err != nil {
 			return RunResult{HarnessError: err.Error()}
 		}
@@ -81,20 +81,22 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 	}
 	result.Files = files
 	if checkTracked {
-		after, err := GitTrackedSnapshot(r.Root)
+		after, err := GitWorkspaceSnapshot(r.Root, probe.Files)
 		if err != nil {
 			result.HarnessError = err.Error()
 			return result
 		}
-		if before != after {
+		if before.Tracked != after.Tracked {
 			result.HarnessError = "probe modified tracked files"
+		} else if stray := before.ChangedUntracked(after); len(stray) > 0 {
+			result.HarnessError = strayFilesError("probe", stray)
 		}
 	}
 	return result
 }
 
 func (r Runner) RunMetric(metric Metric) MetricResult {
-	before, err := GitTrackedSnapshot(r.Root)
+	before, err := GitWorkspaceSnapshot(r.Root, nil)
 	if err != nil {
 		return MetricResult{HarnessError: err.Error()}
 	}
@@ -136,12 +138,15 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 			return MetricResult{Value: value, HarnessError: "metric version command returned empty output"}
 		}
 	}
-	after, err := GitTrackedSnapshot(r.Root)
+	after, err := GitWorkspaceSnapshot(r.Root, nil)
 	if err != nil {
 		return MetricResult{Value: value, ToolVersion: version, HarnessError: err.Error()}
 	}
-	if before != after {
+	if before.Tracked != after.Tracked {
 		return MetricResult{Value: value, ToolVersion: version, HarnessError: "metric modified tracked files"}
+	}
+	if stray := before.ChangedUntracked(after); len(stray) > 0 {
+		return MetricResult{Value: value, ToolVersion: version, HarnessError: strayFilesError("metric", stray)}
 	}
 	return MetricResult{Value: value, ToolVersion: version, Stdout: result.Stdout, Stderr: result.Stderr}
 }
@@ -291,4 +296,19 @@ func sanitizeTempName(value string) string {
 		return "probe"
 	}
 	return value
+}
+
+// strayFilesError names the files a run left in the checkout. It names at
+// most three: the agent reading this needs to know which write to remove, and
+// an unbounded list of a thousand stray files is a wall of text carrying the
+// same one instruction.
+func strayFilesError(kind string, paths []string) string {
+	named := paths
+	suffix := ""
+	if len(named) > 3 {
+		named = named[:3]
+		suffix = fmt.Sprintf(" (and %d more)", len(paths)-3)
+	}
+	return fmt.Sprintf("%s wrote files git neither tracks nor ignores: %s%s; a %s may write only its declared files and $VISE_TMP, or the operator must ignore these paths",
+		kind, strings.Join(named, ", "), suffix, kind)
 }

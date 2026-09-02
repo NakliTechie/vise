@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -108,7 +109,7 @@ func CaptureFingerprint(root string, manifest Manifest) (Fingerprint, error) {
 	if len(manifest.Environment.Fingerprint) == 0 {
 		return fingerprint, nil
 	}
-	before, err := GitTrackedSnapshot(root)
+	before, err := GitWorkspaceSnapshot(root, nil)
 	if err != nil {
 		return Fingerprint{}, err
 	}
@@ -127,12 +128,15 @@ func CaptureFingerprint(root string, manifest Manifest) (Fingerprint, error) {
 		}
 		fingerprint.Env[command] = strings.TrimSpace(string(result.Stdout.Prefix))
 	}
-	after, err := GitTrackedSnapshot(root)
+	after, err := GitWorkspaceSnapshot(root, nil)
 	if err != nil {
 		return Fingerprint{}, err
 	}
-	if before != after {
+	if before.Tracked != after.Tracked {
 		return Fingerprint{}, fmt.Errorf("environment fingerprint command modified tracked files")
+	}
+	if stray := before.ChangedUntracked(after); len(stray) > 0 {
+		return Fingerprint{}, errors.New(strayFilesError("environment fingerprint command", stray))
 	}
 	return fingerprint, nil
 }

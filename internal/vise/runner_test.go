@@ -326,3 +326,66 @@ func TestProbeTempDirectoryIsPinnedToTheProbeScratch(t *testing.T) {
 		t.Fatalf("TMPDIR %q is not under the repository scratch", parts[0])
 	}
 }
+
+// The tracked-file diff cannot see a file that was never tracked, so a probe
+// that drops a stray into the checkout used to pass. That stray is visible to
+// every later probe and every later build, which makes the baseline depend on
+// the order runs happened in.
+func TestAProbeThatWritesAnUntrackedFileIsAHarnessError(t *testing.T) {
+	root := testGitRepo(t)
+	runner := Runner{Root: root, Manifest: Manifest{}}
+
+	result := runner.RunProbe(Probe{ID: "stray", Run: "printf stray > leftover.txt", Timeout: 30}, true)
+	if !strings.Contains(result.HarnessError, "leftover.txt") {
+		t.Fatalf("harness error %q does not name the stray file", result.HarnessError)
+	}
+	if !strings.Contains(result.HarnessError, "neither tracks nor ignores") {
+		t.Fatalf("harness error %q does not say what the rule is", result.HarnessError)
+	}
+}
+
+// An ignored path is the one place a probe is expected to write: a build
+// cache, a compiler's scratch. .gitignore is where the operator already said
+// which those are, so the snapshot must not second-guess it.
+func TestAProbeMayWriteWhereGitIsToldToIgnore(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, ".gitignore", "cache/\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "ignore cache")
+	runner := Runner{Root: root, Manifest: Manifest{}}
+
+	result := runner.RunProbe(Probe{ID: "cache", Run: "mkdir -p cache && printf warm > cache/warm", Timeout: 30}, true)
+	if result.HarnessError != "" {
+		t.Fatalf("writing an ignored path was refused: %s", result.HarnessError)
+	}
+}
+
+// A declared artifact is untracked by rule, and vise deletes and recreates it
+// on every run by design. Counting that as a stray would make every probe
+// with a files = [...] entry fail.
+func TestADeclaredArtifactIsNotAStray(t *testing.T) {
+	root := testGitRepo(t)
+	runner := Runner{Root: root, Manifest: Manifest{}}
+
+	probe := Probe{ID: "artifact", Run: "mkdir -p out && printf produced > out/result.txt", Timeout: 30, Files: []string{"out/result.txt"}}
+	result := runner.RunProbe(probe, true)
+	if result.HarnessError != "" {
+		t.Fatalf("a declared artifact was reported as a stray: %s", result.HarnessError)
+	}
+	if got := string(result.Files["out/result.txt"].Prefix); got != "produced" {
+		t.Fatalf("artifact = %q", got)
+	}
+}
+
+// A probe that deletes a stray it did not create is changing the checkout
+// just as much as one that adds a file.
+func TestAProbeThatRemovesAnUntrackedFileIsAHarnessError(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "scratch.txt", "was here")
+	runner := Runner{Root: root, Manifest: Manifest{}}
+
+	result := runner.RunProbe(Probe{ID: "remover", Run: "rm scratch.txt", Timeout: 30}, true)
+	if !strings.Contains(result.HarnessError, "scratch.txt") {
+		t.Fatalf("harness error %q does not name the removed file", result.HarnessError)
+	}
+}

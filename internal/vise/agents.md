@@ -85,6 +85,7 @@ never to edit the code under test so the gate passes.
 | `metric definition changed after recording` | you edited a metric's definition | revert it |
 | `environment differs from recording` | the toolchain or platform moved | **stop and report** — a human re-records |
 | `probe modified vise state` | something you did wrote to the judge's own files | revert it |
+| `wrote files git neither tracks nor ignores` | a probe left a stray file in the checkout | the message names the files; remove the write, or ask an operator to add those paths to `.gitignore` |
 | `could not be launched` / `timed out` | the probe's command is broken | if your change broke the build, fix your change; if it was broken before you started, **stop and report** |
 | `is tracked by git` | a declared artifact is a tracked file | **stop and report** — the manifest needs an operator |
 | `written by a newer vise` | the `vise` on your PATH is older than the baseline | **stop and report**: the tool is stale, not the code. `vise version --json` names the build you are running |

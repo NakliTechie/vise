@@ -273,7 +273,7 @@ next: human — vise.toml and vise.lock disagree (read-fixture: probe is declare
 
 **The environment differs from the recording.** `[env] fingerprint = ["node --version"]` captures tool versions at record; a mismatch at verify is `fingerprint [harness] — environment differs from recording: …` with `next: human`. Changing `[stubs]` in the manifest is the same class: the stubs are part of the fingerprint.
 
-Also harness, also exit 2: a probe that cannot be launched (127), a timeout, a probe that modifies tracked files, a declared artifact that is tracked by git (vise deletes artifacts before every run and refuses to delete a tracked file), a probe that leaves a background process holding its stdout, and a manifest with no probes.
+Also harness, also exit 2: a probe that cannot be launched (127), a timeout, a probe that modifies tracked files or leaves behind a file Git neither tracks nor ignores, a declared artifact that is tracked by git (vise deletes artifacts before every run and refuses to delete a tracked file), a probe that leaves a background process holding its stdout, and a manifest with no probes.
 
 **A note on very large output.** vise hashes and counts every byte a probe produces but keeps only the first 256 KiB. Two probes that print a gigabyte are still compared exactly, by hash; what changes is the diff, which degrades to a line naming both hashes and the byte count when the divergence lies beyond the retained prefix:
 
