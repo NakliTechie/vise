@@ -122,3 +122,38 @@ func TestStatusStatePrecedence(t *testing.T) {
 		})
 	}
 }
+
+// A journal that cannot be read and a journal that holds nothing both produced
+// an empty list, so the screen printed "journal: empty" two lines above
+// "repair the local journal" — one line contradicting another on the one
+// screen an agent reads before it acts. Found by a coding agent asked to
+// report what looked wrong.
+func TestStatusDistinguishesAnUnreadableJournalFromAnEmptyOne(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "manifest")
+
+	// Before recording there is no journal at all: empty, and readable.
+	if report := BuildStatus(root); report.JournalUnreadable {
+		t.Fatal("a repository with no journal was called unreadable")
+	}
+
+	parsed, bytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := Record(root, parsed, bytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".vise", "journal.jsonl"), []byte("{\"e\":\"torn\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report := BuildStatus(root)
+	if !report.JournalUnreadable {
+		t.Fatal("a torn journal was reported as an ordinary one")
+	}
+	if report.State != "harness-error" || !strings.Contains(report.Next.Detail, "repair the local journal") {
+		t.Fatalf("state = %q, next = %#v", report.State, report.Next)
+	}
+}

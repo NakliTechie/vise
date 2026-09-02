@@ -66,67 +66,122 @@ func renderGate(w io.Writer, outcome vise.Outcome, quiet bool) {
 const maxDriftLines = 5
 
 func renderStatus(w io.Writer, report vise.StatusReport) {
-	fmt.Fprintln(w, "VISE STATUS — "+strings.ToUpper(report.State))
-	if report.Manifest.Present {
-		fmt.Fprintf(w, "manifest: valid=%t · probes=%d · metrics=%d\n", report.Manifest.Valid, report.Manifest.Probes, report.Manifest.Metrics)
+	renderStatusState(w, report.State)
+	renderStatusManifest(w, report.Manifest)
+	renderStatusLockfile(w, report.Lock)
+	renderStatusFingerprint(w, report.Lock.FingerprintMatch)
+	renderStatusRecordedCommits(w, report.Lock.RecordedCommits)
+	renderStatusLockHash(w, report.Lock.Hash)
+	renderStatusLockError(w, report.Lock.Error)
+	renderStatusDrift(w, report.Lock.Drift)
+	renderStatusProposals(w, report.PendingProposals, report.ProposalError)
+	renderStatusJournalTail(w, report.Journal, report.JournalUnreadable)
+	renderStatusNextAction(w, report.Next)
+}
+
+func renderStatusState(w io.Writer, state string) {
+	fmt.Fprintln(w, "VISE STATUS — "+strings.ToUpper(state))
+}
+
+func renderStatusManifest(w io.Writer, manifest vise.StatusManifest) {
+	if manifest.Present {
+		fmt.Fprintf(w, "manifest: valid=%t · probes=%d · metrics=%d\n", manifest.Valid, manifest.Probes, manifest.Metrics)
 	} else {
 		fmt.Fprintln(w, "manifest: missing")
 	}
-	if report.Manifest.Error != "" {
-		fmt.Fprintln(w, "manifest error: "+terminalSafe(report.Manifest.Error, false))
+	if manifest.Error != "" {
+		fmt.Fprintln(w, "manifest error: "+terminalSafe(manifest.Error, false))
 	}
-	if report.Lock.Present {
-		fmt.Fprintf(w, "lockfile: valid=%t · probes=%d · metrics=%d\n", report.Lock.Valid, report.Lock.Probes, report.Lock.Metrics)
+}
+
+func renderStatusLockfile(w io.Writer, lock vise.StatusLock) {
+	if lock.Present {
+		fmt.Fprintf(w, "lockfile: valid=%t · probes=%d · metrics=%d\n", lock.Valid, lock.Probes, lock.Metrics)
 	} else {
 		fmt.Fprintln(w, "lockfile: missing")
 	}
-	if report.Lock.FingerprintMatch != nil {
-		fmt.Fprintf(w, "fingerprint: match=%t\n", *report.Lock.FingerprintMatch)
+}
+
+func renderStatusFingerprint(w io.Writer, match *bool) {
+	if match != nil {
+		fmt.Fprintf(w, "fingerprint: match=%t\n", *match)
 	}
-	if len(report.Lock.RecordedCommits) > 0 {
-		fmt.Fprintln(w, "recorded commits: "+terminalSafe(strings.Join(report.Lock.RecordedCommits, ", "), false))
+}
+
+func renderStatusRecordedCommits(w io.Writer, commits []string) {
+	if len(commits) > 0 {
+		fmt.Fprintln(w, "recorded commits: "+terminalSafe(strings.Join(commits, ", "), false))
 	}
-	if report.Lock.Hash != "" {
-		fmt.Fprintln(w, "lock: "+terminalSafe(report.Lock.Hash, false))
+}
+
+func renderStatusLockHash(w io.Writer, hash string) {
+	if hash != "" {
+		fmt.Fprintln(w, "lock: "+terminalSafe(hash, false))
 	}
-	if report.Lock.Error != "" {
-		fmt.Fprintln(w, "lock error: "+terminalSafe(report.Lock.Error, false))
+}
+
+func renderStatusLockError(w io.Writer, lockError string) {
+	if lockError != "" {
+		fmt.Fprintln(w, "lock error: "+terminalSafe(lockError, false))
 	}
-	for i, line := range report.Lock.Drift {
+}
+
+func renderStatusDrift(w io.Writer, drift []string) {
+	for i, line := range drift {
 		if i == maxDriftLines {
-			fmt.Fprintf(w, "drift: … %d more (see --json)\n", len(report.Lock.Drift)-maxDriftLines)
+			fmt.Fprintf(w, "drift: … %d more (see --json)\n", len(drift)-maxDriftLines)
 			break
 		}
 		fmt.Fprintln(w, "drift: "+terminalSafe(line, false))
 	}
-	fmt.Fprintf(w, "pending proposals: %d\n", report.PendingProposals)
-	if report.ProposalError != "" {
-		fmt.Fprintln(w, "proposal error: "+terminalSafe(report.ProposalError, false))
+}
+
+func renderStatusProposals(w io.Writer, pending int, proposalError string) {
+	fmt.Fprintf(w, "pending proposals: %d\n", pending)
+	if proposalError != "" {
+		fmt.Fprintln(w, "proposal error: "+terminalSafe(proposalError, false))
 	}
-	if len(report.Journal) == 0 {
+}
+
+func renderStatusJournalTail(w io.Writer, journal []vise.JournalEvent, unreadable bool) {
+	if unreadable {
+		fmt.Fprintln(w, "journal: unreadable")
+		return
+	}
+	if len(journal) == 0 {
 		fmt.Fprintln(w, "journal: empty")
-	} else {
-		for _, event := range report.Journal {
-			details := []string{event.Event, event.Commit, event.Verdict}
-			if len(event.Flaky) > 0 {
-				details = append(details, "flaky="+strings.Join(event.Flaky, ","))
-			}
-			if len(event.Metrics) > 0 {
-				metricIDs := make([]string, 0, len(event.Metrics))
-				for id := range event.Metrics {
-					metricIDs = append(metricIDs, id)
-				}
-				sort.Strings(metricIDs)
-				pairs := make([]string, 0, len(metricIDs))
-				for _, id := range metricIDs {
-					pairs = append(pairs, fmt.Sprintf("%s=%g", id, event.Metrics[id]))
-				}
-				details = append(details, "metrics="+strings.Join(pairs, ","))
-			}
-			fmt.Fprintln(w, "journal: "+terminalSafe(strings.Join(details, " · "), false))
-		}
+		return
 	}
-	fmt.Fprintf(w, "next: %s — %s\n", report.Next.Action, terminalSafe(report.Next.Detail, false))
+	for _, event := range journal {
+		details := []string{event.Event, event.Commit, event.Verdict}
+		if len(event.Flaky) > 0 {
+			details = append(details, "flaky="+strings.Join(event.Flaky, ","))
+		}
+		if metrics := renderStatusMetrics(event.Metrics); metrics != "" {
+			details = append(details, metrics)
+		}
+		fmt.Fprintln(w, "journal: "+terminalSafe(strings.Join(details, " · "), false))
+	}
+}
+
+func renderStatusMetrics(metrics map[string]float64) string {
+	if len(metrics) == 0 {
+		return ""
+	}
+	metricIDs := make([]string, 0, len(metrics))
+	for id := range metrics {
+		metricIDs = append(metricIDs, id)
+	}
+	sort.Strings(metricIDs)
+	pairs := make([]string, 0, len(metricIDs))
+	for _, id := range metricIDs {
+		pairs = append(pairs, fmt.Sprintf("%s=%g", id, metrics[id]))
+	}
+	return "metrics=" + strings.Join(pairs, ",")
+}
+
+func renderStatusNextAction(w io.Writer, next vise.Next) {
+	fmt.Fprintf(w, "next: %s — %s\n", next.Action, terminalSafe(next.Detail, false))
 }
 
 func terminalSafe(value string, allowNewline bool) string {

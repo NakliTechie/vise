@@ -49,7 +49,12 @@ type StatusReport struct {
 	PendingProposals int            `json:"pending_proposals"`
 	ProposalError    string         `json:"proposal_error,omitempty"`
 	Journal          []JournalEvent `json:"journal,omitempty"`
-	Next             Next           `json:"next"`
+	// JournalUnreadable distinguishes a journal that could not be read from one
+	// that holds nothing. Both produced an empty Journal, so the screen said
+	// "journal: empty" two lines above "repair the local journal" — one line
+	// contradicting another on the one screen an agent reads before it acts.
+	JournalUnreadable bool `json:"journal_unreadable,omitempty"`
+	Next              Next `json:"next"`
 }
 
 func BuildStatus(root string) StatusReport {
@@ -76,6 +81,7 @@ func buildJournalStatus(root string, report *StatusReport) {
 	journal, err := ReadJournal(root, 5)
 	if err != nil {
 		report.State = "harness-error"
+		report.JournalUnreadable = true
 		report.Next = Next{Action: NextFixProbe, Detail: "repair the local journal"}
 	} else {
 		report.Journal = journal
