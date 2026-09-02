@@ -116,6 +116,12 @@ Rerunning until it passes is the one thing you must not do. Stop and report.
 3. **Never weaken a probe** to make it pass — not by narrowing what it observes,
    not by deleting it, not by relaxing a comparison.
 4. **Never delete or skip a test** for the same reason.
+5. **Never edit a design document to make your change legal.** The
+   specification, the non-goals, the architecture notes: those record decisions
+   somebody made on purpose. If your change needs one of them to say something
+   different, you have not found a way to do the task — you have found that the
+   task requires a decision you were not asked to make. Say which decision, and
+   stop.
 
 Reaching for any of these means the answer is to revert your own change instead.
 
@@ -123,7 +129,8 @@ Reaching for any of these means the answer is to revert your own change instead.
 
 Some tasks cannot be completed without doing something these rules forbid.
 Making the gate faster by narrowing a probe. Changing output the baseline
-freezes. Removing a check that fails. Recognize that early rather than late:
+freezes. Removing a check that fails. Implementing something the specification
+lists as a non-goal. Recognize that early rather than late:
 name the rule the task would require you to break, say what an operator could do
 instead — re-record a baseline, change the manifest, accept a slower gate — and
 stop.
