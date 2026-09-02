@@ -42,6 +42,12 @@ broke something, and batching throws that away.
 the loop. Commits also matter mechanically here — the rerun budget is keyed to
 the commit, so committing is how a stuck loop gets a fresh start.
 
+If committing is denied — some sandboxes refuse writes to `.git`, and you will
+see `Operation not permitted` on `.git/index.lock` — say so once, keep your work
+in the working tree, and carry on with the task. A denied commit is a fact to
+mention in your final report, not a reason to stop. Gate before each step
+regardless; the verdict is what matters, the commit is bookkeeping.
+
 ## Branch on the exit code, never on the prose
 
 | exit | verdict | meaning | what you do |

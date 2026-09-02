@@ -446,6 +446,13 @@ anything. Every environment failure in this project's dogfood — the missing
 toolchain, the denied cache, the host warnings, the stale binary — would have
 surfaced in that one turn instead of consuming a whole session.
 
+**If you want per-step commits, give the agent write access to `.git`.** Several
+sandboxes protect Git metadata by default: the agent gates green, tries to
+commit, and gets `Operation not permitted` on `.git/index.lock`. Either grant
+that access, or accept that the work arrives as one uncommitted diff and say so
+up front — an agent that has been told commits are the loop will otherwise stop
+and ask when it cannot make one.
+
 **One agent, one worktree.** Give each agent its own `git worktree` and do not
 commit into it while it is running. Mid-flight commits move the baseline under
 the agent, which then reasons about a repository that no longer exists — an
