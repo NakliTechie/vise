@@ -125,6 +125,12 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 
 ## What it holds, and what it cannot
 
+**A green gate covers the paths your probes walk, and nothing else.** Before
+trusting one on a change, ask which probe would have gone red if the change were
+wrong. If the answer is none, the gate is not the check you want there — and the
+probe set has a gap worth filling. A behavioural gate and a test suite are not
+substitutes for each other; defects live where they fail to overlap.
+
 **Behavioral equivalence, not semantic equivalence.** Full equivalence is undecidable; same-outputs-on-a-defined-input-set is the production standard. The lockfile *is* that input set — it holds what you declared, and nothing else.
 
 **Determinism is the price of entry.** A probe that cannot be made deterministic gets normalized or it is not a probe. [RUNTIMES.md](RUNTIMES.md) catalogues the traps per language and runtime.

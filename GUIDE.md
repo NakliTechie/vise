@@ -347,6 +347,24 @@ The agent may draft a probe into `.vise/proposals.toml` (same schema as `[[probe
 
 `vise.toml`, `vise.lock`, `.vise/blobs/`, and the local `.vise/journal.jsonl` are the judge. vise cannot authenticate its caller: the agent harness must deny the gated agent writes to those paths and deny `vise record` during a campaign. The journal is on the list because the rerun limit is derived from it.
 
+## 11.5 What a green gate does not tell you
+
+A gate proves that the observations you declared are unchanged. It says nothing
+about the paths no probe walks.
+
+That distinction matters most exactly when it is easiest to forget. In this
+project's own dogfood an agent was asked to make the gate faster, and correctly
+went after the code rather than the judge — straight into the git handling that
+runs before and after every probe. No probe exercised tracked-file mutation
+detection, so a defect introduced there would have gated green. The Go test
+suite covered it; the gate could not.
+
+So: before trusting a green verdict on a change, ask which probe would have gone
+red if the change were wrong. If the answer is "none", the gate is not the check
+you want here — a unit test is, and the probe set has a gap worth filling.
+A behavioural gate and a test suite are not substitutes for one another, and the
+places they fail to overlap are where defects live.
+
 ## 12. Handing the repository to an agent
 
 Everything above assumes a human at the keyboard. The reason vise exists is the
