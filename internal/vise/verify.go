@@ -22,82 +22,122 @@ type VerifyResult struct {
 	RerunRefused bool
 }
 
+type verifyState struct {
+	lock     Lockfile
+	lockHash string
+	commit   string
+	dirty    bool
+}
+
 func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOptions) VerifyResult {
 	outcome := NewOutcome("verify")
 	result := VerifyResult{Outcome: outcome}
+	state, loadFailure := loadVerifyState(root, manifest, manifestBytes, &outcome)
+	if loadFailure != nil {
+		result.Outcome = *loadFailure
+		return result
+	}
+	result.Commit = state.commit
+	result.Dirty = state.dirty
+
+	selected, checkSet, prepareFailure := prepareVerifyChecks(manifest, opts.ProbeID, &outcome)
+	if prepareFailure != nil {
+		result.Outcome = *prepareFailure
+		return result
+	}
+	result.CheckSet = checkSet
+
+	if opts.EnforceRerunLimit {
+		if rerunFailure, refused := checkVerifyRerunLimit(root, state, checkSet); rerunFailure != nil {
+			result.Outcome = *rerunFailure
+			result.RerunRefused = refused
+			return result
+		}
+	}
+
+	if !validateVerifyInputs(root, &outcome, manifest, state.lock, selected, opts.ProbeID == "") {
+		result.Outcome = outcome
+		return result
+	}
+
+	runner := Runner{Root: root, Manifest: manifest}
+	result.Flaky = replayProbes(root, &outcome, runner, selected, state.lock.Probes)
+
+	if opts.ProbeID == "" && outcome.Counts.Harness == 0 {
+		result.Flaky = append(result.Flaky, evaluateMetrics(&outcome, runner, manifest.Metrics, state.lock.Metrics)...)
+	}
+	return finalizeVerifyResult(result, outcome)
+}
+
+func finalizeVerifyResult(result VerifyResult, outcome Outcome) VerifyResult {
+	outcome.Finalize()
+	result.Outcome = outcome
+	sort.Strings(result.Flaky)
+	return result
+}
+
+func loadVerifyState(root string, manifest Manifest, manifestBytes []byte, outcome *Outcome) (verifyState, *Outcome) {
 	lock, lockBytes, err := LoadLockfile(root)
 	if os.IsNotExist(err) {
 		outcome.Exit = ExitNotInitialized
 		outcome.Counts.Declared = len(manifest.Probes) + len(manifest.Metrics)
 		outcome.Finalize()
-		result.Outcome = outcome
-		return result
+		return verifyState{}, outcome
 	}
 	if err != nil {
-		result.Outcome = harnessOnly("verify", "vise.lock", err.Error())
-		return result
+		failure := harnessOnly("verify", "vise.lock", err.Error())
+		return verifyState{}, &failure
 	}
 	lockHash, err := TamperHash(root, manifestBytes, lockBytes)
 	if err != nil {
-		result.Outcome = harnessOnly("verify", "tamper-hash", err.Error())
-		return result
+		failure := harnessOnly("verify", "tamper-hash", err.Error())
+		return verifyState{}, &failure
 	}
 	outcome.Lock = lockHash
 	commit, err := GitHead(root)
 	if err != nil {
-		result.Outcome = harnessOnly("verify", "git", err.Error())
-		return result
+		failure := harnessOnly("verify", "git", err.Error())
+		return verifyState{}, &failure
 	}
 	dirty, err := GitDirty(root)
 	if err != nil {
-		result.Outcome = harnessOnly("verify", "git", err.Error())
-		return result
+		failure := harnessOnly("verify", "git", err.Error())
+		return verifyState{}, &failure
 	}
-	result.Commit = commit
-	result.Dirty = dirty
+	return verifyState{lock: lock, lockHash: lockHash, commit: commit, dirty: dirty}, nil
+}
 
+func prepareVerifyChecks(manifest Manifest, probeID string, outcome *Outcome) ([]Probe, []string, *Outcome) {
 	if len(manifest.Probes) == 0 {
 		// Green requires every declared probe to pass; with none declared there
 		// is nothing to judge, and a 0/0 green would be a verdict without a judge.
-		result.Outcome = harnessWithNext("verify", "manifest", "manifest declares no [[probe]]; nothing can be judged", "fix_probe", "declare at least one probe in vise.toml and record a baseline")
-		return result
+		failure := harnessWithNext("verify", "manifest", "manifest declares no [[probe]]; nothing can be judged", "fix_probe", "declare at least one probe in vise.toml and record a baseline")
+		return nil, nil, &failure
 	}
-	selected, selectionFailure := selectedProbes(manifest, opts.ProbeID)
-	if selectionFailure != nil {
-		result.Outcome = harnessOnly("verify", "probe", selectionFailure.Error())
-		return result
+	selected, checkSet, err := selectVerifyChecks(manifest, probeID)
+	if err != nil {
+		failure := harnessOnly("verify", "probe", err.Error())
+		return nil, nil, &failure
 	}
-	outcome.Counts.Declared = len(selected)
-	probeIDs := make([]string, 0, len(selected))
-	for _, probe := range selected {
-		probeIDs = append(probeIDs, probe.ID)
-	}
-	if opts.ProbeID == "" {
-		// Metrics are judged checks too: they count in the denominator so a
-		// failing metric lowers pass instead of hiding behind the probe count.
-		outcome.Counts.Declared += len(manifest.Metrics)
-		for _, metric := range manifest.Metrics {
-			probeIDs = append(probeIDs, metric.ID)
-		}
-	}
-	sort.Strings(probeIDs)
-	result.CheckSet = append([]string(nil), probeIDs...)
+	outcome.Counts.Declared = len(checkSet)
+	return selected, checkSet, nil
+}
 
-	if opts.EnforceRerunLimit {
-		refused, detail, err := RerunLimitReached(root, commit, lockHash, probeIDs)
-		if err != nil {
-			result.Outcome = harnessOnly("verify", "journal", err.Error())
-			return result
-		}
-		if refused {
-			blocked := harnessOnly("verify", "rerun-limit", detail)
-			blocked.Next = Next{Action: "human", Detail: "operator intervention is required before another rerun"}
-			result.Outcome = blocked
-			result.RerunRefused = true
-			return result
-		}
+func checkVerifyRerunLimit(root string, state verifyState, checkSet []string) (*Outcome, bool) {
+	refused, detail, err := RerunLimitReached(root, state.commit, state.lockHash, checkSet)
+	if err != nil {
+		failure := harnessOnly("verify", "journal", err.Error())
+		return &failure, false
 	}
+	if !refused {
+		return nil, false
+	}
+	blocked := harnessOnly("verify", "rerun-limit", detail)
+	blocked.Next = Next{Action: "human", Detail: "operator intervention is required before another rerun"}
+	return &blocked, true
+}
 
+func validateVerifyInputs(root string, outcome *Outcome, manifest Manifest, lock Lockfile, probes []Probe, validateSets bool) bool {
 	fingerprint, err := CaptureFingerprint(root, manifest)
 	if err != nil {
 		outcome.AddFailure("fingerprint", Failure{Class: "harness", Detail: err.Error()})
@@ -105,27 +145,50 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 		outcome.AddFailure("fingerprint", Failure{Class: "harness", Detail: "environment differs from recording: " + mismatch})
 	}
 
-	if opts.ProbeID == "" {
-		validateProbeSet(&outcome, manifest, lock)
-		validateMetricSet(&outcome, manifest, lock)
+	if validateSets {
+		validateProbeSet(outcome, manifest, lock)
+		validateMetricSet(outcome, manifest, lock)
 	}
-	for _, probe := range selected {
-		validateProbeEntry(root, &outcome, probe, lock)
+	for _, probe := range probes {
+		validateProbeEntry(root, outcome, probe, lock)
 	}
-	if outcome.Counts.Harness > 0 {
-		outcome.Finalize()
-		if _, ok := outcome.Failures["fingerprint"]; ok {
-			outcome.Next = Next{Action: "human", Detail: "restore the recorded toolchain or ask an operator to re-record on this machine"}
-		}
-		// No probe ran, so nothing passed; the count must not imply otherwise.
-		outcome.Counts.Pass = 0
-		result.Outcome = outcome
-		return result
+	if outcome.Counts.Harness == 0 {
+		return true
 	}
 
-	runner := Runner{Root: root, Manifest: manifest}
+	outcome.Finalize()
+	if _, ok := outcome.Failures["fingerprint"]; ok {
+		outcome.Next = Next{Action: "human", Detail: "restore the recorded toolchain or ask an operator to re-record on this machine"}
+	}
+	// No probe ran, so nothing passed; the count must not imply otherwise.
+	outcome.Counts.Pass = 0
+	return false
+}
+
+func selectVerifyChecks(manifest Manifest, probeID string) ([]Probe, []string, error) {
+	selected, err := selectedProbes(manifest, probeID)
+	if err != nil {
+		return nil, nil, err
+	}
+	checkSet := make([]string, 0, len(selected)+len(manifest.Metrics))
 	for _, probe := range selected {
-		expected := lock.Probes[probe.ID]
+		checkSet = append(checkSet, probe.ID)
+	}
+	if probeID == "" {
+		// Metrics are judged checks too: they count in the denominator so a
+		// failing metric lowers pass instead of hiding behind the probe count.
+		for _, metric := range manifest.Metrics {
+			checkSet = append(checkSet, metric.ID)
+		}
+	}
+	sort.Strings(checkSet)
+	return selected, checkSet, nil
+}
+
+func replayProbes(root string, outcome *Outcome, runner Runner, probes []Probe, expectedProbes map[string]ProbeLock) []string {
+	var flaky []string
+	for _, probe := range probes {
+		expected := expectedProbes[probe.ID]
 		first := runner.RunProbe(probe, true)
 		if first.HarnessError != "" {
 			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: first.HarnessError})
@@ -155,17 +218,10 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 				Got:    ActualFromRun(first),
 				Diff:   DiffRuns(root, expected, first),
 			})
-			result.Flaky = append(result.Flaky, probe.ID)
+			flaky = append(flaky, probe.ID)
 		}
 	}
-
-	if opts.ProbeID == "" && outcome.Counts.Harness == 0 {
-		result.Flaky = append(result.Flaky, evaluateMetrics(&outcome, runner, manifest.Metrics, lock.Metrics)...)
-	}
-	outcome.Finalize()
-	result.Outcome = outcome
-	sort.Strings(result.Flaky)
-	return result
+	return flaky
 }
 
 func evaluateMetrics(outcome *Outcome, runner Runner, metrics []Metric, expectedMetrics map[string]MetricLock) []string {
