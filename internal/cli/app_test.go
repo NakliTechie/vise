@@ -789,3 +789,19 @@ func TestVersionJSONIdentifiesTheBuild(t *testing.T) {
 		t.Fatalf("plain version: %d %q", exit, stdout)
 	}
 }
+
+func TestStatusJSONNamesTheToolButHumanStatusDoesNot(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf stable")
+	exit, stdout, _ := cliRun(t, root, "status", "--json")
+	value := parseCLIJSON(t, stdout)
+	tool, _ := value["tool"].(map[string]any)
+	if exit != 0 || tool == nil || tool["version"] != Version {
+		t.Fatalf("status --json tool = %#v", value["tool"])
+	}
+	// The human rendering stays free of build identity so it remains stable
+	// enough to be a probe surface.
+	exit, stdout, _ = cliRun(t, root, "status")
+	if exit != 0 || strings.Contains(stdout, Version) {
+		t.Fatalf("human status leaked build identity: %q", stdout)
+	}
+}

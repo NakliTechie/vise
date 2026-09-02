@@ -15,9 +15,11 @@ vise version --json     # which build am I talking to?
 vise status --json      # what is the situation?
 ```
 
-`version --json` carries `revision` and `modified`, so you can tell two builds
-apart — the `version` string alone cannot. Check it whenever the tool behaves
-oddly, and always when a lockfile will not parse.
+`status --json` carries a `tool` object (version, revision, modified), so one
+read tells you both the situation and which binary is reporting it. `version
+--json` carries the same identity on its own. The `version` string alone cannot
+tell two builds apart, so check the revision whenever the tool behaves oddly,
+and always when a lockfile will not parse.
 
 `status` always exits 0 and reports the whole situation: whether a baseline exists,
 whether it agrees with the manifest, whether the environment drifted, whether a

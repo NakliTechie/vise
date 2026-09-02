@@ -29,11 +29,21 @@ type StatusLock struct {
 	Drift []string `json:"drift,omitempty"`
 }
 
+// StatusTool identifies the binary answering the question. Two builds print
+// the same version string, so an agent that only reads `version` cannot tell a
+// stale tool from broken state.
+type StatusTool struct {
+	Version  string `json:"version"`
+	Revision string `json:"revision,omitempty"`
+	Modified bool   `json:"modified,omitempty"`
+}
+
 type StatusReport struct {
 	V                int            `json:"v"`
 	Cmd              string         `json:"cmd"`
 	Exit             int            `json:"exit"`
 	State            string         `json:"state"`
+	Tool             *StatusTool    `json:"tool,omitempty"`
 	Manifest         StatusManifest `json:"manifest"`
 	Lock             StatusLock     `json:"lock"`
 	PendingProposals int            `json:"pending_proposals"`

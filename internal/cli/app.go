@@ -77,6 +77,7 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 		if command == "status" {
 			report := vise.StatusReport{V: 1, Cmd: "status", Exit: 0, State: "no-git", Next: vise.Next{Action: "fix_probe", Detail: err.Error()}}
 			if jsonMode {
+				report.Tool = toolIdentity()
 				return writeJSON(stdout, report)
 			}
 			renderStatus(stdout, report)
@@ -89,6 +90,7 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 		if command == "status" {
 			report := vise.StatusReport{V: 1, Cmd: "status", Exit: 0, State: "harness-error", Next: vise.Next{Action: "fix_probe", Detail: err.Error()}}
 			if jsonMode {
+				report.Tool = toolIdentity()
 				return writeJSON(stdout, report)
 			}
 			renderStatus(stdout, report)
@@ -115,6 +117,7 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 		}
 		report := vise.BuildStatus(root)
 		if jsonMode {
+			report.Tool = toolIdentity()
 			return writeJSON(stdout, report)
 		}
 		renderStatus(stdout, report)
@@ -416,6 +419,19 @@ func buildIdentity() map[string]any {
 		return nil
 	}
 	return identity
+}
+
+// toolIdentity is the build identity in the shape status reports it.
+func toolIdentity() *vise.StatusTool {
+	tool := &vise.StatusTool{Version: Version}
+	identity := buildIdentity()
+	if revision, ok := identity["revision"].(string); ok {
+		tool.Revision = revision
+	}
+	if modified, ok := identity["modified"].(bool); ok {
+		tool.Modified = modified
+	}
+	return tool
 }
 
 func printHelp(w io.Writer) {
