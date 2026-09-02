@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,26 +58,9 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 	if err != nil {
 		return RunResult{HarnessError: err.Error()}
 	}
-	tracked, err := GitTrackedPaths(r.Root, probe.Files)
-	if err != nil {
+	artifacts := newDeclaredArtifacts(r.Root, probe.Files)
+	if err := artifacts.reset(); err != nil {
 		return RunResult{HarnessError: err.Error()}
-	}
-	if len(tracked) > 0 {
-		return RunResult{HarnessError: fmt.Sprintf("declared artifact %q is tracked by git; artifacts must be gitignored build outputs because vise deletes them before every run", tracked[0])}
-	}
-	for _, rel := range probe.Files {
-		if err := ValidateArtifactPath(r.Root, rel); err != nil {
-			return RunResult{HarnessError: fmt.Sprintf("artifact %q: %v", rel, err)}
-		}
-		path := filepath.Join(r.Root, rel)
-		if info, err := os.Lstat(path); err == nil && info.IsDir() {
-			return RunResult{HarnessError: fmt.Sprintf("declared artifact %q is a directory; recursive deletion is refused", rel)}
-		} else if err != nil && !os.IsNotExist(err) {
-			return RunResult{HarnessError: fmt.Sprintf("inspect artifact %q: %v", rel, err)}
-		}
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return RunResult{HarnessError: fmt.Sprintf("delete artifact %q: %v", rel, err)}
-		}
 	}
 
 	result := r.runShell(probe.ID, probe.Run, probe.Timeout, probe.Env)
@@ -92,29 +74,12 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 		result.HarnessError = evaluatorStateMutated
 		return result
 	}
-	result.Files = make(map[string]Capture, len(probe.Files))
-	for _, rel := range probe.Files {
-		if err := ValidateArtifactPath(r.Root, rel); err != nil {
-			result.HarnessError = fmt.Sprintf("artifact %q after probe: %v", rel, err)
-			return result
-		}
-		path := filepath.Join(r.Root, rel)
-		info, err := os.Lstat(path)
-		if err != nil {
-			result.HarnessError = fmt.Sprintf("declared artifact %q was not produced", rel)
-			return result
-		}
-		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-			result.HarnessError = fmt.Sprintf("declared artifact %q is not a regular file", rel)
-			return result
-		}
-		capture, err := captureFile(path)
-		if err != nil {
-			result.HarnessError = fmt.Sprintf("read artifact %q: %v", rel, err)
-			return result
-		}
-		result.Files[filepath.ToSlash(filepath.Clean(rel))] = capture
+	files, err := artifacts.capture()
+	if err != nil {
+		result.HarnessError = err.Error()
+		return result
 	}
+	result.Files = files
 	if checkTracked {
 		after, err := GitTrackedSnapshot(r.Root)
 		if err != nil {
