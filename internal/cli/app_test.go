@@ -1034,3 +1034,43 @@ func TestAnUnknownCommandIsRefusedBeforeTheStateLock(t *testing.T) {
 		t.Fatal("an unknown command blocked on the state lock")
 	}
 }
+
+// doctor says of itself that it always exits 0. A directory that is not a Git
+// work tree is the most likely first thing anyone types after reading about
+// the command, and it was answering that with a harness error — so the promise
+// had an exception nobody had written down.
+func TestDoctorOutsideAGitWorkTreeStillExitsZero(t *testing.T) {
+	outside := t.TempDir()
+	for _, args := range [][]string{{"doctor"}, {"doctor", "--json"}} {
+		var out, errOut bytes.Buffer
+		if exit := Run(args, outside, &out, &errOut); exit != 0 {
+			t.Fatalf("%v exited %d outside a work tree: %s%s", args, exit, out.String(), errOut.String())
+		}
+		if !strings.Contains(out.String(), "git-work-tree") {
+			t.Fatalf("%v did not name the cause: %s", args, out.String())
+		}
+	}
+}
+
+// `vise recrod --help` printed the top-level help and exited 0, answering a
+// typo with a page that never mentions the typo.
+func TestHelpForAnUnknownCommandRefusesIt(t *testing.T) {
+	var out, errOut bytes.Buffer
+	exit := Run([]string{"no-such-command", "--help"}, t.TempDir(), &out, &errOut)
+	if exit == 0 {
+		t.Fatalf("an unknown command's help exited 0: %s", out.String())
+	}
+	if !strings.Contains(out.String()+errOut.String(), "unknown command") {
+		t.Fatalf("the refusal does not name the problem: %s%s", out.String(), errOut.String())
+	}
+
+	// A real command's help must still work, anywhere, with no repository.
+	out.Reset()
+	errOut.Reset()
+	if exit := Run([]string{"gate", "--help"}, t.TempDir(), &out, &errOut); exit != 0 {
+		t.Fatalf("gate --help exited %d", exit)
+	}
+	if !strings.Contains(out.String(), "vise gate") {
+		t.Fatalf("gate --help printed %q", out.String())
+	}
+}

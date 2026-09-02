@@ -202,7 +202,7 @@ func TestDoctorDoesNotAskForTheCodeUnderTestToBeDeclared(t *testing.T) {
 // A finding's check is a stable identifier a script can act on without reading
 // prose, so the set is part of the contract and SPEC names it.
 func TestDoctorFindingsUseStableCheckNames(t *testing.T) {
-	known := []string{"env-fingerprint", "portable-paths", "declared-inputs", "baseline-committed", "local-state-ignored", "agent-contract", "manifest"}
+	known := []string{"env-fingerprint", "portable-paths", "declared-inputs", "baseline-committed", "local-state-ignored", "agent-contract", "snapshot-cost", "manifest", "git-work-tree"}
 
 	// A repository with a broken manifest, and one with every other gap open.
 	broken := testGitRepo(t)

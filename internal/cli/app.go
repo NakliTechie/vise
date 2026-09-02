@@ -48,72 +48,53 @@ func stopProbeOnSignal() {
 
 func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 	args, jsonMode := removeGlobalJSON(args)
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
-		if jsonMode {
-			return writeJSON(stdout, helpDocument(""))
-		}
-		printHelp(stdout)
-		return vise.ExitOK
-	}
-	if args[0] == "version" || args[0] == "--version" {
-		if len(args) != 1 {
-			return renderSimpleError("version", "version accepts no arguments", jsonMode, stdout, stderr)
-		}
-		if jsonMode {
-			response := map[string]any{"v": 1, "cmd": "version", "exit": 0, "version": Version, "next": vise.Next{Action: vise.NextProceed, Detail: "version reported"}}
-			for key, value := range buildIdentity() {
-				response[key] = value
-			}
-			return writeJSON(stdout, response)
-		}
-		fmt.Fprintln(stdout, "vise "+Version)
-		return vise.ExitOK
+	if exit, answered := answerHelpOrVersion(args, jsonMode, stdout, stderr); answered {
+		return exit
 	}
 	command := args[0]
-	if hasHelp(args[1:]) {
-		if jsonMode {
-			return writeJSON(stdout, helpDocument(command))
-		}
-		printCommandHelp(stdout, command)
-		return vise.ExitOK
-	}
 
-	root, err := vise.GitRoot(cwd)
-	if err != nil {
-		if command == "status" {
-			report := vise.StatusReport{V: 1, Cmd: "status", Exit: 0, State: "no-git", Next: vise.Next{Action: vise.NextFixProbe, Detail: err.Error()}}
-			if jsonMode {
-				report.Tool = toolIdentity()
-				return writeJSON(stdout, report)
-			}
-			renderStatus(stdout, report)
-			return vise.ExitOK
-		}
-		return renderSimpleError(command, err.Error(), jsonMode, stdout, stderr)
+	root, exit, resolved := resolveGitRoot(command, cwd, jsonMode, stdout, stderr)
+	if !resolved {
+		return exit
 	}
-	// status is the one command that writes nothing, so it takes no lock and
-	// creates no state directory: a repository that has never run vise is
-	// unchanged by asking it what its situation is. Concurrency is safe without
-	// one — the lockfile is replaced by atomic rename, so a reader sees the old
-	// generation or the new one, and a torn journal tail is already tolerated.
 	// An unknown command must be refused before anything blocks on it. The
 	// state lock is held for the length of a record or a gate, so reaching for
 	// it first turned a typo into a wait as long as the probe suite — found by
 	// a probe that ran `vise no-such-command` inside a `vise record`.
 	if !isKnownCommand(command) {
-		return renderSimpleError("vise", fmt.Sprintf("unknown command %q; run 'vise --help'", command), jsonMode, stdout, stderr)
+		return refuseUnknownCommand(command, jsonMode, stdout, stderr)
 	}
-	// status and doctor read the situation and write nothing, so they must not
-	// queue behind a run in progress: the moment you most want to ask what is
-	// happening is while something is happening.
-	if !readOnlyCommands[command] {
-		stateLock, err := vise.AcquireStateLock(root)
-		if err != nil {
-			return renderSimpleError(command, err.Error(), jsonMode, stdout, stderr)
-		}
+	// status and doctor read the situation and write nothing, so they take no
+	// lock and create no state directory: a repository that has never run vise
+	// is unchanged by asking what its situation is, and asking is possible
+	// while a run is in progress — the moment you most want to ask what is
+	// happening. Concurrency is safe without a lock because the lockfile is
+	// replaced by atomic rename, so a reader sees the old generation or the
+	// new one, and a torn journal tail is already tolerated.
+	stateLock, err := acquireStateLockForCommand(command, root)
+	if err != nil {
+		return renderSimpleError(command, err.Error(), jsonMode, stdout, stderr)
+	}
+	if stateLock != nil {
 		defer stateLock.Close()
 	}
 
+	return dispatchCommand(args, root, jsonMode, stdout, stderr)
+}
+
+func refuseUnknownCommand(command string, jsonMode bool, stdout, stderr io.Writer) int {
+	return renderSimpleError("vise", fmt.Sprintf("unknown command %q; run 'vise --help'", command), jsonMode, stdout, stderr)
+}
+
+func acquireStateLockForCommand(command, root string) (*vise.StateLock, error) {
+	if readOnlyCommands[command] {
+		return nil, nil
+	}
+	return vise.AcquireStateLock(root)
+}
+
+func dispatchCommand(args []string, root string, jsonMode bool, stdout, stderr io.Writer) int {
+	command := args[0]
 	switch command {
 	case "init":
 		return runInit(args[1:], root, jsonMode, stdout, stderr)
@@ -148,8 +129,83 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 		return vise.ExitOK
 	default:
 		// Unreachable: isKnownCommand above rejects anything not in the table.
-		return renderSimpleError("vise", fmt.Sprintf("unknown command %q; run 'vise --help'", command), jsonMode, stdout, stderr)
+		return refuseUnknownCommand(command, jsonMode, stdout, stderr)
 	}
+}
+
+func resolveGitRoot(command, cwd string, jsonMode bool, stdout, stderr io.Writer) (string, int, bool) {
+	root, err := vise.GitRoot(cwd)
+	if err == nil {
+		return root, vise.ExitOK, true
+	}
+	if command == "status" {
+		report := vise.StatusReport{V: 1, Cmd: "status", Exit: 0, State: "no-git", Next: vise.Next{Action: vise.NextFixProbe, Detail: err.Error()}}
+		if jsonMode {
+			report.Tool = toolIdentity()
+			return "", writeJSON(stdout, report), false
+		}
+		renderStatus(stdout, report)
+		return "", vise.ExitOK, false
+	}
+	// doctor says of itself that it always exits 0, so a directory that is not
+	// a Git work tree has to be a finding rather than a failure. It is also the
+	// most likely first thing anyone types after reading about the command, and
+	// answering a question about readiness with a harness error is a poor way
+	// to say "you are not in a repository".
+	if command == "doctor" {
+		report := vise.DoctorReport{V: 1, Cmd: "doctor", Findings: []vise.DoctorFinding{{
+			Check:  "git-work-tree",
+			Detail: err.Error(),
+			Remedy: "run doctor inside the repository you intend to gate",
+		}}, Next: vise.Next{Action: vise.NextHuman, Detail: "1 finding(s) an operator should resolve before an agent works here"}}
+		if jsonMode {
+			return "", writeJSON(stdout, report), false
+		}
+		renderDoctor(stdout, report)
+		return "", vise.ExitOK, false
+	}
+	return "", renderSimpleError(command, err.Error(), jsonMode, stdout, stderr), false
+}
+
+func answerHelpOrVersion(args []string, jsonMode bool, stdout, stderr io.Writer) (int, bool) {
+	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		if jsonMode {
+			return writeJSON(stdout, helpDocument("")), true
+		}
+		printHelp(stdout)
+		return vise.ExitOK, true
+	}
+	if args[0] == "version" || args[0] == "--version" {
+		if len(args) != 1 {
+			return renderSimpleError("version", "version accepts no arguments", jsonMode, stdout, stderr), true
+		}
+		if jsonMode {
+			response := map[string]any{"v": 1, "cmd": "version", "exit": 0, "version": Version, "next": vise.Next{Action: vise.NextProceed, Detail: "version reported"}}
+			for key, value := range buildIdentity() {
+				response[key] = value
+			}
+			return writeJSON(stdout, response), true
+		}
+		fmt.Fprintln(stdout, "vise "+Version)
+		return vise.ExitOK, true
+	}
+	command := args[0]
+	if hasHelp(args[1:]) {
+		// `vise recrod --help` used to print the top-level help and exit 0,
+		// which answers a typo with a page that never mentions the typo. The
+		// refusal has to come first, and it still needs no repository: help is
+		// the one thing that must work anywhere, including about a word that
+		// is not a command.
+		if !isKnownCommand(command) {
+			return refuseUnknownCommand(command, jsonMode, stdout, stderr), true
+		}
+		if jsonMode {
+			return writeJSON(stdout, helpDocument(command)), true
+		}
+		printCommandHelp(stdout, command)
+		return vise.ExitOK, true
+	}
+	return vise.ExitOK, false
 }
 
 // readOnlyCommands take no state lock. Each one reports a situation without
