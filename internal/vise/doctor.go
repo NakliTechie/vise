@@ -2,6 +2,7 @@ package vise
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -109,13 +110,6 @@ func checkFingerprint(manifest Manifest) []DoctorFinding {
 		Detail: detail,
 		Remedy: "uncomment the [env] fingerprint block vise init writes, and name the version command for every tool a probe runs",
 	}}
-}
-
-// committedAtHead reports whether a path exists in the commit HEAD points at.
-func committedAtHead(root, rel string) bool {
-	cmd := exec.Command("git", "cat-file", "-e", "HEAD:"+rel)
-	cmd.Dir = root
-	return cmd.Run() == nil
 }
 
 // checkPortablePaths: a probe that names an absolute path, $HOME, or ~ runs on
@@ -255,42 +249,75 @@ func checkBaselineCommitted(root string) []DoctorFinding {
 			Remedy: "run vise record, then commit vise.lock and .vise/blobs/",
 		}}
 	}
-	// Against HEAD, not the index. `git ls-files` calls a staged file tracked,
-	// so a `git add vise.lock` with no commit satisfied this check while a
-	// fresh clone still had no baseline at all — which is the only thing the
-	// check was for.
+	// Against HEAD, and against the bytes that are actually here. `git
+	// ls-files` calls a staged file tracked, so a `git add vise.lock` with no
+	// commit used to pass; and merely existing in HEAD is not enough either,
+	// because an older committed lock at that path would satisfy it while the
+	// baseline in the working tree is something else entirely. A fresh clone
+	// gets what HEAD holds, and that is the only thing this check is about.
 	var findings []DoctorFinding
-	if !committedAtHead(root, "vise.lock") {
+	current, lockErr := os.ReadFile(filepath.Join(root, "vise.lock"))
+	committed, headErr := gitFileAtHead(root, "vise.lock")
+	switch {
+	case headErr != nil:
 		findings = append(findings, DoctorFinding{
 			Check:  "baseline-committed",
 			Detail: "vise.lock is not committed, so a fresh clone has no baseline",
 			Remedy: "git add vise.lock && git commit",
 		})
-	}
-	entries, err := os.ReadDir(filepath.Join(root, ".vise", "blobs"))
-	if err != nil || len(entries) == 0 {
-		return findings
-	}
-	// Every blob, not just one. A single committed blob used to satisfy this
-	// while the rest were missing, and the diff a reviewer needs is exactly
-	// the one those missing blobs would have rendered.
-	var uncommitted []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if !committedAtHead(root, ".vise/blobs/"+entry.Name()) {
-			uncommitted = append(uncommitted, entry.Name())
-		}
-	}
-	if len(uncommitted) > 0 {
+	case lockErr == nil && !bytes.Equal(current, committed):
 		findings = append(findings, DoctorFinding{
 			Check:  "baseline-committed",
-			Detail: fmt.Sprintf("%d of %d recorded blobs are not committed, so a fresh clone cannot render a divergence", len(uncommitted), len(entries)),
+			Detail: "the committed vise.lock is not the one in the working tree, so a fresh clone gates against a different baseline",
+			Remedy: "git add vise.lock && git commit",
+		})
+	}
+
+	// Every blob the lockfile references, not every file in the blob
+	// directory. Asking the directory meant a stray orphan produced a finding
+	// while a referenced blob that was never committed produced none — the
+	// wrong way round, since the missing one is what a reviewer in a fresh
+	// clone will find they cannot render.
+	var lock Lockfile
+	source := current
+	if lockErr != nil {
+		source = committed
+	}
+	if len(source) == 0 || json.Unmarshal(source, &lock) != nil {
+		return findings
+	}
+	var missing int
+	referenced := referencedHashes(lock)
+	for hash := range referenced {
+		name, err := HashName(hash)
+		if err != nil {
+			continue
+		}
+		if _, err := gitFileAtHead(root, ".vise/blobs/"+name); err != nil {
+			missing++
+		}
+	}
+	if missing > 0 {
+		findings = append(findings, DoctorFinding{
+			Check:  "baseline-committed",
+			Detail: fmt.Sprintf("%d of %d blobs the lockfile references are not committed, so a fresh clone cannot render a divergence", missing, len(referenced)),
 			Remedy: "git add .vise/blobs && git commit",
 		})
 	}
 	return findings
+}
+
+// gitFileAtHead returns a file's contents from the commit HEAD points at.
+func gitFileAtHead(root, rel string) ([]byte, error) {
+	cmd := exec.Command("git", "show", "HEAD:"+rel)
+	cmd.Dir = root
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("git show HEAD:%s: %s", rel, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.Bytes(), nil
 }
 
 // checkLocalStateIgnored: the journal, the run lock, and the probe scratch are

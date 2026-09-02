@@ -202,7 +202,9 @@ func TestDoctorDoesNotAskForTheCodeUnderTestToBeDeclared(t *testing.T) {
 // A finding's check is a stable identifier a script can act on without reading
 // prose, so the set is part of the contract and SPEC names it.
 func TestDoctorFindingsUseStableCheckNames(t *testing.T) {
-	known := []string{"env-fingerprint", "portable-paths", "declared-inputs", "baseline-committed", "local-state-ignored", "agent-contract", "snapshot-cost", "manifest", "git-work-tree"}
+	// The registry, not a copy of it. A second hand-copied list is a second
+	// thing that goes stale, which is the defect this test is guarding.
+	known := DoctorChecks
 
 	// A repository with a broken manifest, and one with every other gap open.
 	broken := testGitRepo(t)
@@ -314,4 +316,65 @@ func TestDoctorIsNotSatisfiedByAppearances(t *testing.T) {
 			t.Fatalf("an empty AGENTS.md passed as a written contract: %q", detail)
 		}
 	})
+}
+
+// A lockfile that is committed but is not the one on disk means a fresh clone
+// gates against a different baseline. Merely existing in HEAD used to satisfy
+// the check.
+func TestDoctorNoticesTheCommittedBaselineIsNotTheOneHere(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "AGENTS.md", AgentContract)
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"git --version\"]\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
+	writeTestFile(t, root, "vise.lock", "{\"v\":1}")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "baseline")
+
+	if findings := Doctor(root).Findings; len(findings) != 0 {
+		t.Fatalf("a committed baseline produced findings: %#v", findings)
+	}
+
+	// The working tree moves on without a commit.
+	writeTestFile(t, root, "vise.lock", "{\"v\":1,\"probes\":{}}")
+	var detail string
+	for _, finding := range Doctor(root).Findings {
+		if finding.Check == "baseline-committed" {
+			detail = finding.Detail
+		}
+	}
+	if !strings.Contains(detail, "not the one in the working tree") {
+		t.Fatalf("an uncommitted change to the baseline went unreported: %q", detail)
+	}
+}
+
+// The blob check asked the directory, so an uncommitted orphan produced a
+// finding while a referenced blob that was never committed produced none —
+// the wrong way round, since the missing one is what a reviewer in a fresh
+// clone finds they cannot render.
+func TestDoctorAsksAboutTheBlobsTheLockfileReferences(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "AGENTS.md", AgentContract)
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"git --version\"]\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "harness")
+
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+	testGit(t, root, "add", "vise.lock", ".vise/blobs")
+	testGit(t, root, "commit", "-qm", "baseline")
+	if findings := Doctor(root).Findings; len(findings) != 0 {
+		t.Fatalf("a fully committed baseline produced findings: %#v", findings)
+	}
+
+	// An orphan nobody references is harmless and must not be a finding.
+	writeTestFile(t, root, filepath.Join(".vise", "blobs", strings.Repeat("a", 64)), "orphan")
+	for _, finding := range Doctor(root).Findings {
+		if finding.Check == "baseline-committed" {
+			t.Fatalf("an uncommitted orphan blob was reported: %s", finding.Detail)
+		}
+	}
 }

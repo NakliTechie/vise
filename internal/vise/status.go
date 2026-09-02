@@ -90,20 +90,36 @@ func buildJournalStatus(root string, report *StatusReport) {
 }
 
 func buildLockStatus(root string, manifest Manifest, manifestBytes []byte, manifestErr error, report *StatusReport) {
-	lock, lockBytes, valid := buildLockfilePresenceAndValidity(root, report)
-	if !valid {
+	// status takes no lock, so it can read one generation of the lockfile and
+	// then reach for blobs a concurrent record has already pruned. The retry
+	// is for the whole lock section, not one field: patching the hash from a
+	// second generation onto commits and drift derived from the first would
+	// print a report describing a baseline that never existed, which is worse
+	// than the spurious harness error it was meant to avoid.
+	for attempt := 0; attempt < 2; attempt++ {
+		before := *report
+		lock, lockBytes, valid := buildLockfilePresenceAndValidity(root, report)
+		if !valid {
+			return
+		}
+		buildLockCounts(lock, report)
+		buildRecordedCommits(lock, report)
+		if manifestErr != nil {
+			return
+		}
+		buildFingerprintComparison(root, manifest, lock, report)
+		tornRead := buildTamperHash(root, manifestBytes, lockBytes, report)
+		if tornRead && attempt == 0 {
+			// The lockfile moved while we were reading it. Start the whole
+			// section again from the generation that is there now.
+			*report = before
+			continue
+		}
+		buildStaticDrift(root, manifest, lock, report)
+		buildRerunRefusal(root, manifest, report)
+		buildEmptyManifestRefusal(manifest, report)
 		return
 	}
-	buildLockCounts(lock, report)
-	buildRecordedCommits(lock, report)
-	if manifestErr != nil {
-		return
-	}
-	buildFingerprintComparison(root, manifest, lock, report)
-	buildTamperHash(root, manifestBytes, lockBytes, report)
-	buildStaticDrift(root, manifest, lock, report)
-	buildRerunRefusal(root, manifest, report)
-	buildEmptyManifestRefusal(manifest, report)
 }
 
 func buildLockfilePresenceAndValidity(root string, report *StatusReport) (Lockfile, []byte, bool) {
@@ -157,29 +173,24 @@ func buildFingerprintComparison(root string, manifest Manifest, lock Lockfile, r
 	}
 }
 
-func buildTamperHash(root string, manifestBytes, lockBytes []byte, report *StatusReport) {
+// buildTamperHash records the lock hash, and reports whether the failure it
+// saw looks like a torn read rather than a broken baseline.
+func buildTamperHash(root string, manifestBytes, lockBytes []byte, report *StatusReport) (tornRead bool) {
 	hash, err := TamperHash(root, manifestBytes, lockBytes)
 	if err == nil {
 		report.Lock.Hash = hash
-		return
+		return false
 	}
-	// status takes no lock, so it can read one generation of the lockfile and
-	// then reach for blobs that a concurrent record has already pruned. That
-	// is a torn read, not a broken baseline, and reporting a harness error for
-	// it would send an agent to repair something that was never wrong. Reload
-	// once: if the lockfile moved under us, the first attempt was reading a
-	// generation that no longer exists.
-	if reloaded, reloadedBytes, reloadErr := LoadLockfile(root); reloadErr == nil && !bytes.Equal(reloadedBytes, lockBytes) {
-		if hash, err := TamperHash(root, manifestBytes, reloadedBytes); err == nil {
-			report.Lock.Hash = hash
-			report.Lock.Probes = len(reloaded.Probes)
-			report.Lock.Metrics = len(reloaded.Metrics)
-			return
-		}
+	// If the bytes on disk are no longer the bytes we hashed, a record ran
+	// between the two reads and the blobs this generation referenced are gone
+	// on purpose. That is not a baseline to repair.
+	if _, current, reloadErr := LoadLockfile(root); reloadErr == nil && !bytes.Equal(current, lockBytes) {
+		return true
 	}
 	report.State = "harness-error"
 	report.Lock.Error = err.Error()
 	report.Next = Next{Action: NextFixProbe, Detail: "restore a valid vise.lock and referenced blobs"}
+	return false
 }
 
 func buildStaticDrift(root string, manifest Manifest, lock Lockfile, report *StatusReport) {
