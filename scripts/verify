@@ -155,12 +155,16 @@ expect_vise_json_exit() {
 }
 
 verify_orientation() {
-  "$VERIFY_BIN" --help | grep -q 'deterministic behavior locks' || fail orientation "help omitted the product description"
-  "$VERIFY_BIN" version --json | grep -q '"version":"0.3.0-dev"' || fail orientation "version JSON is missing"
+  # Exit status asserted separately from text everywhere below. A pipeline
+  # reports grep's status and discards the tool's, which is how a mutation
+  # making a command always exit nonzero passed this whole harness.
+  expect_exit 0 sh -c "'$VERIFY_BIN' --help >'$VERIFY_RUN/help.out'"
+  grep -q 'deterministic behavior locks' "$VERIFY_RUN/help.out" || fail orientation "help omitted the product description"
+  expect_vise_json_exit orientation 0 '"version":"0.3.0-dev"' "$VISE_ROOT" version
   expect_single_json_object orientation "$VISE_ROOT" version
   outside=$(mktemp -d "$VERIFY_RUN/orientation.XXXXXX")
   expect_single_json_object orientation "$outside" status
-  (cd "$outside" && "$VERIFY_BIN" status --json) | grep -q '"state":"no-git"' || fail orientation "status outside Git did not explain the missing repository"
+  expect_vise_json_exit orientation 0 '"state":"no-git"' "$outside" status
   summary orientation pass
 }
 
@@ -210,7 +214,7 @@ verify_initialization() {
   rm "$repo/vise.toml"
   (cd "$repo" && "$VERIFY_BIN" init --json) >/dev/null
   test "$(cat "$repo/AGENTS.md")" = ours || fail initialization "init overwrote an existing AGENTS.md"
-  (cd "$repo" && "$VERIFY_BIN" status --json) | grep -q '"state":"unrecorded"' || fail initialization "cold status did not report an unrecorded manifest"
+  expect_vise_json_exit initialization 0 '"state":"unrecorded"' "$repo" status
   expect_exit 2 sh -c "cd '$repo' && '$VERIFY_BIN' record --json >/dev/null"
   summary initialization pass
 }
@@ -349,7 +353,7 @@ enforce = "no-regress"
 EOF
   printf '10\n' > "$repo/metric.txt"
   commit_fixture "$repo"
-  (cd "$repo" && "$VERIFY_BIN" record --json) | grep -q '"verdict":"green"' || fail review "record did not create a baseline"
+  expect_vise_json_exit review 0 '"verdict":"green"' "$repo" record
   git -C "$repo" add vise.lock .vise/blobs
   git -C "$repo" commit -qm baseline
   sed 's/enforce = "no-regress"/enforce = "none"/' "$repo/vise.toml" > "$repo/vise.next"
@@ -368,7 +372,7 @@ EOF
   test -n "$candidate" || fail review "preview returned no candidate digest"
   expect_vise_json_exit review 2 'differs from the accepted' "$repo" record --accept sha256:0000000000000000000000000000000000000000000000000000000000000000
   expect_vise_json_exit review 0 '"verdict":"green"' "$repo" record --accept "$candidate"
-  (cd "$repo" && "$VERIFY_BIN" gate --json) | grep -q '"verdict":"green"' || fail review "accepted candidate did not gate green"
+  expect_vise_json_exit review 0 '"verdict":"green"' "$repo" gate
   summary review pass
 }
 
@@ -393,13 +397,13 @@ env = { GOTOOLCHAIN = "$VERIFY_TOOLCHAIN", GOCACHE = "$VERIFY_GOCACHE", GOMODCAC
 EOF
   git -C "$repo" add vise.toml
   git -C "$repo" commit -qm "add dogfood probe"
-  (cd "$repo" && "$VERIFY_BIN" record --json) | grep -q '"verdict":"green"' || fail dogfood "vise could not record its own help surface"
-  (cd "$repo" && "$VERIFY_BIN" gate --json) | grep -q '"verdict":"green"' || fail dogfood "unchanged self-hosted gate was not green"
+  expect_vise_json_exit dogfood 0 '"verdict":"green"' "$repo" record
+  expect_vise_json_exit dogfood 0 '"verdict":"green"' "$repo" gate
   sed 's/deterministic behavior locks/deterministic behavior snapshots/' "$repo/internal/cli/app.go" > "$repo/internal/cli/app.next"
   mv "$repo/internal/cli/app.next" "$repo/internal/cli/app.go"
   expect_vise_json_exit dogfood 1 '"verdict":"red"' "$repo" gate
   git -C "$repo" checkout -- internal/cli/app.go
-  (cd "$repo" && "$VERIFY_BIN" gate --json) | grep -q '"verdict":"green"' || fail dogfood "reverted self-hosted change did not restore green"
+  expect_vise_json_exit dogfood 0 '"verdict":"green"' "$repo" gate
   summary dogfood pass
 }
 
