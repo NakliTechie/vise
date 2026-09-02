@@ -1,6 +1,7 @@
 package vise
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -151,10 +152,18 @@ func checkPortablePaths(manifest Manifest) []DoctorFinding {
 	return findings
 }
 
-// checkUndeclaredScripts: a probe that runs a script in the repository without
-// listing it in deps can have its own definition changed underneath it. The
-// run string is hashed, the script it calls is not, so editing the script
-// changes what is observed with no harness drift to show for it.
+// checkUndeclaredScripts: a probe that runs a harness wrapper without listing
+// it in deps can have its own definition changed underneath it. The run string
+// is hashed; the script it calls is not, so editing the wrapper changes what
+// is observed with no harness drift to show for it.
+//
+// The check fires only on a file that mentions $VISE_TMP. That is the line
+// between the two cases, and getting it wrong is worse than not checking:
+// declaring the *code under test* as a dep would make every refactor of it a
+// harness error, which disables the gate the operator came here to set up.
+// Nothing but a vise-aware wrapper refers to $VISE_TMP, so a file that does is
+// part of the harness and belongs in deps; a file that does not is the subject
+// and must stay out of them.
 func checkUndeclaredScripts(root string, manifest Manifest) []DoctorFinding {
 	var findings []DoctorFinding
 	for _, probe := range manifest.Probes {
@@ -168,24 +177,36 @@ func checkUndeclaredScripts(root string, manifest Manifest) []DoctorFinding {
 				continue
 			}
 			rel := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(token, "./")))
-			if rel == "." || strings.HasPrefix(rel, "..") || strings.HasPrefix(rel, "/") {
+			if rel == "." || strings.HasPrefix(rel, "..") || strings.HasPrefix(rel, "/") || declared[rel] {
 				continue
 			}
-			if declared[rel] {
-				continue
-			}
-			info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel)))
-			if err != nil || !info.Mode().IsRegular() {
+			if !mentionsProbeScratch(filepath.Join(root, filepath.FromSlash(rel))) {
 				continue
 			}
 			findings = append(findings, DoctorFinding{
 				Check:  "declared-inputs",
-				Detail: fmt.Sprintf("probe %s runs %s, a file in the repository that is not in its deps", probe.ID, rel),
-				Remedy: fmt.Sprintf("add deps = [%q] to probe %s so editing it is harness drift, not a silent change of what is observed", rel, probe.ID),
+				Detail: fmt.Sprintf("probe %s runs %s, a harness wrapper that is not in its deps", probe.ID, rel),
+				Remedy: fmt.Sprintf("add deps = [%q] to probe %s, so editing the wrapper is harness drift rather than a silent change of what is observed", rel, probe.ID),
 			})
 		}
 	}
 	return findings
+}
+
+// mentionsProbeScratch reports whether a regular file refers to $VISE_TMP, the
+// one thing only a probe wrapper knows about. Bounded: a wrapper is a small
+// script, and a doctor run must not read a binary into memory to answer a
+// question about a shell script.
+func mentionsProbeScratch(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 64*1024 {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(data, []byte("VISE_TMP"))
 }
 
 // checkBaselineCommitted: a baseline that lives only on the operator's disk

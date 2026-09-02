@@ -43,9 +43,9 @@ func TestDoctorNamesTheSetupFailuresThatCostASession(t *testing.T) {
 			wantText: "/opt/somewhere/cache",
 		},
 		{
-			name: "a script a probe runs without declaring it",
+			name: "a harness wrapper a probe runs without declaring it",
 			setup: func(t *testing.T, root string) {
-				writeTestFile(t, root, "tool.sh", "#!/bin/sh\nprintf tool\n")
+				writeTestFile(t, root, "tool.sh", "#!/bin/sh\nBIN=\"$VISE_TMP/app\"\nprintf tool\n")
 				writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"true\"]\n[[probe]]\nid = \"p\"\nrun = \"sh tool.sh\"\n")
 			},
 			wantOne:  "declared-inputs",
@@ -160,5 +160,39 @@ func TestDoctorWritesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".vise", "run.lock")); err == nil {
 		t.Fatal("doctor created .vise/run.lock")
+	}
+}
+
+// Declaring the code under test as a probe dep would make every refactor of it
+// a harness error, which disables the gate the operator came here to set up.
+// A check that cannot tell the harness from the subject must not guess, so it
+// fires only on a file that refers to $VISE_TMP — the one thing nothing but a
+// probe wrapper knows about.
+func TestDoctorDoesNotAskForTheCodeUnderTestToBeDeclared(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "AGENTS.md", AgentContract)
+	writeTestFile(t, root, "mytool", "#!/bin/sh\nprintf 'mytool 1.0\\n'\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"git --version\"]\n[[probe]]\nid = \"cli\"\nrun = \"./mytool\"\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "subject")
+
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+	testGit(t, root, "add", "vise.lock", ".vise/blobs")
+	testGit(t, root, "commit", "-qm", "baseline")
+
+	report := Doctor(root)
+	for _, finding := range report.Findings {
+		if finding.Check == "declared-inputs" {
+			t.Fatalf("doctor asked for the code under test to be declared: %s", finding.Detail)
+		}
+	}
+	if !report.Ready {
+		t.Fatalf("doctor found %v", doctorChecks(report))
 	}
 }

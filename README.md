@@ -132,8 +132,8 @@ vise doctor
 
 Six checks, each one a setup failure that cost a session when vise was first
 handed to real coding agents: a toolchain nobody fingerprinted, a probe naming
-a path that exists only on your machine, a script a probe runs without
-declaring it as an input, a baseline that was never committed so a fresh clone
+a path that exists only on your machine, a harness wrapper a probe runs
+without declaring it as an input, a baseline that was never committed so a fresh clone
 cannot gate, vise's own local state left unignored, and a repository with no
 written rules for the agent. Every finding names its remedy. It runs no probe,
 writes nothing, and always exits 0.
