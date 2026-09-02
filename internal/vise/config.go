@@ -308,3 +308,13 @@ func LoadProposals(root string) (Proposals, error) {
 	}
 	return proposals, nil
 }
+
+// MetricRunHash freezes a metric's full definition the same way ProbeRunHash
+// freezes a probe's: the canonical JSON of the parsed entry.
+func MetricRunHash(metric Metric) (string, error) {
+	data, err := json.Marshal(metric)
+	if err != nil {
+		return "", err
+	}
+	return HashBytes(data), nil
+}

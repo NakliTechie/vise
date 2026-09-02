@@ -65,6 +65,7 @@ version_cmd = "oxlint --version"   # optional; captured at record — a mismatch
 - `run` must print exactly one number; anything else is harness class.
 - vise ships **no analyzer** and **never provisions tools** — no downloads, no network. A missing tool is exit 2 with `next: {action: "fix_probe", detail: "oxlint not on PATH — install it, then re-run"}`; the driving agent installs via its own tooling, guided at the moment of failure. `vise init` writes a static stub with one commented example metric; tool and ecosystem detection is parked (§8).
 - A metric probe that yields different numbers across the flake re-run (§4.1) is classed flake → indeterminate, same as behavior probes.
+- The metric definition (`run`, `direction`, `enforce`, `timeout`, `env`, `version_cmd`) is frozen as `run_hash` in the lockfile, like a probe's; a changed definition at verify is **harness class**, never an improvement. A lock recorded before definitions were frozen reports "metric definition was not frozen by this baseline; re-record".
 - ~~ratchet~~ deferred to v1 with the journal-integrity redesign (the floor must live inside an operator-protected artifact, not a plain local file).
 
 ### 2.2 Probe execution contract
@@ -97,7 +98,7 @@ version_cmd = "oxlint --version"   # optional; captured at record — a mismatch
       "files": { "out/result.json": "sha256:…" }
     }
   },
-  "metrics": { "complexity": { "value": 148, "tool_version": "oxlint 1.35.0" } }
+  "metrics": { "complexity": { "run_hash": "sha256:…", "value": 148, "tool_version": "oxlint 1.35.0" } }
 }
 ```
 

@@ -39,6 +39,10 @@ type ProbeLock struct {
 }
 
 type MetricLock struct {
+	// RunHash freezes the metric definition (run, direction, enforce, env,
+	// timeout, version_cmd) the value was recorded under; a changed definition
+	// is harness drift, never a quality improvement.
+	RunHash     string  `json:"run_hash,omitempty"`
 	Value       float64 `json:"value"`
 	ToolVersion string  `json:"tool_version,omitempty"`
 }
@@ -201,6 +205,14 @@ func validateLockfileHashes(lock Lockfile) error {
 			if _, err := HashName(hash); err != nil {
 				return fmt.Errorf("probe %s file %s: %w", id, path, err)
 			}
+		}
+	}
+	for id, metric := range lock.Metrics {
+		if metric.RunHash == "" {
+			continue // recorded before definitions were frozen; verify reports the drift
+		}
+		if _, err := HashName(metric.RunHash); err != nil {
+			return fmt.Errorf("metric %s run_hash: %w", id, err)
 		}
 	}
 	return nil

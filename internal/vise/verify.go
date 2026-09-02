@@ -240,6 +240,23 @@ func validateMetricSet(outcome *Outcome, manifest Manifest, lock Lockfile) {
 			outcome.AddFailure(id, Failure{Class: "harness", Detail: "metric is declared but absent from vise.lock"})
 		}
 	}
+	for _, metric := range manifest.Metrics {
+		expected, ok := lock.Metrics[metric.ID]
+		if !ok {
+			continue
+		}
+		runHash, err := MetricRunHash(metric)
+		if err != nil {
+			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: err.Error()})
+			continue
+		}
+		switch {
+		case expected.RunHash == "":
+			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: "metric definition was not frozen by this baseline; re-record"})
+		case expected.RunHash != runHash:
+			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: "metric definition changed after recording"})
+		}
+	}
 	for id := range lock.Metrics {
 		if !declared[id] {
 			outcome.AddFailure(id, Failure{Class: "harness", Detail: "metric exists in vise.lock but not vise.toml"})

@@ -291,7 +291,7 @@ metric complexity: 10 -> 12 (+2)
 [exit 5]
 ```
 
-Metrics count in the denominator; `verify` and `--json` carry the deltas.
+Metrics count in the denominator; `verify` and `--json` carry the deltas. The metric's definition is frozen with its baseline: changing `run`, `direction`, `enforce`, `env`, `timeout`, or `version_cmd` after recording is a harness failure (`metric definition changed after recording`), not a quality change.
 
 ## 9. Proposals: escaped defects become probes
 

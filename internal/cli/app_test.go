@@ -582,3 +582,59 @@ func TestGreenVerifyEndsAFlakeChainAndHarnessStopsReportPassZero(t *testing.T) {
 		t.Fatalf("harness stop counts: exit=%d counts=%#v", exit, counts)
 	}
 }
+
+func TestMetricDefinitionChangeIsHarnessNotImprovement(t *testing.T) {
+	manifest := basicManifest(`
+[[metric]]
+id = "complexity"
+run = "cat metric.txt"
+direction = "down"
+enforce = "no-regress"
+`)
+	root := cliRepo(t, manifest, "#!/bin/sh\nprintf stable")
+	cliWrite(t, root, "metric.txt", "10")
+	cliGit(t, root, "add", ".")
+	cliGit(t, root, "commit", "-qm", "metric")
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 0 {
+		t.Fatalf("record: %d %s", exit, stderr)
+	}
+	// Replacing the analyzer with one that prints 0 used to gate green as an
+	// improvement from 10 to 0. It is a changed judge: harness, fix_probe.
+	cliWrite(t, root, "vise.toml", strings.Replace(manifest, `run = "cat metric.txt"`, `run = "printf 0"`, 1))
+	exit, stdout, _ := cliRun(t, root, "gate", "--json")
+	value := parseCLIJSON(t, stdout)
+	failure, _ := value["failures"].(map[string]any)["complexity"].(map[string]any)
+	if exit != 2 || failure == nil || failure["class"] != "harness" || !strings.Contains(failure["detail"].(string), "metric definition changed") {
+		t.Fatalf("metric definition change: exit=%d value=%#v", exit, value)
+	}
+	if exit, stdout, _ := cliRun(t, root, "status", "--json"); exit != 0 || !strings.Contains(stdout, `"state":"baseline-drift"`) || !strings.Contains(stdout, "complexity: metric definition changed") {
+		t.Fatalf("status: %d %s", exit, stdout)
+	}
+	// A lock recorded before definitions were frozen reports drift, not green.
+	cliWrite(t, root, "vise.toml", manifest)
+	var lock map[string]any
+	if err := json.Unmarshal(cliReadFile(t, root, "vise.lock"), &lock); err != nil {
+		t.Fatal(err)
+	}
+	delete(lock["metrics"].(map[string]any)["complexity"].(map[string]any), "run_hash")
+	legacy, err := json.Marshal(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cliWrite(t, root, "vise.lock", string(legacy))
+	exit, stdout, _ = cliRun(t, root, "gate", "--json")
+	value = parseCLIJSON(t, stdout)
+	failure, _ = value["failures"].(map[string]any)["complexity"].(map[string]any)
+	if exit != 2 || failure == nil || !strings.Contains(failure["detail"].(string), "not frozen") {
+		t.Fatalf("legacy lock: exit=%d value=%#v", exit, value)
+	}
+}
+
+func cliReadFile(t *testing.T, root, rel string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, rel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}

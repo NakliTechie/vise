@@ -146,8 +146,13 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		lock.Probes[probe.ID] = entry
 	}
 	for _, metric := range manifest.Metrics {
+		runHash, err := MetricRunHash(metric)
+		if err != nil {
+			result.Outcome = harnessOnly("record", metric.ID, err.Error())
+			return result
+		}
 		run := firstMetrics[metric.ID]
-		lock.Metrics[metric.ID] = MetricLock{Value: run.Value, ToolVersion: run.ToolVersion}
+		lock.Metrics[metric.ID] = MetricLock{RunHash: runHash, Value: run.Value, ToolVersion: run.ToolVersion}
 	}
 	if len(lock.Metrics) == 0 {
 		lock.Metrics = nil
