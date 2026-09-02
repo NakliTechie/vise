@@ -282,6 +282,12 @@ func (r Runner) sanitizedEnv(tmp string, extra map[string]string) []string {
 		"COLUMNS":           "80",
 		"CI":                "1",
 		"VISE_TMP":          tmp,
+		// Every tool that reaches for a temp directory lands in the probe's own
+		// scratch, which is wiped after the run. Left unpinned, TMPDIR resolves
+		// against the host: inside an agent sandbox macOS cannot resolve it and
+		// git prints a warning into the observation, so the same probe is green
+		// in a terminal and red in a sandbox.
+		"TMPDIR": tmp,
 	}
 	for key, value := range extra {
 		values[key] = value

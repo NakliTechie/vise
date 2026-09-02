@@ -127,3 +127,11 @@ func TestArtifactPathExclusionsAreCaseInsensitive(t *testing.T) {
 		t.Fatalf("plain artifact rejected: %v", err)
 	}
 }
+
+func TestManifestCannotOverrideTheTempDirectory(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion=1\n[[probe]]\nid='p'\nrun='true'\nenv={TMPDIR='/tmp'}\n")
+	if _, _, err := LoadManifest(root); err == nil || !strings.Contains(err.Error(), "reserved variable TMPDIR") {
+		t.Fatalf("error = %v", err)
+	}
+}

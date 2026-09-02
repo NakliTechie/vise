@@ -49,6 +49,24 @@ Three tiers of handling, in order of preference:
 **Browser / DOM** (LocalMind class)
 - Font metrics, GPU rasterization, animation timing — why DOM probes are Parked. Today's honest form: probe the app's *logic* via a headless JS entry point; leave pixel/GPU truth to `/live-check-nt`.
 
+## Warnings the host injects into your observation
+
+A probe freezes bytes, and the host writes bytes into them that have nothing to
+do with your program. Inside an agent sandbox macOS could not resolve its temp
+directory, so every `git` call printed
+`git: warning: confstr() failed ... DARWIN_USER_TEMP_DIR` onto the probe's
+stderr — invisible in a terminal, eight extra lines in the sandbox, and a red
+gate that named a divergence the author could not reproduce.
+
+- vise now pins `TMPDIR` to the per-probe scratch, which removes this particular
+  one at the source. It is the shape of the problem that matters: anything the
+  host decides to say lands in the observation.
+- Normalize or drop host chatter in the probe, and remember that a filter only
+  covers the commands you actually pipe through it — the setup commands beside
+  it are where the noise gets in.
+- If a probe merges stderr into stdout, it has doubled the surface the host can
+  write to. Merge deliberately, not by habit.
+
 ## The normalizer is a probe too
 
 A probe that normalizes its own output is only as deterministic as the

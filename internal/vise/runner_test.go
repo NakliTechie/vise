@@ -310,3 +310,19 @@ func TestProbeStartedAfterInterruptIsKilledOnRegistration(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func TestProbeTempDirectoryIsPinnedToTheProbeScratch(t *testing.T) {
+	root := testGitRepo(t)
+	probe := Probe{ID: "tmp", Run: "printf '%s|%s' \"$TMPDIR\" \"$VISE_TMP\"", Timeout: 5}
+	result := (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, false)
+	if result.HarnessError != "" {
+		t.Fatalf("result = %#v", result)
+	}
+	parts := strings.SplitN(string(result.Stdout.Prefix), "|", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[0] != parts[1] {
+		t.Fatalf("TMPDIR = %q, VISE_TMP = %q — they must be the same scratch", parts[0], parts[len(parts)-1])
+	}
+	if !strings.HasPrefix(parts[0], filepath.Join(root, ".vise", "tmp")+string(filepath.Separator)) {
+		t.Fatalf("TMPDIR %q is not under the repository scratch", parts[0])
+	}
+}

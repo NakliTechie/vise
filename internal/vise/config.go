@@ -75,7 +75,7 @@ var reservedEnv = map[string]bool{
 	"PATH": true, "HOME": true, "TZ": true, "LANG": true, "LC_ALL": true,
 	"VISE_SEED": true, "SOURCE_DATE_EPOCH": true, "VISE": true,
 	"PYTHONHASHSEED": true, "NO_COLOR": true, "TERM": true, "COLUMNS": true,
-	"CI": true, "VISE_TMP": true,
+	"CI": true, "VISE_TMP": true, "TMPDIR": true,
 }
 
 func LoadManifest(root string) (Manifest, []byte, error) {
