@@ -379,6 +379,23 @@ Everything above assumes a human at the keyboard. The reason vise exists is the
 other case, and that one has a setup step people skip. These lessons come from
 running real coding agents against a vise-gated clone of vise itself.
 
+**Run `vise doctor` first.** It is the short version of this whole section:
+six static checks, each one a failure that actually cost a session here, each
+with its remedy attached.
+
+```text
+DOCTOR — 2 finding(s)
+declared-inputs — probe cli runs probe-cli.sh, a harness wrapper that is not in its deps
+  fix: add deps = ["probe-cli.sh"] to probe cli, so editing the wrapper is harness drift rather than a silent change of what is observed
+portable-paths — "/Users/you/go/pkg/mod" is outside the checkout, named by probe cli env VISE_GOMODCACHE
+  fix: make the path relative to the repository, or accept that this baseline only gates on a machine where that path exists and say so in the agent contract
+next: human — 2 finding(s) an operator should resolve before an agent works here
+```
+
+It runs no probe, writes nothing, and always exits 0. A clean report is not a
+promise that the gate will pass in a sandbox — only the cold gate below proves
+that — but every finding it does raise would have shown up there as a mystery.
+
 **Ask the agent what looks wrong, not only to change things.** A refactor
 forces a careful read of code nobody has re-read in weeks, and the agent
 finishes that read holding exactly the context an auditor would have to
@@ -402,23 +419,6 @@ Probe timeouts are wall clock. Running a heavy build or test suite alongside a
 gated agent pushed one probe here from seconds past two minutes, and a probe
 that times out is exit 2 — a harness error the agent reports as its own
 blocker. On one machine, either leave the CPU alone or give the probes room.
-
-**Run `vise doctor` first.** It is the short version of this whole section: six
-static checks, each one a failure that actually cost a session here, each with
-its remedy attached.
-
-```text
-DOCTOR — 2 finding(s)
-declared-inputs — probe cli runs probe-cli.sh, a file in the repository that is not in its deps
-  fix: add deps = ["probe-cli.sh"] to probe cli so editing it is harness drift, not a silent change of what is observed
-portable-paths — "/Users/you/go/pkg/mod" is outside the checkout, named by probe cli env VISE_GOMODCACHE
-  fix: make the path relative to the repository, or accept that this baseline only gates on a machine where that path exists and say so in the agent contract
-next: human — 2 finding(s) an operator should resolve before an agent works here
-```
-
-It runs no probe, writes nothing, and always exits 0. A clean report is not a
-promise that the gate will pass in a sandbox — only the cold gate below proves
-that — but every finding it does raise would have shown up there as a mystery.
 
 **Declare each probe's environment; do not inherit it.** vise sanitizes the
 environment down to `PATH`, `HOME`, and the stub set. Anything else your probe
