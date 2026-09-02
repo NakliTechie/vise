@@ -389,3 +389,21 @@ func TestAProbeThatRemovesAnUntrackedFileIsAHarnessError(t *testing.T) {
 		t.Fatalf("harness error %q does not name the removed file", result.HarnessError)
 	}
 }
+
+// A probe that writes a stray fails the first run. On the second run the
+// stray already exists and the probe rewrites it byte-for-byte, so comparing
+// content alone would report green — turning "rerun it" into a way to launder
+// a harness error, which is the one move the tool must never reward.
+func TestRerunningDoesNotLaunderAStrayWrite(t *testing.T) {
+	root := testGitRepo(t)
+	runner := Runner{Root: root, Manifest: Manifest{}}
+	probe := Probe{ID: "stray", Run: "printf leftover > leftover.txt", Timeout: 30}
+
+	if first := runner.RunProbe(probe, true); !strings.Contains(first.HarnessError, "leftover.txt") {
+		t.Fatalf("first run: %q", first.HarnessError)
+	}
+	second := runner.RunProbe(probe, true)
+	if !strings.Contains(second.HarnessError, "leftover.txt") {
+		t.Fatalf("rerunning laundered the stray write: %q", second.HarnessError)
+	}
+}

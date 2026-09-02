@@ -153,10 +153,21 @@ func gitUntrackedPaths(root string) ([]string, error) {
 	return paths, nil
 }
 
-// hashWorkspaceEntry digests one untracked entry. A file that is not a
-// regular file is recorded by its type instead of its content: reading a
-// named pipe would block until something wrote to it, which would hang the
-// judge on a file a probe left behind.
+// hashWorkspaceEntry digests one untracked entry by content, size, and
+// modification time.
+//
+// The modification time is in the digest because content alone lets a probe
+// launder its own failure. A probe that writes a stray fails the first run;
+// on the next run the stray already exists, the probe rewrites it with the
+// same bytes, and a content-only comparison sees nothing — so rerunning turns
+// a harness error green, which is the one move the tool must never reward.
+// The same reasoning applies to a second writer touching the checkout mid-run,
+// and the tracked half of this check has always failed on that, so treating
+// untracked files more leniently was the inconsistency.
+//
+// A file that is not a regular file is recorded by its type instead of its
+// content: reading a named pipe would block until something wrote to it,
+// which would hang the judge on a file a probe left behind.
 func hashWorkspaceEntry(path string) (string, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -179,7 +190,7 @@ func hashWorkspaceEntry(path string) (string, error) {
 	if _, err := io.Copy(digest, file); err != nil {
 		return "", fmt.Errorf("read untracked %s: %w", path, err)
 	}
-	return "sha256:" + hex.EncodeToString(digest.Sum(nil)), nil
+	return fmt.Sprintf("sha256:%s:%d:%d", hex.EncodeToString(digest.Sum(nil)), info.Size(), info.ModTime().UnixNano()), nil
 }
 
 func gitOutput(root string, args ...string) (string, error) {
