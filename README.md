@@ -82,7 +82,7 @@ GATE INDETERMINATE [flake] — 0/1: cli-help
 
 Use `vise verify` for the first bounded divergence, `vise verify --probe cli-help` to judge one probe, and `vise run cli-help` for raw debugging output. Every command accepts `--json`; gate consumers branch on `exit`, `classes`, and the closed `next.action` value.
 
-`vise.toml`, `vise.lock`, and `.vise/blobs/` are operator territory. vise cannot authenticate its caller. The agent harness must deny the gated agent writes to those paths and deny `vise record` during a refactor campaign.
+`vise.toml`, `vise.lock`, `.vise/blobs/`, and the local `.vise/journal.jsonl` are operator territory. vise cannot authenticate its caller. The agent harness must deny the gated agent writes to those paths and deny `vise record` during a refactor campaign; the journal is on the list because the rerun limit (§4.1 of the spec) is derived from it.
 
 ## The problem
 
