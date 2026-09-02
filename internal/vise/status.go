@@ -1,6 +1,7 @@
 package vise
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"sort"
@@ -161,6 +162,20 @@ func buildTamperHash(root string, manifestBytes, lockBytes []byte, report *Statu
 	if err == nil {
 		report.Lock.Hash = hash
 		return
+	}
+	// status takes no lock, so it can read one generation of the lockfile and
+	// then reach for blobs that a concurrent record has already pruned. That
+	// is a torn read, not a broken baseline, and reporting a harness error for
+	// it would send an agent to repair something that was never wrong. Reload
+	// once: if the lockfile moved under us, the first attempt was reading a
+	// generation that no longer exists.
+	if reloaded, reloadedBytes, reloadErr := LoadLockfile(root); reloadErr == nil && !bytes.Equal(reloadedBytes, lockBytes) {
+		if hash, err := TamperHash(root, manifestBytes, reloadedBytes); err == nil {
+			report.Lock.Hash = hash
+			report.Lock.Probes = len(reloaded.Probes)
+			report.Lock.Metrics = len(reloaded.Metrics)
+			return
+		}
 	}
 	report.State = "harness-error"
 	report.Lock.Error = err.Error()

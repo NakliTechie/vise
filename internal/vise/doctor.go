@@ -34,6 +34,24 @@ type DoctorReport struct {
 	Next     Next            `json:"next"`
 }
 
+// DoctorChecks is every check name Doctor can emit, as data.
+//
+// It exists so the test that requires each one to be documented cannot go
+// stale: a hand-copied list in a test is a list that stops matching the code
+// the moment somebody adds a check, and then the guard passes while the new
+// surface is undocumented — which is the exact failure the guard is for.
+var DoctorChecks = []string{
+	"env-fingerprint",
+	"portable-paths",
+	"declared-inputs",
+	"baseline-committed",
+	"local-state-ignored",
+	"agent-contract",
+	"snapshot-cost",
+	"manifest",
+	"git-work-tree",
+}
+
 // Doctor inspects the checkout without running a probe or writing anything.
 func Doctor(root string) DoctorReport {
 	report := DoctorReport{V: 1, Cmd: "doctor", Findings: []DoctorFinding{}}
@@ -74,14 +92,30 @@ func (r *DoctorReport) finish() {
 // baseline then holds observations from a compiler nobody can name, and the
 // first cross-machine red looks like a behavior change.
 func checkFingerprint(manifest Manifest) []DoctorFinding {
+	// Declared is not the same as useful. fingerprint = [""] parses, passes
+	// validation, and captures nothing, which is worse than declaring none:
+	// the operator believes the toolchain is watched.
+	for _, command := range manifest.Environment.Fingerprint {
+		if strings.TrimSpace(command) != "" {
+			return nil
+		}
+	}
+	detail := "the manifest declares no [env] fingerprint, so a toolchain change is invisible to the gate"
 	if len(manifest.Environment.Fingerprint) > 0 {
-		return nil
+		detail = "every [env] fingerprint command is blank, so the toolchain is recorded as nothing and a change to it is invisible"
 	}
 	return []DoctorFinding{{
 		Check:  "env-fingerprint",
-		Detail: "the manifest declares no [env] fingerprint, so a toolchain change is invisible to the gate",
+		Detail: detail,
 		Remedy: "uncomment the [env] fingerprint block vise init writes, and name the version command for every tool a probe runs",
 	}}
+}
+
+// committedAtHead reports whether a path exists in the commit HEAD points at.
+func committedAtHead(root, rel string) bool {
+	cmd := exec.Command("git", "cat-file", "-e", "HEAD:"+rel)
+	cmd.Dir = root
+	return cmd.Run() == nil
 }
 
 // checkPortablePaths: a probe that names an absolute path, $HOME, or ~ runs on
@@ -221,12 +255,12 @@ func checkBaselineCommitted(root string) []DoctorFinding {
 			Remedy: "run vise record, then commit vise.lock and .vise/blobs/",
 		}}
 	}
-	tracked, err := GitTrackedPaths(root, []string{"vise.lock"})
-	if err != nil {
-		return []DoctorFinding{{Check: "baseline-committed", Detail: err.Error(), Remedy: "run doctor inside a Git work tree"}}
-	}
+	// Against HEAD, not the index. `git ls-files` calls a staged file tracked,
+	// so a `git add vise.lock` with no commit satisfied this check while a
+	// fresh clone still had no baseline at all — which is the only thing the
+	// check was for.
 	var findings []DoctorFinding
-	if len(tracked) == 0 {
+	if !committedAtHead(root, "vise.lock") {
 		findings = append(findings, DoctorFinding{
 			Check:  "baseline-committed",
 			Detail: "vise.lock is not committed, so a fresh clone has no baseline",
@@ -237,11 +271,22 @@ func checkBaselineCommitted(root string) []DoctorFinding {
 	if err != nil || len(entries) == 0 {
 		return findings
 	}
-	blobs, err := GitTrackedPaths(root, []string{".vise/blobs"})
-	if err == nil && len(blobs) == 0 {
+	// Every blob, not just one. A single committed blob used to satisfy this
+	// while the rest were missing, and the diff a reviewer needs is exactly
+	// the one those missing blobs would have rendered.
+	var uncommitted []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !committedAtHead(root, ".vise/blobs/"+entry.Name()) {
+			uncommitted = append(uncommitted, entry.Name())
+		}
+	}
+	if len(uncommitted) > 0 {
 		findings = append(findings, DoctorFinding{
 			Check:  "baseline-committed",
-			Detail: "the recorded blobs are not committed, so a fresh clone cannot render a divergence",
+			Detail: fmt.Sprintf("%d of %d recorded blobs are not committed, so a fresh clone cannot render a divergence", len(uncommitted), len(entries)),
 			Remedy: "git add .vise/blobs && git commit",
 		})
 	}
@@ -273,8 +318,19 @@ func checkLocalStateIgnored(root string) []DoctorFinding {
 // checkAgentContract: an agent with no written rules will discover them by
 // breaking them, and the cheapest of those discoveries costs a session.
 func checkAgentContract(root string) []DoctorFinding {
-	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); err == nil {
+	// A regular file with something in it. An empty AGENTS.md, or a directory
+	// by that name, satisfied a bare Stat while telling an agent nothing —
+	// and the whole value of the check is that somebody wrote the rules down.
+	info, err := os.Lstat(filepath.Join(root, "AGENTS.md"))
+	switch {
+	case err == nil && info.Mode().IsRegular() && info.Size() > 0:
 		return nil
+	case err == nil:
+		return []DoctorFinding{{
+			Check:  "agent-contract",
+			Detail: "AGENTS.md exists but is empty or is not a regular file, so an agent working here has no written rules",
+			Remedy: "replace it with the agent contract; vise init writes one, and will not overwrite a real file",
+		}}
 	}
 	return []DoctorFinding{{
 		Check:  "agent-contract",

@@ -1074,3 +1074,38 @@ func TestHelpForAnUnknownCommandRefusesIt(t *testing.T) {
 		t.Fatalf("gate --help printed %q", out.String())
 	}
 }
+
+// The README's command table is where someone decides whether vise does the
+// thing they came for. A command missing from it does not exist as far as they
+// are concerned.
+//
+// The list is the same table the CLI dispatches on, not a copy: a hand-copied
+// list in a test stops matching the code the moment somebody adds a command,
+// and then the guard passes while the new surface is undocumented — the exact
+// failure the guard is for, reproduced one level up. The search is scoped to
+// the table, because searching the whole file passed with the row deleted.
+func TestEveryCommandIsInTheReadmeTable(t *testing.T) {
+	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Skipf("README.md unavailable: %v", err)
+	}
+	table := readmeSection(t, string(readme), "## Commands")
+	for _, entry := range commands {
+		if !strings.Contains(table, "`vise "+entry.Name+"`") && !strings.Contains(table, "`vise "+entry.Name+" ") {
+			t.Errorf("vise %s is a command and the README table does not list it", entry.Name)
+		}
+	}
+}
+
+func readmeSection(t *testing.T, document, heading string) string {
+	t.Helper()
+	start := strings.Index(document, heading)
+	if start < 0 {
+		t.Fatalf("%q is not in the document", heading)
+	}
+	rest := document[start+len(heading):]
+	if end := strings.Index(rest, "\n## "); end >= 0 {
+		return rest[:end]
+	}
+	return rest
+}

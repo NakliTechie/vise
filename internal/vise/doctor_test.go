@@ -262,3 +262,56 @@ func TestDoctorNamesAnExpensiveWorkTreeSnapshot(t *testing.T) {
 		}
 	}
 }
+
+// Three ways doctor said "ready" about a repository that was not. All found by
+// a cold audit while the gate was green.
+func TestDoctorIsNotSatisfiedByAppearances(t *testing.T) {
+	t.Run("a staged lockfile is not a committed one", func(t *testing.T) {
+		root := testGitRepo(t)
+		writeTestFile(t, root, "AGENTS.md", AgentContract)
+		writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"git --version\"]\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
+		writeTestFile(t, root, "vise.lock", "{}")
+		testGit(t, root, "add", "vise.lock")
+
+		var found bool
+		for _, finding := range Doctor(root).Findings {
+			if finding.Check == "baseline-committed" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("a lockfile that is staged but never committed passed as committed; a fresh clone has no baseline")
+		}
+	})
+
+	t.Run("a blank fingerprint command records nothing", func(t *testing.T) {
+		root := testGitRepo(t)
+		writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"\"]\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
+
+		var detail string
+		for _, finding := range Doctor(root).Findings {
+			if finding.Check == "env-fingerprint" {
+				detail = finding.Detail
+			}
+		}
+		if !strings.Contains(detail, "blank") {
+			t.Fatalf("a blank fingerprint command passed as a declared one: %q", detail)
+		}
+	})
+
+	t.Run("an empty agent contract is not a contract", func(t *testing.T) {
+		root := testGitRepo(t)
+		writeTestFile(t, root, "AGENTS.md", "")
+		writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"git --version\"]\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
+
+		var detail string
+		for _, finding := range Doctor(root).Findings {
+			if finding.Check == "agent-contract" {
+				detail = finding.Detail
+			}
+		}
+		if !strings.Contains(detail, "empty") {
+			t.Fatalf("an empty AGENTS.md passed as a written contract: %q", detail)
+		}
+	})
+}

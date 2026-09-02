@@ -54,10 +54,6 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 			return RunResult{HarnessError: err.Error()}
 		}
 	}
-	stateBefore, err := evaluatorStateDigest(r.Root)
-	if err != nil {
-		return RunResult{HarnessError: err.Error()}
-	}
 	artifacts := newDeclaredArtifacts(r.Root, probe.Files)
 	if err := artifacts.reset(); err != nil {
 		return RunResult{HarnessError: err.Error()}
@@ -65,13 +61,6 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 
 	result := r.runShell(probe.ID, probe.Run, probe.Timeout, probe.Env)
 	if result.HarnessError != "" {
-		return result
-	}
-	if stateAfter, err := evaluatorStateDigest(r.Root); err != nil {
-		result.HarnessError = err.Error()
-		return result
-	} else if stateAfter != stateBefore {
-		result.HarnessError = evaluatorStateMutated
 		return result
 	}
 	files, err := artifacts.capture()
@@ -100,18 +89,9 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 	if err != nil {
 		return MetricResult{HarnessError: err.Error()}
 	}
-	stateBefore, err := evaluatorStateDigest(r.Root)
-	if err != nil {
-		return MetricResult{HarnessError: err.Error()}
-	}
 	result := r.runShell(metric.ID, metric.Run, metric.Timeout, metric.Env)
 	if result.HarnessError != "" {
 		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: result.HarnessError}
-	}
-	if stateAfter, err := evaluatorStateDigest(r.Root); err != nil {
-		return MetricResult{HarnessError: err.Error()}
-	} else if stateAfter != stateBefore {
-		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: evaluatorStateMutated}
 	}
 	if result.Exit != 0 {
 		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: fmt.Sprintf("metric exited %d", result.Exit)}
@@ -151,7 +131,35 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 	return MetricResult{Value: value, ToolVersion: version, Stdout: result.Stdout, Stderr: result.Stderr}
 }
 
+// runShell executes one manifest-declared command and refuses any run that
+// touched the evaluator's own state.
+//
+// The check used to live in the callers, and two of them did not have it: the
+// environment fingerprint commands had none at all, and a metric's version_cmd
+// ran after RunMetric had already compared the state. Either could have
+// deleted .vise/journal.jsonl, which is where the flake history and the rerun
+// budget live — so the property that an agent cannot eject the judge by making
+// a probe flaky had a hole behind it. A guard that each caller must remember
+// is a guard that some caller will forget, so it lives here now, around every
+// command the manifest can name.
 func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[string]string) RunResult {
+	stateBefore, err := evaluatorStateDigest(r.Root)
+	if err != nil {
+		return RunResult{HarnessError: err.Error()}
+	}
+	result := r.runShellUnguarded(id, command, timeoutSeconds, extra)
+	stateAfter, stateErr := evaluatorStateDigest(r.Root)
+	if stateErr != nil {
+		result.HarnessError = stateErr.Error()
+		return result
+	}
+	if stateAfter != stateBefore {
+		result.HarnessError = evaluatorStateMutated
+	}
+	return result
+}
+
+func (r Runner) runShellUnguarded(id, command string, timeoutSeconds int, extra map[string]string) RunResult {
 	// VISE_TMP lives under .vise/tmp inside the repository: init ignores it,
 	// the dirty-tree check skips it, and it is wiped after every run, so a
 	// crash leaves residue where the operator expects state, not in /tmp.

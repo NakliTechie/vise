@@ -407,3 +407,106 @@ func TestRerunningDoesNotLaunderAStrayWrite(t *testing.T) {
 		t.Fatalf("rerunning laundered the stray write: %q", second.HarnessError)
 	}
 }
+
+// The evaluator-state guard used to live in the callers, and two of them did
+// not have it: the environment fingerprint commands had none at all, and a
+// metric's version_cmd ran after RunMetric had already compared the state.
+// Either could delete the journal, which is where the flake history and the
+// rerun budget live — so "an agent cannot eject the judge by making a probe
+// flaky" had a hole behind it. Found by a cold audit, with a green gate.
+func TestEveryManifestCommandIsGuardedAgainstTouchingViseState(t *testing.T) {
+	setup := func(t *testing.T) string {
+		t.Helper()
+		root := testGitRepo(t)
+		writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
+		if err := os.MkdirAll(filepath.Join(root, ".vise"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, ".vise", "journal.jsonl"), []byte("{\"e\":\"gate\"}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+	// A command that erases the journal, which is exactly the flake history an
+	// agent would want gone.
+	erase := "rm -f .vise/journal.jsonl"
+
+	t.Run("a probe", func(t *testing.T) {
+		root := setup(t)
+		result := Runner{Root: root}.RunProbe(Probe{ID: "p", Run: erase, Timeout: 30}, false)
+		if !strings.Contains(result.HarnessError, "probe modified vise state") {
+			t.Fatalf("harness error = %q", result.HarnessError)
+		}
+	})
+
+	t.Run("a metric version command", func(t *testing.T) {
+		root := setup(t)
+		metric := Metric{ID: "m", Run: "printf 1", Timeout: 30, VersionCmd: erase}
+		result := Runner{Root: root}.RunMetric(metric)
+		if !strings.Contains(result.HarnessError, "probe modified vise state") {
+			t.Fatalf("harness error = %q", result.HarnessError)
+		}
+	})
+
+	t.Run("an environment fingerprint command", func(t *testing.T) {
+		root := setup(t)
+		manifest := Manifest{Environment: EnvironmentSettings{Fingerprint: []string{erase}}}
+		_, err := CaptureFingerprint(root, manifest)
+		if err == nil || !strings.Contains(err.Error(), "probe modified vise state") {
+			t.Fatalf("fingerprint error = %v", err)
+		}
+	})
+}
+
+// The work-tree snapshot compared content and missed three ways a probe can
+// change the checkout without changing any file's bytes. Found by a cold audit
+// with the gate green.
+func TestTheSnapshotSeesChangesThatLeaveContentAlone(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, root string)
+		run   string
+		want  string
+	}{
+		{
+			name: "a permission change on a script",
+			setup: func(t *testing.T, root string) {
+				writeTestFile(t, root, "helper.sh", "#!/bin/sh\nprintf helper\n")
+				if err := os.Chmod(filepath.Join(root, "helper.sh"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			run:  "chmod +x helper.sh",
+			want: "helper.sh",
+		},
+		{
+			name: "a symlink pointed somewhere else",
+			setup: func(t *testing.T, root string) {
+				writeTestFile(t, root, "one.txt", "one")
+				writeTestFile(t, root, "two.txt", "two")
+				if err := os.Symlink("one.txt", filepath.Join(root, "link")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			run:  "rm link && ln -s two.txt link",
+			want: "link",
+		},
+		{
+			name:  "an empty directory left behind",
+			setup: func(t *testing.T, root string) {},
+			run:   "mkdir -p leftover",
+			want:  "leftover",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := testGitRepo(t)
+			test.setup(t, root)
+			result := Runner{Root: root}.RunProbe(Probe{ID: "p", Run: test.run, Timeout: 30}, true)
+			if !strings.Contains(result.HarnessError, test.want) {
+				t.Fatalf("harness error %q does not name %q", result.HarnessError, test.want)
+			}
+		})
+	}
+}

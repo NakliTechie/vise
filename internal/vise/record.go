@@ -515,6 +515,18 @@ func appendBlobDiff(b *strings.Builder, root string, newBlobs map[string][]byte,
 	if oldHash == newHash && oldLarge == newLarge {
 		return
 	}
+	// An empty hash means the observation is not in that baseline at all —
+	// an artifact this probe did not produce before, or no longer produces.
+	// That is an ordinary change, and asking for its blob would be asking for
+	// something that was never supposed to exist.
+	if oldHash == "" || newHash == "" {
+		side := "added"
+		if newHash == "" {
+			side = "removed"
+		}
+		fmt.Fprintf(b, "%s %s\n", label, side)
+		return
+	}
 	oldData, oldAvailable, oldErr := BlobData(root, oldHash, oldLarge)
 	newData, newAvailable := newBlobs[newHash]
 	var newErr error

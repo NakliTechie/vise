@@ -119,9 +119,13 @@ deps = ["probe-status.sh"]
 # An error path is observable behavior too, and the one most likely to be
 # quietly reworded by a refactor. The trailing branch keeps the probe's own
 # exit at 0; what is frozen is the message and the exit code vise printed.
+# The \$ is escaped because this heredoc is unquoted: an unescaped $? was
+# expanded when the manifest was generated, so the probe froze a literal 0 and
+# observed no exit code at all. Found by a cold audit, not by the gate, which
+# was green the whole time.
 [[probe]]
 id = "cli-unknown-command"
-run = "./probe-cli.sh no-such-command 2>&1 || printf 'exit=%s\\n' $?"
+run = "./probe-cli.sh no-such-command 2>&1 || printf 'exit=%s\\n' \$?"
 timeout = 300
 deps = ["probe-cli.sh"]
 MANIFEST

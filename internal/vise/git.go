@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -112,7 +113,20 @@ func GitWorkspaceSnapshot(root string, exclude []string) (WorkspaceSnapshot, err
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
-	snapshot.Untracked = make(map[string]string, len(paths))
+	// git ls-files --others lists files and never an empty directory, so a
+	// probe could leave one behind unnoticed. An empty directory is not
+	// nothing: a later probe that writes into it behaves differently from one
+	// that has to create it, and a build system may take it as a signal.
+	dirs, err := untrackedEmptyDirs(root, paths)
+	if err != nil {
+		return WorkspaceSnapshot{}, err
+	}
+	snapshot.Untracked = make(map[string]string, len(paths)+len(dirs))
+	for _, rel := range dirs {
+		if !skip[rel] && !isViseLocalState(rel) {
+			snapshot.Untracked[rel] = "empty-dir"
+		}
+	}
 	for _, rel := range paths {
 		if skip[rel] || isViseLocalState(rel) {
 			continue
@@ -132,7 +146,8 @@ func GitWorkspaceSnapshot(root string, exclude []string) (WorkspaceSnapshot, err
 // probe touching them is caught by evaluatorStateDigest with a message that
 // says so.
 func isViseLocalState(rel string) bool {
-	return rel == ".vise/run.lock" || rel == ".vise/journal.jsonl" || strings.HasPrefix(rel, ".vise/tmp/")
+	return rel == ".vise/run.lock" || rel == ".vise/journal.jsonl" ||
+		rel == ".vise/tmp" || strings.HasPrefix(rel, ".vise/tmp/")
 }
 
 func gitUntrackedPaths(root string) ([]string, error) {
@@ -178,6 +193,16 @@ func hashWorkspaceEntry(path string) (string, error) {
 		}
 		return "", fmt.Errorf("inspect untracked %s: %w", path, err)
 	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		// The target, not just the fact that it is a symlink: a probe that
+		// retargets an existing link changes what every later probe reads
+		// through it, and the link itself looks untouched.
+		target, err := os.Readlink(path)
+		if err != nil {
+			return "", fmt.Errorf("read link %s: %w", path, err)
+		}
+		return "symlink:" + target, nil
+	}
 	if !info.Mode().IsRegular() {
 		return "mode:" + info.Mode().Type().String(), nil
 	}
@@ -190,7 +215,10 @@ func hashWorkspaceEntry(path string) (string, error) {
 	if _, err := io.Copy(digest, file); err != nil {
 		return "", fmt.Errorf("read untracked %s: %w", path, err)
 	}
-	return fmt.Sprintf("sha256:%s:%d:%d", hex.EncodeToString(digest.Sum(nil)), info.Size(), info.ModTime().UnixNano()), nil
+	// Permission bits are in the digest because the executable bit is
+	// behaviour: chmod +x on a script changes what running it does, and the
+	// content hash does not move.
+	return fmt.Sprintf("sha256:%s:%d:%d:%o", hex.EncodeToString(digest.Sum(nil)), info.Size(), info.ModTime().UnixNano(), info.Mode().Perm()), nil
 }
 
 func gitOutput(root string, args ...string) (string, error) {
@@ -237,4 +265,74 @@ func GitTrackedPaths(root string, rels []string) ([]string, error) {
 		}
 	}
 	return tracked, nil
+}
+
+// untrackedEmptyDirs finds directories Git will never mention: it lists files,
+// so a directory holding none is invisible to `ls-files --others`. Ignored
+// directories are skipped wholesale — they are the one place a probe may write,
+// and walking a build cache to find empty folders inside it would cost more
+// than the whole snapshot.
+func untrackedEmptyDirs(root string, untrackedFiles []string) ([]string, error) {
+	occupied := make(map[string]bool, len(untrackedFiles))
+	for _, rel := range untrackedFiles {
+		for dir := filepath.Dir(rel); dir != "." && dir != "/"; dir = filepath.Dir(dir) {
+			occupied[filepath.ToSlash(dir)] = true
+		}
+	}
+	var empty []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			// A directory that vanished under us is not a finding; the next
+			// snapshot sees the same absence.
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil || rel == "." {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		// .git is not the workspace, and .vise is vise's own — the scratch
+		// directory is created and removed by the runner itself, so reporting
+		// it as a stray empty directory would fail every probe that ran.
+		if rel == ".git" || strings.HasPrefix(rel, ".git/") || rel == ".vise" || strings.HasPrefix(rel, ".vise/") {
+			return filepath.SkipDir
+		}
+		if occupied[rel] {
+			return nil
+		}
+		entries, readErr := os.ReadDir(path)
+		if readErr != nil {
+			return nil
+		}
+		if len(entries) == 0 {
+			// Only report it if Git would not ignore it, so an empty folder in
+			// a build cache stays the operator's business.
+			ignored, checkErr := gitIgnores(root, rel+"/")
+			if checkErr == nil && !ignored {
+				empty = append(empty, rel)
+			}
+			return nil
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan for empty directories: %w", err)
+	}
+	sort.Strings(empty)
+	return empty, nil
+}
+
+func gitIgnores(root, rel string) (bool, error) {
+	cmd := exec.Command("git", "check-ignore", "-q", "--", rel)
+	cmd.Dir = root
+	if err := cmd.Run(); err != nil {
+		return false, nil
+	}
+	return true, nil
 }

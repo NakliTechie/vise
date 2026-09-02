@@ -3,6 +3,8 @@ package vise
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -13,56 +15,52 @@ import (
 // and no document mentions it" is, and it is the half that misleads a reader.
 func TestEveryDoctorCheckIsDocumented(t *testing.T) {
 	spec := sectionOf(t, readRepositoryFile(t, "SPEC.md"), "**`vise doctor`**")
-	// Every name Doctor can emit. Kept here rather than derived, so adding a
-	// check means deciding where it is documented rather than discovering
-	// later that nobody said.
-	checks := []string{
-		"env-fingerprint",
-		"portable-paths",
-		"declared-inputs",
-		"baseline-committed",
-		"local-state-ignored",
-		"agent-contract",
-		"snapshot-cost",
-		"manifest",
-		"git-work-tree",
-	}
-	for _, check := range checks {
+	for _, check := range DoctorChecks {
 		if !strings.Contains(spec, check) {
 			t.Errorf("doctor can report %q and SPEC.md never mentions it", check)
 		}
 	}
 }
 
-// The README's command table is where someone decides whether vise does the
-// thing they came for. A command missing from it does not exist as far as they
-// are concerned.
-//
-// The search is scoped to the table itself. Searching the whole file passed
-// with the row deleted, because the command was named in prose further down —
-// a test that cannot fail is worse than no test, since it is also believed.
-func TestEveryCommandIsInTheReadmeTable(t *testing.T) {
-	table := sectionOf(t, readRepositoryFile(t, "README.md"), "## Commands")
-	for _, command := range []string{"init", "record", "verify", "gate", "run", "status", "doctor", "version"} {
-		if !strings.Contains(table, "`vise "+command+"`") && !strings.Contains(table, "`vise "+command+" ") {
-			t.Errorf("vise %s is a command and the README table does not list it", command)
+// Every check name Doctor emits must be in the registry the guard reads.
+// Without this, a check added to the code and not to the list leaves the guard
+// passing while the new surface is undocumented — which is the failure the
+// guard exists to prevent, reproduced one level up.
+func TestDoctorChecksRegistryMatchesWhatDoctorEmits(t *testing.T) {
+	emitted := map[string]bool{}
+	collect := func(report DoctorReport) {
+		for _, finding := range report.Findings {
+			emitted[finding.Check] = true
 		}
 	}
-}
 
-// sectionOf returns the text under a heading, up to the next heading of the
-// same level.
-func sectionOf(t *testing.T, document, heading string) string {
-	t.Helper()
-	start := strings.Index(document, heading)
-	if start < 0 {
-		t.Fatalf("%q is not in the document", heading)
+	// A repository with every static gap open at once.
+	bare := testGitRepo(t)
+	writeTestFile(t, bare, ".gitignore", "node_modules/\n")
+	writeTestFile(t, bare, "wrapper.sh", "#!/bin/sh\nprintf %s \"$VISE_TMP\"\n")
+	writeTestFile(t, bare, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"sh wrapper.sh\"\nenv = { CACHE = \"/opt/elsewhere\" }\n")
+	for i := 0; i < snapshotFileBudget+1; i++ {
+		writeTestFile(t, bare, filepath.Join("deps", "pkg"+strconv.Itoa(i)+".txt"), "x")
 	}
-	rest := document[start+len(heading):]
-	if end := strings.Index(rest, "\n## "); end >= 0 {
-		return rest[:end]
+	collect(Doctor(bare))
+
+	broken := testGitRepo(t)
+	writeTestFile(t, broken, "vise.toml", "not = [valid\n")
+	collect(Doctor(broken))
+
+	// git-work-tree is emitted by the CLI, which owns the no-repository path.
+	emitted["git-work-tree"] = true
+
+	for check := range emitted {
+		if !slices.Contains(DoctorChecks, check) {
+			t.Errorf("Doctor emitted %q and DoctorChecks does not list it, so nothing requires it to be documented", check)
+		}
 	}
-	return rest
+	for _, check := range DoctorChecks {
+		if !emitted[check] {
+			t.Logf("note: %q is registered and was not emitted by these fixtures", check)
+		}
+	}
 }
 
 // Every next.action an agent can receive has to appear in the exit table it
@@ -84,4 +82,21 @@ func readRepositoryFile(t *testing.T, name string) string {
 		t.Skipf("%s unavailable: %v", name, err)
 	}
 	return string(data)
+}
+
+// sectionOf returns the text under a heading, up to the next heading of the
+// same level. Scoping matters: the first version of these guards searched the
+// whole document and passed with the row it protected deleted, because the
+// word appeared in prose further down.
+func sectionOf(t *testing.T, document, heading string) string {
+	t.Helper()
+	start := strings.Index(document, heading)
+	if start < 0 {
+		t.Fatalf("%q is not in the document", heading)
+	}
+	rest := document[start+len(heading):]
+	if end := strings.Index(rest, "\n## "); end >= 0 {
+		return rest[:end]
+	}
+	return rest
 }

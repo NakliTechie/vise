@@ -270,3 +270,36 @@ func TestTheReviewDiffSaysWhenABlobCannotBeRead(t *testing.T) {
 		t.Fatalf("a deliberately withheld blob was reported as broken:\n%s", diff)
 	}
 }
+
+// An artifact present in one baseline and absent from the other is an ordinary
+// change, not a broken blob. The union of artifact paths gives the absent side
+// an empty hash, which BlobData rightly refuses — and the "blob unreadable"
+// line added earlier turned that refusal into an accusation. A reviewer told
+// the evidence is gone stops reviewing; a reviewer told an artifact was added
+// carries on.
+func TestAnAddedOrRemovedArtifactIsNotReportedAsACorruptBlob(t *testing.T) {
+	root := testGitRepo(t)
+	content := []byte("artifact")
+	hash := HashBytes(content)
+
+	oldLock := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{
+		"p": {Stdout: hash, Stderr: hash},
+	}}
+	newLock := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{
+		"p": {Stdout: hash, Stderr: hash, Files: map[string]string{"out/new.txt": hash}},
+	}}
+
+	diff := LockfileDiff(root, oldLock, newLock, map[string][]byte{hash: content})
+	if strings.Contains(diff, "unreadable") {
+		t.Fatalf("an added artifact was reported as a corrupt blob:\n%s", diff)
+	}
+	if !strings.Contains(diff, "out/new.txt") {
+		t.Fatalf("the added artifact is not mentioned at all:\n%s", diff)
+	}
+
+	// And the same in reverse: an artifact that goes away.
+	reverse := LockfileDiff(root, newLock, oldLock, map[string][]byte{hash: content})
+	if strings.Contains(reverse, "unreadable") {
+		t.Fatalf("a removed artifact was reported as a corrupt blob:\n%s", reverse)
+	}
+}
