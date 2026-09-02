@@ -96,7 +96,7 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 - **One perception act.** `vise status` renders the entire situation — manifest, lockfile, environment drift, baseline drift, rerun state, journal tail — in one bounded read. It always exits 0.
 - **Machine-decidable, not merely machine-readable.** `--json` on every command; every outcome carries a typed class and one `next.action` from a closed vocabulary. The agent branches on the exit code and the class, never on prose.
 - **One exit code per distinct next action.** Conflating two would force the agent to investigate what the tool already knows.
-- **Bounded output, always.** Green is one line. Red shows the first divergence and counts, never a dump. Output grows with divergence, never with repository size.
+- **Bounded output, always.** Green is one line. Red shows the first divergence and counts, never a dump. Output grows with divergence, never with repository size — and a long line is clipped around the differing column, so a probe that prints one 8,000-character line still renders a diff you can read.
 - **Every failure names its remedy.** The error message is the documentation, delivered when it is needed.
 - **Fail closed.** A flaky probe makes the verdict *indeterminate*, never green, and never leaves the denominator. An agent cannot eject a judge by making it flaky, and after two reruns at one commit the third is refused.
 
