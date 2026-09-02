@@ -280,3 +280,33 @@ func TestProbeThatTouchesEvaluatorStateIsHarness(t *testing.T) {
 		t.Fatalf("metric: %#v", result)
 	}
 }
+
+func TestProbeStartedAfterInterruptIsKilledOnRegistration(t *testing.T) {
+	root := testGitRepo(t)
+	interrupted.Store(true)
+	defer interrupted.Store(false)
+	probe := Probe{ID: "late", Run: "sleep 20 & echo $! > child.pid; wait", Timeout: 30}
+	start := time.Now()
+	result := (Runner{Root: root, Manifest: testManifest(probe)}).RunProbe(probe, false)
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("probe ran for %v after an interrupt", elapsed)
+	}
+	if result.Exit == 0 && result.HarnessError == "" {
+		t.Fatalf("probe was not killed: %#v", result)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "child.pid"))
+	if err != nil {
+		return // the shell died before writing the pid; nothing survived
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("child %d survived the interrupt", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

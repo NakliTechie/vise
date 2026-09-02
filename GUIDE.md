@@ -175,7 +175,7 @@ When the change was intended, the operator re-records. Overwriting an existing l
 
 ```
 $ vise record --preview
-CANDIDATE BASELINE — nothing written
+CANDIDATE BASELINE — no baseline state written (probes ran; declared artifacts were regenerated)
 --- expected/greet/stdout
 +++ got/greet/stdout
 @@ first divergence line 1 @@
@@ -196,8 +196,8 @@ If the tree changed between preview and accept, the digest no longer matches and
 ```
 $ vise record
 RECORD INDETERMINATE [harness] — 0/0
-operator-review [harness] — vise.lock already exists; review the behavior diff and rerun with --i-reviewed-the-diff
-next: human — review the behavior diff, then rerun record with --i-reviewed-the-diff
+operator-review [harness] — vise.lock already exists; preview the behavior diff with --preview and accept its digest with --accept, or rerun with --i-reviewed-the-diff
+next: human — run record --preview, review the diff, then record --accept <digest>; or rerun with --i-reviewed-the-diff to review and write in one step
 [exit 2]
 
 $ vise record --i-reviewed-the-diff
@@ -213,7 +213,7 @@ lock: sha256:57da…
 $ git add vise.lock .vise/blobs && git commit -m "Accept new greeting baseline"
 ```
 
-The review also lists dependency hash changes, fingerprint drift, and metric baseline changes.
+The review also lists probe and metric definition changes (by run_hash), dependency hash changes, fingerprint drift, and metric baseline changes; an added or removed entry shows its exit, output hashes, or value.
 
 ## 6. Flakes: indeterminate, never green
 
@@ -338,8 +338,10 @@ The agent may draft a probe into `.vise/proposals.toml` (same schema as `[[probe
 
 ```
 vise init                          write a starter vise.toml and .gitignore entries; never overwrites
-vise record [--allow-dirty] [--i-reviewed-the-diff]
-                                   two full passes, atomic write of vise.lock and blobs, journal event
+vise record [--allow-dirty] [--i-reviewed-the-diff | --preview | --accept DIGEST]
+                                   two full passes, atomic write of vise.lock and blobs, journal event;
+                                   --preview shows the candidate diff and digest without writing baseline
+                                   state, --accept writes only that candidate
 vise verify [--probe ID]           replay all probes or one; bounded diagnosis
 vise gate [--probe ID] [--quiet]   verify plus the one-line verdict; journals the event
 vise run <probe-id>                one probe raw; exit mirrors the probe

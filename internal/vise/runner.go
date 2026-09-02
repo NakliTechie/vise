@@ -206,6 +206,11 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 	}
 	setActiveProbeGroup(cmd.Process.Pid)
 	defer setActiveProbeGroup(0)
+	if interrupted.Load() {
+		// The signal handler ran between Start and registration; it found no
+		// group to kill, so this probe would have outlived vise.
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
