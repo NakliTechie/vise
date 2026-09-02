@@ -11,10 +11,13 @@ import (
 var errInjected = errors.New("injected persistence failure")
 
 // faultyFS fails exactly one persistence step and passes the rest through, so
-// each failure point can be tested on its own.
+// each failure point can be tested on its own. target, when set, narrows a
+// rename failure to one file name — that is what lets a test fail the
+// lockfile write while letting the blob writes before it succeed.
 type faultyFS struct {
-	inner fileSystem
-	step  string
+	inner  fileSystem
+	step   string
+	target string
 }
 
 func (f faultyFS) MkdirAll(path string, perm os.FileMode) error {
@@ -36,7 +39,7 @@ func (f faultyFS) CreateStaged(dir, pattern string) (stagedFile, error) {
 }
 
 func (f faultyFS) Rename(from, to string) error {
-	if f.step == "rename" {
+	if f.step == "rename" && (f.target == "" || filepath.Base(to) == f.target) {
 		return errInjected
 	}
 	return f.inner.Rename(from, to)
@@ -82,12 +85,23 @@ func (f faultyFile) Sync() error {
 func (f faultyFile) Close() error { return f.inner.Close() }
 
 // injectFailure makes the named persistence step fail for the duration of the
-// test.
-func injectFailure(t *testing.T, step string) {
+// test. The seam is a package-level variable and these tests never call
+// t.Parallel(), so installing it is safe; adding parallelism here would need a
+// different mechanism.
+func injectFailure(t *testing.T, step string) func() {
+	t.Helper()
+	return injectFailureFor(t, step, "")
+}
+
+// injectFailureFor narrows a rename failure to one target file name, so a test
+// can fail the lockfile write while the blob writes before it succeed.
+func injectFailureFor(t *testing.T, step, target string) func() {
 	t.Helper()
 	previous := persistence
-	persistence = faultyFS{inner: previous, step: step}
-	t.Cleanup(func() { persistence = previous })
+	persistence = faultyFS{inner: previous, step: step, target: target}
+	restore := func() { persistence = previous }
+	t.Cleanup(restore)
+	return restore
 }
 
 func TestEveryPersistenceFailureLeavesTheOldFileIntact(t *testing.T) {
@@ -141,7 +155,10 @@ func TestPersistenceOrderingHoldsWhenTheLockfileWriteFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	injectFailure(t, "rename")
+	blobsBefore := blobNames(t, root)
+	// Fail only the lockfile rename, so the blob writes that precede it in
+	// WriteGeneration succeed — that ordering is what is under test.
+	restore := injectFailureFor(t, "rename", "vise.lock")
 	result := Record(root, manifest, manifestBytes, RecordOptions{AllowDirty: true, ReviewedDiff: true})
 	if result.Outcome.Exit != ExitHarness {
 		t.Fatalf("record with a failing rename: %#v", result.Outcome)
@@ -153,6 +170,9 @@ func TestPersistenceOrderingHoldsWhenTheLockfileWriteFails(t *testing.T) {
 	// SPEC §3.1: blobs first (orphans are harmless), then the lockfile, then
 	// the journal. A crash at the lockfile leaves the old baseline and no
 	// journal event — never a hybrid.
+	if blobsAfter := blobNames(t, root); len(blobsAfter) <= len(blobsBefore) {
+		t.Fatalf("blobs went from %d to %d: the new observation must be written before the lockfile", len(blobsBefore), len(blobsAfter))
+	}
 	if current := mustRead(t, filepath.Join(root, "vise.lock")); string(current) != string(firstLock) {
 		t.Fatal("a failed generation replaced the recorded baseline")
 	}
@@ -168,8 +188,8 @@ func TestPersistenceOrderingHoldsWhenTheLockfileWriteFails(t *testing.T) {
 	}
 
 	// With the failure removed, the same record succeeds and the journal gains
-	// exactly one event.
-	persistence = osFileSystem{}
+	// exactly one event; the orphan blobs from the failed attempt are pruned.
+	restore()
 	if result := Record(root, manifest, manifestBytes, RecordOptions{AllowDirty: true, ReviewedDiff: true}); result.Outcome.Exit != ExitOK {
 		t.Fatalf("record after recovery: %#v", result.Outcome)
 	}
@@ -198,4 +218,17 @@ func TestDirectorySyncFailureDoesNotUndoACommittedWrite(t *testing.T) {
 	if err != nil || string(data) != "new generation" {
 		t.Fatalf("target = %q, %v", data, err)
 	}
+}
+
+func blobNames(t *testing.T, root string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(root, ".vise", "blobs"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names
 }
