@@ -182,7 +182,7 @@ vise carries no model and edits no code. Pull the AI out and it is a plain golde
 ## Development
 
 ```sh
-scripts/verify verify          # the committed harness: 8 features, from any directory
+scripts/verify verify          # the committed harness: 9 features, from any directory
 scripts/verify verify baseline # one feature
 go test -race ./... && go vet ./... && shellcheck scripts/verify scripts/dogfood && govulncheck ./...
 ```

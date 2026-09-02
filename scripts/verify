@@ -33,6 +33,7 @@ Usage:
 
 Features:
   orientation       Help, version, JSON, and status outside Git
+  readiness         doctor's findings, what init closes, and the lock-free reads
   initialization    First-run init, unrecorded status, and empty-manifest remedy
   baseline          Record, status, raw run, verify, gate, artifacts, and dependencies
   failure-modes     Behavior diff, dependency drift, flake, and rerun refusal
@@ -132,6 +133,33 @@ verify_orientation() {
   outside=$(mktemp -d "$VERIFY_RUN/orientation.XXXXXX")
   (cd "$outside" && "$VERIFY_BIN" status --json) | grep -q '"state":"no-git"' || fail orientation "status outside Git did not explain the missing repository"
   summary orientation pass
+}
+
+verify_readiness() {
+  repo=$(new_repo readiness)
+  # A repository nobody has set up: doctor must name every gap and still exit 0,
+  # because it advises an operator rather than judging a change.
+  (cd "$repo" && "$VERIFY_BIN" doctor --json) > "$repo/doctor.json"
+  grep -q '"cmd":"doctor"' "$repo/doctor.json" || fail readiness "doctor did not emit its JSON contract"
+  grep -q '"ready":false' "$repo/doctor.json" || fail readiness "doctor called an unset-up repository ready"
+  expect_exit 0 sh -c "cd '$repo' && '$VERIFY_BIN' doctor >/dev/null"
+
+  # doctor writes nothing. Checked here, before any command that does take the
+  # state lock, or the lock init leaves behind would be credited to doctor.
+  test -e "$repo/.vise" && fail readiness "doctor created vise state in a repository that never ran vise"
+
+  # init closes the two gaps it is responsible for and nothing else.
+  (cd "$repo" && "$VERIFY_BIN" init --json) >/dev/null
+  (cd "$repo" && "$VERIFY_BIN" doctor --json) > "$repo/after-init.json"
+  grep -q 'agent-contract' "$repo/after-init.json" && fail readiness "doctor still wants an agent contract after init wrote one"
+  grep -q 'local-state-ignored' "$repo/after-init.json" && fail readiness "doctor still wants ignores after init wrote them"
+  grep -q 'env-fingerprint' "$repo/after-init.json" || fail readiness "doctor stopped asking for a fingerprint"
+
+  # A read-only command must answer while a run holds the state lock, and an
+  # unknown command must be refused before it can wait on one.
+  expect_exit 0 sh -c "cd '$repo' && '$VERIFY_BIN' status --json >/dev/null"
+  expect_exit 2 sh -c "cd '$repo' && '$VERIFY_BIN' no-such-command >/dev/null 2>&1"
+  summary readiness pass
 }
 
 verify_initialization() {
@@ -346,6 +374,7 @@ verify_internal_checks() {
 run_feature() {
   case "$1" in
     orientation) verify_orientation ;;
+    readiness) verify_readiness ;;
     initialization) verify_initialization ;;
     baseline) verify_baseline ;;
     failure-modes) verify_failure_modes ;;
@@ -369,7 +398,7 @@ case "${1:-}" in
     if test "$#" -eq 2; then
       run_feature "$2"
     elif test "$#" -eq 1; then
-      for feature in orientation initialization baseline failure-modes metrics review dogfood internal-checks; do
+      for feature in orientation readiness initialization baseline failure-modes metrics review dogfood internal-checks; do
         run_feature "$feature"
       done
       summary full pass
