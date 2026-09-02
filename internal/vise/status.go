@@ -89,68 +89,108 @@ func buildJournalStatus(root string, report *StatusReport) {
 }
 
 func buildLockStatus(root string, manifest Manifest, manifestBytes []byte, manifestErr error, report *StatusReport) {
-	lock, lockBytes, lockErr := LoadLockfile(root)
-	if lockErr != nil {
-		if os.IsNotExist(lockErr) {
-			report.Lock = StatusLock{Present: false, Valid: false}
-		} else {
-			report.Lock = StatusLock{Present: true, Valid: false, Error: lockErr.Error()}
-			report.State = "harness-error"
-			report.Next = Next{Action: NextFixProbe, Detail: "restore a valid vise.lock, then rerun status"}
-		}
+	lock, lockBytes, valid := buildLockfilePresenceAndValidity(root, report)
+	if !valid {
+		return
+	}
+	buildLockCounts(lock, report)
+	buildRecordedCommits(lock, report)
+	if manifestErr != nil {
+		return
+	}
+	buildFingerprintComparison(root, manifest, lock, report)
+	buildTamperHash(root, manifestBytes, lockBytes, report)
+	buildStaticDrift(root, manifest, lock, report)
+	buildRerunRefusal(root, manifest, report)
+	buildEmptyManifestRefusal(manifest, report)
+}
+
+func buildLockfilePresenceAndValidity(root string, report *StatusReport) (Lockfile, []byte, bool) {
+	lock, lockBytes, err := LoadLockfile(root)
+	if err == nil {
+		report.Lock = StatusLock{Present: true, Valid: true}
+		return lock, lockBytes, true
+	}
+	if os.IsNotExist(err) {
+		report.Lock = StatusLock{Present: false, Valid: false}
+		return Lockfile{}, nil, false
+	}
+	report.Lock = StatusLock{Present: true, Valid: false, Error: err.Error()}
+	report.State = "harness-error"
+	report.Next = Next{Action: NextFixProbe, Detail: "restore a valid vise.lock, then rerun status"}
+	return Lockfile{}, nil, false
+}
+
+func buildLockCounts(lock Lockfile, report *StatusReport) {
+	report.Lock.Probes = len(lock.Probes)
+	report.Lock.Metrics = len(lock.Metrics)
+}
+
+func buildRecordedCommits(lock Lockfile, report *StatusReport) {
+	commitSet := make(map[string]bool)
+	for _, probe := range lock.Probes {
+		commitSet[probe.RecordedCommit] = true
+	}
+	for commit := range commitSet {
+		report.Lock.RecordedCommits = append(report.Lock.RecordedCommits, commit)
+	}
+	sort.Strings(report.Lock.RecordedCommits)
+}
+
+func buildFingerprintComparison(root string, manifest Manifest, lock Lockfile, report *StatusReport) {
+	fingerprint, err := CaptureFingerprint(root, manifest)
+	if err != nil {
+		report.State = "harness-error"
+		report.Lock.Error = err.Error()
+		report.Next = Next{Action: NextFixProbe, Detail: "repair the environment fingerprint command"}
+		return
+	}
+	matches := FingerprintEqual(fingerprint, lock.Fingerprint)
+	report.Lock.FingerprintMatch = &matches
+	if matches {
+		report.State = "ready"
+		report.Next = Next{Action: NextProceed, Detail: "run vise gate before the next refactor step"}
 	} else {
-		report.Lock = StatusLock{Present: true, Valid: true, Probes: len(lock.Probes), Metrics: len(lock.Metrics)}
-		commitSet := make(map[string]bool)
-		for _, probe := range lock.Probes {
-			commitSet[probe.RecordedCommit] = true
-		}
-		for commit := range commitSet {
-			report.Lock.RecordedCommits = append(report.Lock.RecordedCommits, commit)
-		}
-		sort.Strings(report.Lock.RecordedCommits)
-		if manifestErr == nil {
-			fingerprint, err := CaptureFingerprint(root, manifest)
-			if err != nil {
-				report.State = "harness-error"
-				report.Lock.Error = err.Error()
-				report.Next = Next{Action: NextFixProbe, Detail: "repair the environment fingerprint command"}
-			} else {
-				matches := FingerprintEqual(fingerprint, lock.Fingerprint)
-				report.Lock.FingerprintMatch = &matches
-				if matches {
-					report.State = "ready"
-					report.Next = Next{Action: NextProceed, Detail: "run vise gate before the next refactor step"}
-				} else {
-					report.State = "environment-drift"
-					report.Next = Next{Action: NextHuman, Detail: "restore the recorded toolchain or ask an operator to re-record"}
-				}
-			}
-			hash, err := TamperHash(root, manifestBytes, lockBytes)
-			if err == nil {
-				report.Lock.Hash = hash
-			} else {
-				report.State = "harness-error"
-				report.Lock.Error = err.Error()
-				report.Next = Next{Action: NextFixProbe, Detail: "restore a valid vise.lock and referenced blobs"}
-			}
-			report.Lock.Drift = baselineDrift(root, manifest, lock)
-			if len(report.Lock.Drift) > 0 && report.State == "ready" {
-				report.State = "baseline-drift"
-				report.Next = Next{Action: NextHuman, Detail: "vise.toml and vise.lock disagree (" + report.Lock.Drift[0] + "); restore the manifest or ask an operator to re-record"}
-			}
-			if report.State == "ready" {
-				if refused, detail := nextGateRefused(root, manifest, report.Lock.Hash); refused {
-					report.State = "rerun-refused"
-					report.Next = Next{Action: NextHuman, Detail: "the next gate is refused (" + detail + "); commit, re-record, or change the manifest"}
-				}
-			}
-			if len(manifest.Probes) == 0 && report.State != "harness-error" {
-				// A lock beside a manifest with no probes judges nothing; gate
-				// refuses it, so status must not promise proceed.
-				report.State = "harness-error"
-				report.Next = Next{Action: NextFixProbe, Detail: "manifest declares no [[probe]]; declare at least one probe in vise.toml and record a baseline"}
-			}
-		}
+		report.State = "environment-drift"
+		report.Next = Next{Action: NextHuman, Detail: "restore the recorded toolchain or ask an operator to re-record"}
+	}
+}
+
+func buildTamperHash(root string, manifestBytes, lockBytes []byte, report *StatusReport) {
+	hash, err := TamperHash(root, manifestBytes, lockBytes)
+	if err == nil {
+		report.Lock.Hash = hash
+		return
+	}
+	report.State = "harness-error"
+	report.Lock.Error = err.Error()
+	report.Next = Next{Action: NextFixProbe, Detail: "restore a valid vise.lock and referenced blobs"}
+}
+
+func buildStaticDrift(root string, manifest Manifest, lock Lockfile, report *StatusReport) {
+	report.Lock.Drift = baselineDrift(root, manifest, lock)
+	if len(report.Lock.Drift) > 0 && report.State == "ready" {
+		report.State = "baseline-drift"
+		report.Next = Next{Action: NextHuman, Detail: "vise.toml and vise.lock disagree (" + report.Lock.Drift[0] + "); restore the manifest or ask an operator to re-record"}
+	}
+}
+
+func buildRerunRefusal(root string, manifest Manifest, report *StatusReport) {
+	if report.State != "ready" {
+		return
+	}
+	if refused, detail := nextGateRefused(root, manifest, report.Lock.Hash); refused {
+		report.State = "rerun-refused"
+		report.Next = Next{Action: NextHuman, Detail: "the next gate is refused (" + detail + "); commit, re-record, or change the manifest"}
+	}
+}
+
+func buildEmptyManifestRefusal(manifest Manifest, report *StatusReport) {
+	if len(manifest.Probes) == 0 && report.State != "harness-error" {
+		// A lock beside a manifest with no probes judges nothing; gate
+		// refuses it, so status must not promise proceed.
+		report.State = "harness-error"
+		report.Next = Next{Action: NextFixProbe, Detail: "manifest declares no [[probe]]; declare at least one probe in vise.toml and record a baseline"}
 	}
 }
 

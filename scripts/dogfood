@@ -98,8 +98,9 @@ deps = ["probe-cli.sh"]
 # The review diff is the output whose whole job is to be read carefully, and
 # until a coding agent said so out loud, nothing gated it: it refactored the
 # renderer, the gate went green, and no declared probe had walked the code. A
-# preview against a manifest with one probe added and one removed exercises the
-# added, removed, and changed branches in one deterministic render.
+# preview against a manifest that keeps one probe with different output, drops
+# another, and adds a third exercises the changed, removed, and added branches
+# in one deterministic render.
 [[probe]]
 id = "cli-review-diff"
 run = "./probe-preview.sh"
@@ -139,11 +140,12 @@ cat > probe-preview.sh <<'PREVIEW'
 #!/bin/sh
 # Render a review diff deterministically.
 #
-# Builds a throwaway repository under $VISE_TMP with one probe, records it,
-# then previews a manifest that adds one probe, removes the first, and changes
-# nothing else — so the added, removed, and changed branches of the renderer
-# all appear in one frozen output. Digests vary with the tree, so the sha256
-# values are normalised away; what is frozen is the shape of the render.
+# Builds a throwaway repository under $VISE_TMP, records it, then previews a
+# manifest in which one probe keeps its id and changes its output, one is
+# removed, and one is added — so the changed, removed, and added branches of
+# the renderer all appear in one frozen output. Digests vary with the tree, so
+# the sha256 values are normalised away; what is frozen is the shape of the
+# render.
 set -eu
 BIN="$VISE_TMP/vise"
 GOCACHE="$PWD/.gocache" GOFLAGS=-mod=vendor GOTOOLCHAIN=TOOLCHAIN_PLACEHOLDER \
@@ -159,11 +161,16 @@ git init -q .
 git config user.email preview@vise.invalid
 git config user.name preview
 printf '.vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n' > .gitignore
-printf '[vise]\nversion = 1\n[[probe]]\nid = "first"\nrun = "printf one"\n' > vise.toml
+printf '[vise]\nversion = 1\n[[probe]]\nid = "kept"\nrun = "printf one"\n[[probe]]\nid = "removed"\nrun = "printf gone"\n' > vise.toml
 git add -A
 git commit -qm base
 "$BIN" record > /dev/null
-printf '[vise]\nversion = 1\n[[probe]]\nid = "second"\nrun = "printf two"\n' > vise.toml
+# "kept" survives with different output, "removed" goes, "added" arrives: all
+# three branches of the renderer in one frozen render. An earlier version
+# swapped one id for another, so nothing was ever "changed" and the comment
+# above claiming that branch was covered was simply wrong — found by an agent
+# auditing this probe's own coverage claim.
+printf '[vise]\nversion = 1\n[[probe]]\nid = "kept"\nrun = "printf one-changed"\n[[probe]]\nid = "added"\nrun = "printf two"\n' > vise.toml
 # Commit the new manifest before previewing. record refuses a dirty tree, and
 # the first version of this probe froze that refusal instead of a review diff —
 # a probe that looked like coverage, passed, and walked none of the code it was
