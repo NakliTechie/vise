@@ -16,6 +16,19 @@ vise gate            # 0 → next step · 1 → revert, the diff says what chang
 
 Raw AI refactoring fails roughly 60% of the time; paired with a verification layer, correctness climbs to about 98% ([sources](RESEARCH.md)). The value is in the verification layer, and nothing ships it on its own: what exists nearby is a transform *engine* (OpenRewrite, codemods), a per-language golden-master *library* written for humans (ApprovalTests), or a harness that baselines *the agent* rather than the app. vise is the net itself — language-agnostic, CLI-first, built to sit inside an agent's loop and be read by a machine.
 
+### What it catches that a test suite does not
+
+From this project's own dogfood: a coding agent was asked to shorten three of
+vise's harness messages. It made the edits, updated the two test assertions that
+pinned the old strings, and ran the suite — `go test ./...`, exit 0, both
+packages green. Then it ran the gate, which said red: those strings are
+observable output, frozen in the baseline. The agent reverted and reported that
+only an operator can accept a new baseline.
+
+The tests were not wrong. They were watching what someone had thought to assert;
+the lockfile was watching what the program actually does. That gap is the whole
+job.
+
 ## Status
 
 v0.3, developed in the open, not yet packaged. Build from this checkout. The command surface is implemented and exercised by a committed harness; Windows, service probes, network enforcement, partial recording, and `vise map` are non-goals for v0 ([SPEC §8](SPEC.md#8-non-goals-v0)).
