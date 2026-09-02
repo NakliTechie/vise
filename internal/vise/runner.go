@@ -167,7 +167,12 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 	// Wait blocks until every holder of the stdout/stderr pipes exits. A probe
 	// that leaves a detached process (setsid, a daemon, a preloader) holding
 	// them would otherwise hang vise past its timeout. WaitDelay closes the
-	// pipes shortly after the shell exits or the timeout kill lands.
+	// pipes shortly after the shell exits or the timeout kill lands. It is set
+	// here, with the rest of the process configuration and before Start,
+	// because Start also consults it to arm the context watchdog: that path is
+	// dormant only for as long as this command carries no context, and a field
+	// whose correctness depends on an unstated invariant is a trap for whoever
+	// switches to exec.CommandContext.
 	cmd.WaitDelay = pipeCloseDelay
 	stdout := newCaptureWriter(r.MirrorStdout)
 	stderr := newCaptureWriter(r.MirrorStderr)
@@ -186,24 +191,7 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 	probeLifecycle.Unlock()
 	defer setActiveProbeGroup(0)
 
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	timer := time.NewTimer(time.Duration(timeoutSeconds) * time.Second)
-	defer timer.Stop()
-	var waitErr error
-	timedOut := false
-	select {
-	case waitErr = <-done:
-	case <-timer.C:
-		timedOut = true
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		waitErr = <-done
-	}
-	// The shell has exited (or been killed). Anything it left behind in the
-	// process group — a redirected background child, a pipe holder — must not
-	// outlive the run: it could keep writing artifacts or tracked files after
-	// the tracked-tree check, or hold the next run's state.
-	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	waitErr, timedOut := awaitProbe(cmd, time.Duration(timeoutSeconds)*time.Second)
 
 	result := RunResult{Stdout: stdout.Capture(), Stderr: stderr.Capture(), TimedOut: timedOut}
 	if timedOut {
@@ -229,6 +217,29 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 	}
 	result.HarnessError = fmt.Sprintf("wait for probe: %v", waitErr)
 	return result
+}
+
+// awaitProbe waits for a started probe, kills its process group when the
+// timeout lands, and sweeps the group again once the shell is gone.
+func awaitProbe(cmd *exec.Cmd, timeout time.Duration) (waitErr error, timedOut bool) {
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case waitErr = <-done:
+	case <-timer.C:
+		timedOut = true
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		waitErr = <-done
+	}
+	// The shell has exited (or been killed). Anything it left behind in the
+	// process group — a redirected background child, a pipe holder — must not
+	// outlive the run: it could keep writing artifacts or tracked files after
+	// the tracked-tree check, or hold the next run's state.
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+
+	return waitErr, timedOut
 }
 
 func (r Runner) sanitizedEnv(tmp string, extra map[string]string) []string {
