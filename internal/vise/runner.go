@@ -1,9 +1,9 @@
 package vise
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,9 +16,9 @@ import (
 
 type RunResult struct {
 	Exit         int
-	Stdout       []byte
-	Stderr       []byte
-	Files        map[string][]byte
+	Stdout       Capture
+	Stderr       Capture
+	Files        map[string]Capture
 	TimedOut     bool
 	HarnessError string
 }
@@ -26,14 +26,20 @@ type RunResult struct {
 type MetricResult struct {
 	Value        float64
 	ToolVersion  string
-	Stdout       []byte
-	Stderr       []byte
+	Stdout       Capture
+	Stderr       Capture
 	HarnessError string
 }
 
 type Runner struct {
 	Root     string
 	Manifest Manifest
+	// MirrorStdout and MirrorStderr receive every byte a probe writes, in
+	// order, as it is produced. `vise run` sets them so raw execution prints
+	// the probe's complete output while vise itself keeps only a bounded
+	// capture. Judgment paths leave them nil.
+	MirrorStdout io.Writer
+	MirrorStderr io.Writer
 }
 
 // pipeCloseDelay bounds how long a finished or killed probe may keep its
@@ -86,7 +92,7 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 		result.HarnessError = evaluatorStateMutated
 		return result
 	}
-	result.Files = make(map[string][]byte, len(probe.Files))
+	result.Files = make(map[string]Capture, len(probe.Files))
 	for _, rel := range probe.Files {
 		if err := ValidateArtifactPath(r.Root, rel); err != nil {
 			result.HarnessError = fmt.Sprintf("artifact %q after probe: %v", rel, err)
@@ -102,12 +108,12 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 			result.HarnessError = fmt.Sprintf("declared artifact %q is not a regular file", rel)
 			return result
 		}
-		data, err := os.ReadFile(path)
+		capture, err := captureFile(path)
 		if err != nil {
 			result.HarnessError = fmt.Sprintf("read artifact %q: %v", rel, err)
 			return result
 		}
-		result.Files[filepath.ToSlash(filepath.Clean(rel))] = data
+		result.Files[filepath.ToSlash(filepath.Clean(rel))] = capture
 	}
 	if checkTracked {
 		after, err := GitTrackedSnapshot(r.Root)
@@ -143,9 +149,9 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 	if result.Exit != 0 {
 		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: fmt.Sprintf("metric exited %d", result.Exit)}
 	}
-	text := strings.TrimSpace(string(result.Stdout))
+	text := strings.TrimSpace(string(result.Stdout.Prefix))
 	value, err := strconv.ParseFloat(text, 64)
-	if err != nil || strings.ContainsAny(text, "\r\n \t") {
+	if err != nil || result.Stdout.Truncated() || strings.ContainsAny(text, "\r\n \t") {
 		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: "metric must print exactly one finite number"}
 	}
 	if value != value || value > 1.7976931348623157e+308 || value < -1.7976931348623157e+308 {
@@ -160,8 +166,8 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 		if vr.Exit != 0 {
 			return MetricResult{Value: value, HarnessError: fmt.Sprintf("metric version command exited %d", vr.Exit)}
 		}
-		version = strings.TrimSpace(string(vr.Stdout))
-		if version == "" {
+		version = strings.TrimSpace(string(vr.Stdout.Prefix))
+		if version == "" || vr.Stdout.Truncated() {
 			return MetricResult{Value: value, HarnessError: "metric version command returned empty output"}
 		}
 	}
@@ -198,9 +204,10 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 	// them would otherwise hang vise past its timeout. WaitDelay closes the
 	// pipes shortly after the shell exits or the timeout kill lands.
 	cmd.WaitDelay = pipeCloseDelay
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := newCaptureWriter(r.MirrorStdout)
+	stderr := newCaptureWriter(r.MirrorStderr)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	probeLifecycle.Lock()
 	if interrupted.Load() {
 		probeLifecycle.Unlock()
@@ -233,7 +240,7 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 	// the tracked-tree check, or hold the next run's state.
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 
-	result := RunResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), TimedOut: timedOut}
+	result := RunResult{Stdout: stdout.Capture(), Stderr: stderr.Capture(), TimedOut: timedOut}
 	if timedOut {
 		result.HarnessError = fmt.Sprintf("probe timed out after %ds", timeoutSeconds)
 		return result

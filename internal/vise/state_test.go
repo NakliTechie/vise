@@ -120,7 +120,7 @@ func TestFingerprintRejectsTrackedMutation(t *testing.T) {
 func TestLargeObservationIsHashOnly(t *testing.T) {
 	blobs := make(map[string][]byte)
 	data := make([]byte, MaxBlobSize+1)
-	entry := AddObservationBlobs(blobs, RunResult{Stdout: data, Stderr: nil})
+	entry := AddObservationBlobs(blobs, RunResult{Stdout: CaptureBytes(data), Stderr: CaptureBytes(nil)})
 	if !entry.StdoutLarge {
 		t.Fatal("large marker missing")
 	}

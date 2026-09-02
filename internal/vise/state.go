@@ -120,9 +120,12 @@ func CaptureFingerprint(root string, manifest Manifest) (Fingerprint, error) {
 			return Fingerprint{}, fmt.Errorf("fingerprint %q: %s", command, result.HarnessError)
 		}
 		if result.Exit != 0 {
-			return Fingerprint{}, fmt.Errorf("fingerprint %q exited %d: %s", command, result.Exit, strings.TrimSpace(string(result.Stderr)))
+			return Fingerprint{}, fmt.Errorf("fingerprint %q exited %d: %s", command, result.Exit, strings.TrimSpace(string(result.Stderr.Prefix)))
 		}
-		fingerprint.Env[command] = strings.TrimSpace(string(result.Stdout))
+		if result.Stdout.Truncated() {
+			return Fingerprint{}, fmt.Errorf("fingerprint %q printed more than %d bytes", command, CaptureLimit)
+		}
+		fingerprint.Env[command] = strings.TrimSpace(string(result.Stdout.Prefix))
 	}
 	after, err := GitTrackedSnapshot(root)
 	if err != nil {
@@ -369,28 +372,29 @@ func BlobData(root, hash string, large bool) ([]byte, bool, error) {
 func AddObservationBlobs(blobs map[string][]byte, result RunResult) ProbeLock {
 	probe := ProbeLock{
 		Exit:       result.Exit,
-		Stdout:     HashBytes(result.Stdout),
-		Stderr:     HashBytes(result.Stderr),
+		Stdout:     result.Stdout.Hash,
+		Stderr:     result.Stderr.Hash,
 		Files:      make(map[string]string, len(result.Files)),
 		FilesLarge: make(map[string]bool),
 	}
-	if len(result.Stdout) > MaxBlobSize {
+	// An observation larger than the capture bound was never held whole, so
+	// it is hash-only in the lockfile and its diff degrades to hashes.
+	if data, complete := result.Stdout.Complete(); complete {
+		blobs[probe.Stdout] = append([]byte(nil), data...)
+	} else {
 		probe.StdoutLarge = true
-	} else {
-		blobs[probe.Stdout] = append([]byte(nil), result.Stdout...)
 	}
-	if len(result.Stderr) > MaxBlobSize {
+	if data, complete := result.Stderr.Complete(); complete {
+		blobs[probe.Stderr] = append([]byte(nil), data...)
+	} else {
 		probe.StderrLarge = true
-	} else {
-		blobs[probe.Stderr] = append([]byte(nil), result.Stderr...)
 	}
-	for path, data := range result.Files {
-		hash := HashBytes(data)
-		probe.Files[path] = hash
-		if len(data) > MaxBlobSize {
-			probe.FilesLarge[path] = true
+	for path, capture := range result.Files {
+		probe.Files[path] = capture.Hash
+		if data, complete := capture.Complete(); complete {
+			blobs[capture.Hash] = append([]byte(nil), data...)
 		} else {
-			blobs[hash] = append([]byte(nil), data...)
+			probe.FilesLarge[path] = true
 		}
 	}
 	if len(probe.Files) == 0 {

@@ -275,6 +275,19 @@ next: human — vise.toml and vise.lock disagree (read-fixture: probe is declare
 
 Also harness, also exit 2: a probe that cannot be launched (127), a timeout, a probe that modifies tracked files, a declared artifact that is tracked by git (vise deletes artifacts before every run and refuses to delete a tracked file), a probe that leaves a background process holding its stdout, and a manifest with no probes.
 
+**A note on very large output.** vise hashes and counts every byte a probe produces but keeps only the first 256 KiB. Two probes that print a gigabyte are still compared exactly, by hash; what changes is the diff, which degrades to a line naming both hashes and the byte count when the divergence lies beyond the retained prefix:
+
+```
+$ vise verify
+VERIFY RED [behavior] — 0/1
+big [behavior] — observed behavior differs consistently from the lockfile
+stdout hash: expected sha256:… , got sha256:… (1048576 bytes, larger than the 262144-byte capture bound)
+next: revert — revert the unintended behavior change or ask an operator to accept a new baseline
+[exit 1]
+```
+
+`vise run` is the exception, as it is for exit codes: it streams the probe's complete output to your terminal however large. Its `--json` form reports the bounded prefix plus `stdout_truncated`, `stdout_size`, and `stdout_hash`. If you want a readable diff on a noisy probe, narrow what the probe prints — that is the probe's job, not vise's.
+
 ## 8. Metrics: hold behavior, prove improvement
 
 A metric probe prints one number and is tracked as a delta, never diffed for equality:

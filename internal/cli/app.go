@@ -273,7 +273,14 @@ func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Write
 	if !ok {
 		return renderSimpleError("run", fmt.Sprintf("unknown probe %q", args[0]), jsonMode, stdout, stderr)
 	}
-	result := (vise.Runner{Root: root, Manifest: manifest}).RunProbe(probe, false)
+	runner := vise.Runner{Root: root, Manifest: manifest}
+	if !jsonMode {
+		// Raw execution: the probe's complete output streams to the terminal
+		// as it is produced, while vise keeps only a bounded capture.
+		runner.MirrorStdout = stdout
+		runner.MirrorStderr = stderr
+	}
+	result := runner.RunProbe(probe, false)
 	// run mirrors the probe's own exit. A launch failure is the probe's exit 127 and
 	// passes through; a timeout, a refused artifact, or a lingering pipe holder
 	// has no probe exit to mirror and stays a harness error.
@@ -285,12 +292,10 @@ func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Write
 			"v": 1, "cmd": "run", "exit": result.Exit, "probe": probe.ID,
 			"files": hashFiles(result.Files), "next": vise.Next{Action: "proceed", Detail: "raw probe execution finished"},
 		}
-		addBytes(response, "stdout", result.Stdout)
-		addBytes(response, "stderr", result.Stderr)
+		addCapture(response, "stdout", result.Stdout)
+		addCapture(response, "stderr", result.Stderr)
 		return writeJSONWithExit(stdout, response, result.Exit)
 	}
-	_, _ = stdout.Write(result.Stdout)
-	_, _ = stderr.Write(result.Stderr)
 	return result.Exit
 }
 
@@ -355,6 +360,17 @@ func writeOutcomeJSON(w io.Writer, outcome vise.Outcome, extra map[string]any) i
 	return outcome.Exit
 }
 
+// addCapture reports an observation in JSON. Output larger than the capture
+// bound is reported by its prefix, hash, and size rather than in full.
+func addCapture(response map[string]any, key string, capture vise.Capture) {
+	addBytes(response, key, capture.Prefix)
+	if capture.Truncated() {
+		response[key+"_truncated"] = true
+		response[key+"_size"] = capture.Size
+		response[key+"_hash"] = capture.Hash
+	}
+}
+
 func addBytes(response map[string]any, key string, data []byte) {
 	if utf8.Valid(data) {
 		response[key] = string(data)
@@ -363,10 +379,10 @@ func addBytes(response map[string]any, key string, data []byte) {
 	response[key+"_base64"] = base64.StdEncoding.EncodeToString(data)
 }
 
-func hashFiles(files map[string][]byte) map[string]string {
+func hashFiles(files map[string]vise.Capture) map[string]string {
 	result := make(map[string]string, len(files))
-	for path, data := range files {
-		result[path] = vise.HashBytes(data)
+	for path, capture := range files {
+		result[path] = capture.Hash
 	}
 	return result
 }

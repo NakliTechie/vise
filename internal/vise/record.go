@@ -213,11 +213,12 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 }
 
 func RunResultsEqual(a, b RunResult) bool {
-	if a.Exit != b.Exit || a.HarnessError != b.HarnessError || !bytes.Equal(a.Stdout, b.Stdout) || !bytes.Equal(a.Stderr, b.Stderr) || len(a.Files) != len(b.Files) {
+	if a.Exit != b.Exit || a.HarnessError != b.HarnessError || !a.Stdout.Equal(b.Stdout) || !a.Stderr.Equal(b.Stderr) || len(a.Files) != len(b.Files) {
 		return false
 	}
-	for path, data := range a.Files {
-		if !bytes.Equal(data, b.Files[path]) {
+	for path, capture := range a.Files {
+		other, ok := b.Files[path]
+		if !ok || !capture.Equal(other) {
 			return false
 		}
 	}
@@ -350,31 +351,63 @@ func DiffRuns(root string, expected ProbeLock, got RunResult) string {
 	if expected.Exit != got.Exit {
 		return fmt.Sprintf("exit: expected %d, got %d", expected.Exit, got.Exit)
 	}
-	if expected.Stdout != HashBytes(got.Stdout) {
-		data, available, _ := BlobData(root, expected.Stdout, expected.StdoutLarge)
-		if available {
-			return FirstDiff("stdout", data, got.Stdout)
+	if expected.Stdout != got.Stdout.Hash {
+		if diff := captureDiff(root, "stdout", expected.Stdout, expected.StdoutLarge, got.Stdout); diff != "" {
+			return diff
 		}
-		return fmt.Sprintf("stdout hash: expected %s, got %s", expected.Stdout, HashBytes(got.Stdout))
 	}
-	if expected.Stderr != HashBytes(got.Stderr) {
-		data, available, _ := BlobData(root, expected.Stderr, expected.StderrLarge)
-		if available {
-			return FirstDiff("stderr", data, got.Stderr)
+	if expected.Stderr != got.Stderr.Hash {
+		if diff := captureDiff(root, "stderr", expected.Stderr, expected.StderrLarge, got.Stderr); diff != "" {
+			return diff
 		}
-		return fmt.Sprintf("stderr hash: expected %s, got %s", expected.Stderr, HashBytes(got.Stderr))
 	}
 	for _, path := range sortedKeys(expected.Files) {
 		actual := got.Files[path]
-		if expected.Files[path] != HashBytes(actual) {
-			data, available, _ := BlobData(root, expected.Files[path], expected.FilesLarge[path])
-			if available {
-				return FirstDiff("file/"+path, data, actual)
+		if expected.Files[path] != actual.Hash {
+			if diff := captureDiff(root, "file/"+path, expected.Files[path], expected.FilesLarge[path], actual); diff != "" {
+				return diff
 			}
-			return fmt.Sprintf("file %s hash: expected %s, got %s", path, expected.Files[path], HashBytes(actual))
 		}
 	}
 	return "observation differs"
+}
+
+// captureDiff renders a divergence as bytes whenever the retained prefix
+// actually holds it — an observation past the capture bound still gets a real
+// diff when it changed early. It degrades to hashes only when the expected
+// bytes are unavailable or the two agree everywhere vise still has.
+func captureDiff(root, label, expected string, expectedLarge bool, got Capture) string {
+	data, available, _ := BlobData(root, expected, expectedLarge)
+	switch {
+	case !available:
+		return truncatedDiff(label, expected, got)
+	case !got.Truncated():
+		return FirstDiff(label, data, got.Prefix)
+	case divergesWithin(data, got.Prefix):
+		return FirstDiff(label, data, got.Prefix) + fmt.Sprintf("\n… the observation continues to %d bytes, past the %d-byte capture bound", got.Size, CaptureLimit)
+	default:
+		return truncatedDiff(label, expected, got)
+	}
+}
+
+// divergesWithin reports whether two streams already differ inside the bytes
+// both sides still have; if they agree there, the divergence is past the bound
+// and no byte-level diff would be honest.
+func divergesWithin(expected, prefix []byte) bool {
+	n := len(expected)
+	if len(prefix) < n {
+		n = len(prefix)
+	}
+	return !bytes.Equal(expected[:n], prefix[:n])
+}
+
+// truncatedDiff explains a difference vise cannot render as bytes: either the
+// expected blob is hash-only or the streams agree everywhere vise retained.
+func truncatedDiff(label, expected string, got Capture) string {
+	if got.Truncated() {
+		return fmt.Sprintf("%s hash: expected %s, got %s (%d bytes, larger than the %d-byte capture bound)", label, expected, got.Hash, got.Size, CaptureLimit)
+	}
+	return fmt.Sprintf("%s hash: expected %s, got %s", label, expected, got.Hash)
 }
 
 // DiffRunResults explains the first divergence between two observations of
@@ -384,11 +417,17 @@ func DiffRunResults(first, second RunResult) string {
 	if first.Exit != second.Exit {
 		return fmt.Sprintf("exit: first pass %d, second pass %d", first.Exit, second.Exit)
 	}
-	if diff := FirstDiff("stdout", first.Stdout, second.Stdout); diff != "" {
-		return diff
+	if !first.Stdout.Equal(second.Stdout) {
+		if diff := FirstDiff("stdout", first.Stdout.Prefix, second.Stdout.Prefix); diff != "" {
+			return diff
+		}
+		return fmt.Sprintf("stdout differs beyond the %d-byte capture bound: %s (%d bytes) then %s (%d bytes)", CaptureLimit, first.Stdout.Hash, first.Stdout.Size, second.Stdout.Hash, second.Stdout.Size)
 	}
-	if diff := FirstDiff("stderr", first.Stderr, second.Stderr); diff != "" {
-		return diff
+	if !first.Stderr.Equal(second.Stderr) {
+		if diff := FirstDiff("stderr", first.Stderr.Prefix, second.Stderr.Prefix); diff != "" {
+			return diff
+		}
+		return fmt.Sprintf("stderr differs beyond the %d-byte capture bound: %s (%d bytes) then %s (%d bytes)", CaptureLimit, first.Stderr.Hash, first.Stderr.Size, second.Stderr.Hash, second.Stderr.Size)
 	}
 	paths := make(map[string]bool, len(first.Files))
 	for path := range first.Files {
@@ -398,9 +437,13 @@ func DiffRunResults(first, second RunResult) string {
 		paths[path] = true
 	}
 	for _, path := range sortedKeys(paths) {
-		if diff := FirstDiff("file/"+path, first.Files[path], second.Files[path]); diff != "" {
+		if first.Files[path].Equal(second.Files[path]) {
+			continue
+		}
+		if diff := FirstDiff("file/"+path, first.Files[path].Prefix, second.Files[path].Prefix); diff != "" {
 			return diff
 		}
+		return fmt.Sprintf("file/%s differs beyond the %d-byte capture bound: %s (%d bytes) then %s (%d bytes)", path, CaptureLimit, first.Files[path].Hash, first.Files[path].Size, second.Files[path].Hash, second.Files[path].Size)
 	}
 	return "observation differs"
 }

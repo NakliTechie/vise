@@ -714,3 +714,58 @@ func TestReviewDiffIsTerminalSafeAndVersionRejectsArguments(t *testing.T) {
 		t.Fatalf("preview wording: %d %s", exit, stdout)
 	}
 }
+
+func TestRunPrintsCompleteOutputWhileRecordBoundsIt(t *testing.T) {
+	const size = 1 << 20
+	manifest := `[vise]
+version = 1
+
+[stubs]
+network = "declared-off"
+
+[[probe]]
+id = "noisy"
+run = "dd if=/dev/zero bs=65536 count=16 2>/dev/null"
+timeout = 60
+`
+	root := cliRepo(t, manifest, "")
+	// Raw run streams every byte, however large.
+	exit, stdout, _ := cliRun(t, root, "run", "noisy")
+	if exit != 0 || len(stdout) != size {
+		t.Fatalf("run printed %d bytes, want %d (exit %d)", len(stdout), size, exit)
+	}
+	// JSON mode reports the bounded prefix and says the stream was larger.
+	exit, stdout, _ = cliRun(t, root, "run", "noisy", "--json")
+	value := parseCLIJSON(t, stdout)
+	if exit != 0 || value["stdout_truncated"] != true || value["stdout_size"] != float64(size) {
+		t.Fatalf("run --json: exit=%d truncated=%v size=%v", exit, value["stdout_truncated"], value["stdout_size"])
+	}
+	if hash, _ := value["stdout_hash"].(string); !strings.HasPrefix(hash, "sha256:") {
+		t.Fatalf("run --json carried no stream hash: %#v", value)
+	}
+
+	// The baseline holds the hash, not the bytes: no blob is written for it.
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 0 {
+		t.Fatalf("record: %d %s", exit, stderr)
+	}
+	lock := string(cliReadFile(t, root, "vise.lock"))
+	if !strings.Contains(lock, `"stdout_large": true`) {
+		t.Fatalf("lockfile did not mark the observation hash-only: %s", lock)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".vise", "blobs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Size() > int64(core.CaptureLimit) {
+			t.Fatalf("blob %s is %d bytes, larger than the capture bound", entry.Name(), info.Size())
+		}
+	}
+	if exit, _, _ := cliRun(t, root, "gate", "--quiet"); exit != 0 {
+		t.Fatalf("gate on a bounded observation: %d", exit)
+	}
+}
