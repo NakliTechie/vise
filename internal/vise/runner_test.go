@@ -592,3 +592,78 @@ func TestTheRunnerKeepsThePromisesTheSpecMakes(t *testing.T) {
 		}
 	})
 }
+
+// A metric that will not run said "metric exited 1" and nothing else. A probe
+// that cannot launch names the missing tool; the design rule the project
+// states for both is that every failure names its remedy, and this half of it
+// named none. The whole path had no coverage, which is how four messages
+// stayed uninformative without anybody noticing.
+//
+// The common cause is an input the refactor moved, and the shell says so on
+// stderr in the line these messages now carry.
+func TestAMetricThatWillNotRunSaysWhatWentWrong(t *testing.T) {
+	root := testGitRepo(t)
+	for _, c := range []struct {
+		name    string
+		metric  Metric
+		wants   []string
+		unwants []string
+	}{
+		{
+			name:   "its input is gone",
+			metric: Metric{ID: "size", Run: "cat no-such-input.txt", Timeout: 10},
+			wants:  []string{"metric exited", "no-such-input.txt"},
+		},
+		{
+			name:   "the analyzer is not installed",
+			metric: Metric{ID: "size", Run: "no-such-analyzer --count", Timeout: 10},
+			wants:  []string{"no-such-analyzer"},
+		},
+		{
+			name:    "it printed nothing",
+			metric:  Metric{ID: "size", Run: "true", Timeout: 10},
+			wants:   []string{"exactly one finite number", "printed nothing"},
+			unwants: []string{`printed ""`},
+		},
+		{
+			name:   "it printed a word",
+			metric: Metric{ID: "size", Run: "echo unknown", Timeout: 10},
+			wants:  []string{"exactly one finite number", `printed "unknown"`},
+		},
+		{
+			name:   "it printed a warning before the number",
+			metric: Metric{ID: "size", Run: "echo 'warning: deprecated'; echo 12", Timeout: 10},
+			wants:  []string{"exactly one finite number", "warning"},
+		},
+		{
+			// Exit 127 — the analyzer is not on PATH — takes the launch-failure
+			// branch, which already named the tool. This is the other branch:
+			// the version command exists, runs, and fails.
+			name:   "its version command runs and fails",
+			metric: Metric{ID: "size", Run: "echo 12", VersionCmd: "cat no-such-version-file.txt", Timeout: 10},
+			wants:  []string{"version command exited", "no-such-version-file.txt"},
+		},
+		{
+			name:   "its version command is not installed",
+			metric: Metric{ID: "size", Run: "echo 12", VersionCmd: "no-such-analyzer --version", Timeout: 10},
+			wants:  []string{"version command", "no-such-analyzer"},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			result := Runner{Root: root}.RunMetric(c.metric)
+			if result.HarnessError == "" {
+				t.Fatalf("no harness error; value %v", result.Value)
+			}
+			for _, want := range c.wants {
+				if !strings.Contains(result.HarnessError, want) {
+					t.Errorf("the message never mentions %q:\n\t%s", want, result.HarnessError)
+				}
+			}
+			for _, unwanted := range c.unwants {
+				if strings.Contains(result.HarnessError, unwanted) {
+					t.Errorf("the message contains %q, which reads as a value rather than an absence:\n\t%s", unwanted, result.HarnessError)
+				}
+			}
+		})
+	}
+}

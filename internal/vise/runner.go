@@ -119,15 +119,15 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: result.HarnessError, HarnessOperator: result.HarnessOperator}
 	}
 	if result.Exit != 0 {
-		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: fmt.Sprintf("metric exited %d", result.Exit)}
+		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: metricExitDetail(result)}
 	}
 	text := strings.TrimSpace(string(result.Stdout.Prefix))
 	value, err := strconv.ParseFloat(text, 64)
 	if err != nil || result.Stdout.Truncated() || strings.ContainsAny(text, "\r\n \t") {
-		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: "metric must print exactly one finite number"}
+		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: metricNumberDetail(text, result.Stdout.Truncated())}
 	}
 	if value != value || value > 1.7976931348623157e+308 || value < -1.7976931348623157e+308 {
-		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: "metric must print exactly one finite number"}
+		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: metricNumberDetail(text, false)}
 	}
 	version := ""
 	if metric.VersionCmd != "" {
@@ -136,7 +136,11 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 			return MetricResult{Value: value, HarnessError: "metric version command: " + vr.HarnessError}
 		}
 		if vr.Exit != 0 {
-			return MetricResult{Value: value, HarnessError: fmt.Sprintf("metric version command exited %d", vr.Exit)}
+			detail := fmt.Sprintf("metric version command exited %d", vr.Exit)
+			if line := firstShellDiagnostic(vr.Stderr); line != "" {
+				detail += ": " + line
+			}
+			return MetricResult{Value: value, HarnessError: detail}
 		}
 		version = strings.TrimSpace(string(vr.Stdout.Prefix))
 		if version == "" || vr.Stdout.Truncated() {
@@ -419,4 +423,38 @@ func (r RunResult) harnessFailure() Failure {
 
 func (m MetricResult) harnessFailure() Failure {
 	return Failure{Class: "harness", Detail: m.HarnessError, Operator: m.HarnessOperator}
+}
+
+// metricExitDetail names what the analyzer said, not only that it failed.
+//
+// "metric exited 1" was the whole message. A probe that cannot launch names the
+// missing tool; a metric that cannot run named nothing, and the design rule the
+// project states is that every failure names its remedy. The most common cause
+// is an input the refactor moved or deleted, and the shell says so on stderr in
+// the line this picks out.
+func metricExitDetail(result RunResult) string {
+	detail := fmt.Sprintf("metric exited %d", result.Exit)
+	if line := firstShellDiagnostic(result.Stderr); line != "" {
+		return detail + ": " + line
+	}
+	return detail
+}
+
+// metricNumberDetail shows what arrived instead of a number. An analyzer that
+// prints a warning line first, or a table, or nothing at all, produced the same
+// sentence as one that printed "NaN", and the author had to rerun the command
+// by hand to see which.
+func metricNumberDetail(text string, truncated bool) string {
+	const rule = "metric must print exactly one finite number"
+	switch {
+	case truncated:
+		return rule + "; it printed more than the capture bound"
+	case text == "":
+		return rule + "; it printed nothing"
+	}
+	shown := text
+	if len(shown) > 80 {
+		shown = shown[:80] + "…"
+	}
+	return fmt.Sprintf("%s; it printed %q", rule, shown)
 }
