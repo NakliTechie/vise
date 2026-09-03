@@ -2,6 +2,7 @@ package vise
 
 import (
 	"os"
+	"regexp"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -124,6 +125,39 @@ func TestTheStatedCheckCountMatchesTheRegistry(t *testing.T) {
 		}
 		if mentions == 0 {
 			t.Logf("note: %s states no check count", name)
+		}
+	}
+}
+
+// Backticks inside a double-quoted shell string are a command substitution.
+// Twice tonight one ran and its output — empty — replaced the words I meant to
+// write: once in a commit message, once in the README, where "committed with
+// `git add -A`" became "committed with ,". The damage is silent, survives
+// review because the sentence still scans, and leaves exactly one fingerprint:
+// punctuation with a space in front of it, or an empty pair of backticks.
+//
+// Prose never wants either. Fenced code blocks are excluded, because a diff or
+// a shell transcript can legitimately contain both.
+func TestNoShippedDocumentHasASubstitutionScar(t *testing.T) {
+	docs := []string{"README.md", "SPEC.md", "GUIDE.md", "AGENTS.md", "RESEARCH.md"}
+	scar := regexp.MustCompile(`\s[,.](\s|$)`)
+	for _, name := range docs {
+		text := readRepositoryFile(t, name)
+		fenced := false
+		for number, line := range strings.Split(text, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "```") {
+				fenced = !fenced
+				continue
+			}
+			if fenced {
+				continue
+			}
+			if scar.MatchString(line) {
+				t.Errorf("%s:%d punctuation with a space before it, the mark of an eaten command substitution:\n\t%s", name, number+1, strings.TrimSpace(line))
+			}
+			if strings.Contains(line, "``") {
+				t.Errorf("%s:%d an empty pair of backticks, the mark of an eaten command substitution:\n\t%s", name, number+1, strings.TrimSpace(line))
+			}
 		}
 	}
 }

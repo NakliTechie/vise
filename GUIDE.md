@@ -307,7 +307,7 @@ Also harness, also exit 2: a probe that cannot be launched (127), a timeout, a p
 $ vise verify
 VERIFY RED [behavior] — 0/1
 big [behavior] — observed behavior differs consistently from the lockfile
-stdout hash: expected sha256:… , got sha256:… (1048576 bytes, larger than the 262144-byte capture bound)
+stdout hash: expected sha256:…, got sha256:… (1048576 bytes, larger than the 262144-byte capture bound)
 next: revert — revert the unintended behavior change or ask an operator to accept a new baseline
 [exit 1]
 ```
