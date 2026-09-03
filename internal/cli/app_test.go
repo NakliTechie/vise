@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"regexp"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -1267,4 +1268,28 @@ func TestMalformedOperatorStateTellsTheAgentToStop(t *testing.T) {
 			t.Fatalf("gate said %v for a malformed lockfile", next["action"])
 		}
 	})
+}
+
+// The other direction, which is the one that costs an agent a turn. The guard
+// above stops a command from going undocumented; nothing stopped the table
+// from naming a command that does not exist. An agent reads the table, runs
+// what it says, and gets a usage error back from the tool that is supposed to
+// be telling it what to do — and the tool is right, so it has no way to learn
+// the document was wrong.
+//
+// vise map is the live risk here rather than a hypothetical: SPEC.md names it
+// as a v0 non-goal, so the word is already in the repository, one careless
+// paste from the table.
+func TestTheReadmeTableNamesNoCommandThatDoesNotExist(t *testing.T) {
+	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Skipf("README.md unavailable: %v", err)
+	}
+	table := readmeSection(t, string(readme), "## Commands")
+	quoted := regexp.MustCompile("`vise ([a-z][a-z-]*)")
+	for _, match := range quoted.FindAllStringSubmatch(table, -1) {
+		if !isKnownCommand(match[1]) {
+			t.Errorf("the README table offers `vise %s` and the CLI has no such command", match[1])
+		}
+	}
 }
