@@ -408,6 +408,37 @@ you want here — a unit test is, and the probe set has a gap worth filling.
 A behavioural gate and a test suite are not substitutes for one another, and the
 places they fail to overlap are where defects live.
 
+## 11.6 Using an agent to audit code you already trust
+
+A gated clone plus a coding agent is an auditing instrument, and a cheap one.
+The method, run against vise itself:
+
+1. `scripts/dogfood` builds a gated clone. Confirm it gates green before you
+   hand it over — a red repository makes every later answer unreadable.
+2. Give the agent one file and one narrow task: *find genuinely duplicated
+   logic here and extract it; if there is none, change nothing and say so.*
+   Point it at `AGENTS.md` and nothing else.
+3. Ask for the final report `AGENTS.md` describes, including the two sections
+   that do the work: what the gate did not check, and what looked wrong.
+
+The extraction task is the pretext. It makes the agent read every line of one
+file with a reason to understand it, and the findings arrive as a by-product.
+Six runs against six files here produced seventeen defects that had survived
+every direct audit, including two by the same author over the same file an hour
+earlier.
+
+Two things make it work. **The gate turns "I did not change behavior" from a
+claim into a verdict**, so you can accept the refactor without re-deriving it.
+And **the report's "what looks wrong" heading gives the agent somewhere to put
+what it noticed but was not asked about** — which is where every one of those
+seventeen came from. Without that heading a well-behaved agent stays on task and
+throws the observation away.
+
+Take the refactor as a patch rather than re-typing it: `git format-patch` in the
+clone, `git apply --3way` in the repository. And do not delete the clone until
+its work has landed. Both of those are written here because the opposite
+happened.
+
 ## 12. Handing the repository to an agent
 
 Everything above assumes a human at the keyboard. The reason vise exists is the

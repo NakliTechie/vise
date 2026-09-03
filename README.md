@@ -230,6 +230,12 @@ The feature inventory and the traps each one guards live in [`verify/features/`]
 scripts/dogfood /tmp/vise-dogfood     # a gated clone of this checkout, ready for an agent
 ```
 
+A gated clone plus a coding agent is also the cheapest audit available. Give
+the agent one file and a narrow extraction task, point it at `AGENTS.md`, and
+read the two sections of its report that matter: what the gate did not check,
+and what looked wrong. Six runs against six files here produced seventeen
+defects that had survived every direct audit ([GUIDE §11.6](GUIDE.md)).
+
 `scripts/dogfood` builds the target vise is tested against: a clone of this
 repository with vendored dependencies, agent-ready probes, a recorded baseline,
 `vise doctor` clean, and a cold gate green. It exists because every round of
