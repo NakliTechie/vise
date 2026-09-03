@@ -3,6 +3,7 @@ package vise
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -529,6 +530,34 @@ func TestTheRerunBudgetFollowsTheProbeNotTheSet(t *testing.T) {
 			got, _ := ConsecutiveFlakes(events, "c", "l", test.run)
 			if got != test.want {
 				t.Fatalf("count = %d, want %d for %v", got, test.want, test.run)
+			}
+		})
+	}
+}
+
+// A lockfile this vise cannot read is a tooling problem with a one-line fix,
+// and which fix depends on the direction. An unknown key already said so; an
+// unsupported version said "vise.lock version 99 is unsupported" and stopped —
+// four words, no remedy, for the coarser and likelier of the two signals.
+func TestAnUnreadableLockfileVersionSaysWhichWayToGo(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		version int
+		wants   string
+	}{
+		{"written by a newer vise", LockVersion + 1, "upgrade this one"},
+		{"written by an older vise", LockVersion - 1, "re-records it"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := testGitRepo(t)
+			body := fmt.Sprintf(`{"v":%d,"probes":{}}`, c.version)
+			writeTestFile(t, root, "vise.lock", body)
+			_, _, err := LoadLockfile(root)
+			if err == nil {
+				t.Fatal("a lockfile this vise cannot read was accepted")
+			}
+			if !strings.Contains(err.Error(), c.wants) {
+				t.Errorf("the message does not say what to do (%q):\n\t%s", c.wants, err)
 			}
 		})
 	}

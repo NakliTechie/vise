@@ -225,7 +225,15 @@ func LoadLockfile(root string) (Lockfile, []byte, error) {
 		return Lockfile{}, nil, fmt.Errorf("parse vise.lock: trailing JSON data")
 	}
 	if lock.V != LockVersion {
-		return Lockfile{}, nil, fmt.Errorf("vise.lock version %d is unsupported", lock.V)
+		// Two paths report the same situation and only one of them used to
+		// help. An unknown *key* in the lockfile gets a one-line fix (see
+		// schema.go); an unsupported *version* got four words. The version is
+		// the coarser and likelier signal of the two, so it was the more
+		// common way to be told nothing.
+		if lock.V > LockVersion {
+			return Lockfile{}, nil, fmt.Errorf("vise.lock is version %d and this vise understands %d: the baseline was written by a newer vise, so upgrade this one (go install ./cmd/vise) and check `vise version --json` for the build you are running", lock.V, LockVersion)
+		}
+		return Lockfile{}, nil, fmt.Errorf("vise.lock is version %d and this vise understands %d: the baseline predates this vise, so an operator re-records it", lock.V, LockVersion)
 	}
 	if lock.Probes == nil {
 		return Lockfile{}, nil, fmt.Errorf("vise.lock has no probe map")
