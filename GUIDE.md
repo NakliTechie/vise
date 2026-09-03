@@ -242,7 +242,7 @@ GATE INDETERMINATE [harness] — 0/0: rerun-limit
 [exit 2]
 ```
 
-Two reruns per commit, lock, and probe set; the third is refused so a loop cannot circle. `status` says so:
+A probe may flake twice at one commit and lock; the third run is refused so a loop cannot circle. The budget follows the probe, not the set it ran in. `status` says so:
 
 ```
 $ vise status
@@ -250,7 +250,7 @@ VISE STATUS — RERUN-REFUSED
 …
 journal: flake · d7ff97… · indeterminate · flaky=greet
 journal: flake · d7ff97… · indeterminate · flaky=greet
-next: human — the next gate is refused (second consecutive rerun already consumed for this commit, lock, and probe set); commit, re-record, or change the manifest
+next: human — the next gate is refused (this probe has already flaked twice at this commit and lock; the budget follows the unstable probe, so running it alone does not renew it); commit, re-record, or change the manifest
 [exit 0]
 ```
 

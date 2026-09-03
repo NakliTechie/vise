@@ -98,7 +98,7 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 - **The exit code is the branch; `next.action` is the instruction.** They are not one-to-one and the difference matters: exit 2 asks the agent to repair a probe it broke, or to stop because the repair is in a file it may not write, and only `next.action` separates those. Exits 1 and 5 both say revert, and what to revert differs. Branch on the code, then read the action.
 - **Bounded output, always.** Green is one line. Red shows the first divergence and counts, never a dump. Output grows with divergence, never with repository size — and a long line is clipped around the differing column, so a probe that prints one 8,000-character line still renders a diff you can read.
 - **Every failure names its remedy.** The error message is the documentation, delivered when it is needed.
-- **Fail closed.** A flaky probe makes the verdict *indeterminate*, never green, and never leaves the denominator. An agent cannot eject a judge by making it flaky, and after two reruns at one commit the third is refused.
+- **Fail closed.** A flaky probe makes the verdict *indeterminate*, never green, and never leaves the denominator. An agent cannot eject a judge by making it flaky, and after a probe has flaked twice at one commit the third run is refused.
 
 | exit | meaning | `next.action` | what the agent does |
 |---|---|---|---|

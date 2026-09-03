@@ -35,7 +35,11 @@ and report a blocked repository. It costs one run.
 
 **Know which binary you are running.** `vise` comes from your `PATH`, and the
 one there may be older than the repository, or built from somebody's dirty
-tree. `vise version --json` tells you: `version`, `revision`, and `modified`.
+tree. `vise version --json` tells you: `version`, `revision`, and `modified`. A
+binary built without VCS stamps — an install from a tarball, say — carries no
+revision, so both fields are absent rather than false. Absent means unknown,
+and report it that way: a build that cannot tell you whether its tree was
+clean has not told you that it was.
 
 - Put the revision and `modified` in your final report, always. An operator
   reading a green gate needs to know which build produced it, and that costs
@@ -97,14 +101,19 @@ report at all*. Do not read a usage error as a situation.
 | 4 | indeterminate | no baseline exists | stop and report |
 | 5 | red, `metric` | behavior held, a tracked metric got worse | revert what worsened it |
 
-The JSON carries `exit`, `verdict`, `classes`, `counts`, `failures` keyed by
-probe id, and one `next.action` from a closed vocabulary. Read those fields.
-Never parse the human text.
+The JSON carries `exit`, `counts`, one `next.action` from a closed
+vocabulary, and — when something failed — `verdict`, `classes` and `failures`.
+A green outcome carries no classes and no failures, because there are none, so
+branch on the exit code and read the rest if it is there. Failures are keyed by
+the name of the thing that failed: usually a probe id, but `manifest`,
+`journal`, `vise.lock`, `fingerprint` and `rerun-limit` name themselves. Read
+those fields. Never parse the human text.
 
 ## Exit 1 — you changed behavior
 
-`vise verify` prints the first divergence as a diff. That diff is the truth
-about what you changed. Read it, then revert.
+`vise verify` prints a diff for every probe that diverged, each showing the
+first line where that probe's output stopped matching. Those diffs are the
+truth about what you changed. Read them, then revert.
 
 A refactor that changes observable behavior is a failed refactor even when the
 new behavior is better. If you are confident the change is right, that is a
@@ -159,8 +168,9 @@ blocked repository is a fact to report, not a puzzle to solve.
 ## Exit 3 — flake
 
 An observation differed between two runs of the same code. The gate calls this
-neither green nor red, on purpose. You get two reruns per commit; the third is
-refused with `next.action: human`.
+neither green nor red, on purpose. A probe may flake twice at one commit and
+lock; the third run is refused with `next.action: human`. That is one rerun
+after the run that first flaked, not two.
 
 Rerunning until it passes is the one thing you must not do. Stop and report.
 

@@ -581,10 +581,10 @@ func ConsecutiveFlakes(events []JournalEvent, commit, lock string, probes []stri
 		if event.Event == "flake" {
 			// The budget follows the unstable probe, not the exact set it was
 			// running in. Keying on the set gave every subset its own two
-			// reruns: a flake seen in the full suite did not count against
+			// budgets: a flake seen in the full suite did not count against
 			// `verify --probe p`, and an agent diagnosing with --probe walked
-			// into a fresh budget without meaning to. "Two reruns, then a
-			// human" has to mean two for the probe.
+			// into a fresh budget without meaning to. Two flakes then a human
+			// has to mean two for the probe.
 			if flakeTouches(event, want) {
 				count++
 			}
