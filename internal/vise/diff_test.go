@@ -124,3 +124,53 @@ func TestFirstDiffDescribesABinaryDivergence(t *testing.T) {
 		t.Fatalf("the diff does not say how long the observation was: %q", rendered)
 	}
 }
+
+// The diff's bounds are a promise about how much of an agent's context a red
+// gate can consume. Three mutations survived: widening the 160-rune window to
+// 500, rendering every later line instead of eight, and dropping the marker
+// that says how many lines were omitted. Each turns a bounded rendering into
+// an unbounded one while every existing assertion still held.
+func TestTheDiffBoundsAreExactlyWhatTheSpecSays(t *testing.T) {
+	if lineWindow != 160 {
+		t.Fatalf("lineWindow is %d; the spec and this test both say 160", lineWindow)
+	}
+
+	// Line count: two lines of context, eight of each side, a header, and the
+	// omission marker. Twenty lines of divergence must not render twenty.
+	expected := make([]string, 0, 40)
+	got := make([]string, 0, 40)
+	for i := 0; i < 40; i++ {
+		expected = append(expected, "line")
+		got = append(got, "line")
+	}
+	for i := 10; i < 40; i++ {
+		got[i] = "changed"
+	}
+	diff := FirstDiff("stdout", []byte(strings.Join(expected, "\n")), []byte(strings.Join(got, "\n")))
+	lines := strings.Split(diff, "\n")
+	// header (3) + context (2) + 8 expected + 8 got + omission marker.
+	if len(lines) > 24 {
+		t.Fatalf("a 30-line divergence rendered %d lines:\n%s", len(lines), diff)
+	}
+	if !strings.Contains(diff, "later line(s) omitted") {
+		t.Fatalf("the diff does not say how much it left out:\n%s", diff)
+	}
+	// And it says how many, because "some" is not a number a reader can act on.
+	// 23, not 22: neither observation ends in a newline, and the marker that
+	// records that is itself a line.
+	if !strings.Contains(diff, "23 later line(s) omitted") {
+		t.Fatalf("the omitted count is wrong or missing:\n%s", diff)
+	}
+
+	// Line length: a rendered line carries at most the window plus its
+	// annotations, never the whole line.
+	long := strings.Repeat("a", 5000) + "X"
+	other := strings.Repeat("a", 5000) + "Y"
+	clipped := FirstDiff("stdout", []byte(long), []byte(other))
+	for _, line := range strings.Split(clipped, "\n") {
+		if len([]rune(line)) > lineWindow+80 {
+			t.Fatalf("a rendered line is %d runes, past the %d-rune window plus its annotations:\n%s",
+				len([]rune(line)), lineWindow, line)
+		}
+	}
+}
