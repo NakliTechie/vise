@@ -115,31 +115,41 @@ func NewOutcome(cmd string) Outcome {
 
 func (o *Outcome) AddFailure(id string, f Failure) {
 	if prior, ok := o.Failures[id]; ok {
-		o.removeFailureCount(prior.Class)
+		*o.counterFor(prior.Class)--
 	}
 	o.Failures[id] = f
-	switch f.Class {
-	case "behavior":
-		o.Counts.Behavior++
-	case "flake":
-		o.Counts.Flaky++
-	case "harness":
-		o.Counts.Harness++
-	case "metric":
-		o.Counts.Metric++
-	}
+	*o.counterFor(f.Class)++
 }
 
-func (o *Outcome) removeFailureCount(class string) {
+// counterFor selects the count a failure class belongs to.
+//
+// It used to be two switches, one incrementing and one decrementing, with no
+// default arm on either — so a failure whose class was misspelled or empty was
+// written into Failures and counted nowhere. Finalize then derived pass as
+// declared minus the four known classes, counted it as a pass, fell through
+// every case, and returned exit 0, verdict green, next.action proceed, with a
+// non-empty failures map in the same JSON object.
+//
+// A green verdict carrying a failure is the one thing this tool exists not to
+// do. An unknown class is now harness, which is the fail-closed answer: the
+// verdict becomes indeterminate and an operator is told the harness is wrong,
+// which it is, because a class vise does not recognise means vise itself is
+// broken.
+//
+// Found by a coding agent working under the gate, which was blocked by a red
+// repository, could not do its task, and read the code it had been asked to
+// change instead.
+func (o *Outcome) counterFor(class string) *int {
 	switch class {
 	case "behavior":
-		o.Counts.Behavior--
+		return &o.Counts.Behavior
 	case "flake":
-		o.Counts.Flaky--
-	case "harness":
-		o.Counts.Harness--
+		return &o.Counts.Flaky
 	case "metric":
-		o.Counts.Metric--
+		return &o.Counts.Metric
+	default:
+		// "harness", and anything vise does not recognise.
+		return &o.Counts.Harness
 	}
 }
 
