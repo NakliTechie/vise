@@ -66,3 +66,50 @@ func TestAnOrdinaryProbeDoesNotTripTheGitStateCheck(t *testing.T) {
 		}
 	}
 }
+
+// A repository with no commits is a state somebody reaches by running
+// `git init` and then vise. It produced a raw git error about an ambiguous
+// argument, escaped newlines and all, under next.action fix_probe — telling an
+// agent to repair a probe when nothing had ever been committed.
+func TestARepositoryWithNoCommitsIsToldWhatIsWrong(t *testing.T) {
+	root := t.TempDir()
+	testGit(t, root, "init", "-q")
+	testGit(t, root, "config", "user.email", "vise-tests@example.invalid")
+	testGit(t, root, "config", "user.name", "vise tests")
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
+
+	if GitHasCommits(root) {
+		t.Fatal("a fresh repository was reported as having commits")
+	}
+
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome := Record(root, manifest, manifestBytes, RecordOptions{AllowDirty: true}).Outcome
+	if outcome.Exit != ExitHarness {
+		t.Fatalf("exit = %d, want harness", outcome.Exit)
+	}
+	failure := outcome.Failures["git"]
+	if !strings.Contains(failure.Detail, "no commits") {
+		t.Fatalf("the failure does not say what is wrong: %q", failure.Detail)
+	}
+	if strings.Contains(failure.Detail, "ambiguous argument") {
+		t.Fatalf("the raw git error reached the caller: %q", failure.Detail)
+	}
+	// An operator makes the commit; there is nothing here an agent may do.
+	if outcome.Next.Action != NextHuman {
+		t.Fatalf("next.action = %q, want human", outcome.Next.Action)
+	}
+
+	// Once there is a commit, recording works.
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "harness")
+	if !GitHasCommits(root) {
+		t.Fatal("a repository with a commit was reported as having none")
+	}
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("record after the first commit: %#v", result.Outcome)
+	}
+}

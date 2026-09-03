@@ -158,6 +158,16 @@ func (r *recordRun) captureEnvironment() bool {
 func (r *recordRun) resolveHead() bool {
 	commit, err := GitHead(r.root)
 	if err != nil {
+		// A repository with no commits produces a raw git error about an
+		// ambiguous argument, escaped newlines and all, under next.action
+		// fix_probe — telling an agent to repair a probe when the actual
+		// situation is that nothing has ever been committed. Say what it is.
+		if !GitHasCommits(r.root) {
+			r.result.Outcome = harnessWithNext("record", "git",
+				"this repository has no commits, so there is nothing to record a baseline against",
+				Next{Action: NextHuman, Detail: "commit the harness first; a baseline freezes behavior at a commit somebody can return to"})
+			return false
+		}
 		r.result.Outcome = harnessOnly("record", "git", err.Error())
 		return false
 	}

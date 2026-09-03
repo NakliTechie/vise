@@ -348,19 +348,13 @@ func GitTrackedPaths(root string, rels []string) ([]string, error) {
 func gitOwnState(root string) (string, error) {
 	digest := sha256.New()
 
-	head, err := gitOutput(root, "rev-parse", "HEAD")
+	// One rev-parse for both answers: this runs twice per probe, and a process
+	// spawn costs more than everything it computes.
+	gitDir, head, err := gitDirAndHead(root)
 	if err != nil {
-		// A repository with no commits yet has no HEAD, and that is a state
-		// vise supports: record refuses it for other reasons, and a probe run
-		// through `vise run` should not fail here.
-		head = ""
+		return "", err
 	}
 	writeHashPart(digest, "head", []byte(head))
-
-	gitDir, err := gitOutput(root, "rev-parse", "--absolute-git-dir")
-	if err != nil {
-		return "", fmt.Errorf("locate the git directory: %w", err)
-	}
 	// The repository's own rule files, which live in the git directory rather
 	// than the work tree and so appear in neither half of the snapshot.
 	// attributes is here beside exclude because `git diff` consults it: an
@@ -430,4 +424,35 @@ func expandHome(path string) string {
 		return path
 	}
 	return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(path, "~"), string(filepath.Separator)))
+}
+
+// gitDirAndHead resolves the git directory and the current commit in one call.
+// A repository with no commits yet has no HEAD, and that is a state vise
+// supports: record refuses it for its own reasons, and a probe run through
+// `vise run` should not fail here.
+func gitDirAndHead(root string) (gitDir, head string, err error) {
+	out, err := gitOutput(root, "rev-parse", "--absolute-git-dir", "HEAD")
+	if err != nil {
+		// HEAD is the part that can be absent, so ask for the directory alone
+		// before giving up.
+		gitDir, dirErr := gitOutput(root, "rev-parse", "--absolute-git-dir")
+		if dirErr != nil {
+			return "", "", fmt.Errorf("locate the git directory: %w", dirErr)
+		}
+		return gitDir, "", nil
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 2 {
+		return strings.TrimSpace(out), "", nil
+	}
+	return strings.TrimSpace(lines[0]), strings.TrimSpace(lines[1]), nil
+}
+
+// GitHasCommits reports whether HEAD names a commit. An unborn branch — a
+// repository somebody has just run `git init` in — makes rev-parse fail with a
+// message about an ambiguous argument, which is true and unhelpful.
+func GitHasCommits(root string) bool {
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "HEAD")
+	cmd.Dir = root
+	return cmd.Run() == nil
 }
