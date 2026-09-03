@@ -670,13 +670,22 @@ func printHelp(w io.Writer) {
 	for _, entry := range commands {
 		fmt.Fprintf(w, "  %-20s %s\n", entry.Invocation, entry.Summary)
 	}
-	fmt.Fprint(w, `
-Global options:
-  --json               Replace human output with one JSON object
-  --help               Show help without requiring a Git repository
+	fmt.Fprint(w, "\nGlobal options:\n")
+	for _, option := range globalOptions {
+		fmt.Fprintf(w, "  %-20s %s\n", option.Flag, option.Summary)
+	}
+	fmt.Fprint(w, "\nRun 'vise <command> --help' for command-specific help.\n")
+}
 
-Run 'vise <command> --help' for command-specific help.
-`)
+// globalOptions is the one source for the two flags that are not commands,
+// for the same reason `commands` is the one source for the rest. Their
+// descriptions were written twice — a raw string in the human render and map
+// values in the JSON document — identical today, and the human half is the only
+// half a probe watches. Editing one and not the other would have made
+// `vise --help` and `vise --help --json` disagree with nothing to catch it.
+var globalOptions = []struct{ Flag, Summary string }{
+	{"--json", "Replace human output with one JSON object"},
+	{"--help", "Show help without requiring a Git repository"},
 }
 
 // commands is the one source for every rendering of help: the top-level list,
@@ -738,14 +747,22 @@ func helpDocument(command string) map[string]any {
 		document["usage"] = strings.TrimSpace(usage)
 		return document
 	}
-	listed := make(map[string]string, len(commands))
+	// Each command carries its summary as well as its usage. The summary is
+	// the one-line description of what a command is for, and it existed only
+	// in the human rendering — so a JSON consumer that wanted it had to parse
+	// the human text, which the agent contract tells agents never to do.
+	listed := make(map[string]map[string]string, len(commands))
 	for _, entry := range commands {
-		listed[entry.Name] = strings.TrimSpace(entry.Usage)
+		listed[entry.Name] = map[string]string{
+			"summary": entry.Summary,
+			"usage":   strings.TrimSpace(entry.Usage),
+		}
 	}
 	document["commands"] = listed
-	document["global_options"] = map[string]string{
-		"--json": "Replace human output with one JSON object",
-		"--help": "Show help without requiring a Git repository",
+	options := make(map[string]string, len(globalOptions))
+	for _, option := range globalOptions {
+		options[option.Flag] = option.Summary
 	}
+	document["global_options"] = options
 	return document
 }

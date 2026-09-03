@@ -1023,7 +1023,8 @@ func TestEveryCommandAppearsInBothRenderingsOfHelp(t *testing.T) {
 		t.Fatalf("help --json exit = %d", exit)
 	}
 	var document struct {
-		Commands map[string]string `json:"commands"`
+		Commands      map[string]map[string]string `json:"commands"`
+		GlobalOptions map[string]string            `json:"global_options"`
 	}
 	if err := json.Unmarshal(machine.Bytes(), &document); err != nil {
 		t.Fatal(err)
@@ -1032,12 +1033,37 @@ func TestEveryCommandAppearsInBothRenderingsOfHelp(t *testing.T) {
 		if !strings.Contains(human.String(), entry.Name) {
 			t.Errorf("%q is missing from the human help", entry.Name)
 		}
-		if _, ok := document.Commands[entry.Name]; !ok {
+		listed, ok := document.Commands[entry.Name]
+		if !ok {
 			t.Errorf("%q is missing from the JSON help", entry.Name)
+			continue
+		}
+		// The summary is what a command is *for*, and it existed only in the
+		// human rendering — so a JSON consumer that wanted it had to parse the
+		// human text, which the agent contract forbids.
+		if listed["summary"] != entry.Summary {
+			t.Errorf("%q: JSON summary %q, table says %q", entry.Name, listed["summary"], entry.Summary)
+		}
+		if listed["usage"] == "" {
+			t.Errorf("%q: JSON help carries no usage", entry.Name)
 		}
 	}
 	if len(document.Commands) != len(commands) {
 		t.Errorf("JSON help lists %d commands, the table has %d", len(document.Commands), len(commands))
+	}
+
+	// The two global options were written down twice, and only the human half
+	// is watched by a probe. One table now, so the renderings cannot disagree.
+	if len(document.GlobalOptions) != len(globalOptions) {
+		t.Errorf("JSON help lists %d global options, the table has %d", len(document.GlobalOptions), len(globalOptions))
+	}
+	for _, option := range globalOptions {
+		if document.GlobalOptions[option.Flag] != option.Summary {
+			t.Errorf("%s: JSON says %q, table says %q", option.Flag, document.GlobalOptions[option.Flag], option.Summary)
+		}
+		if !strings.Contains(human.String(), option.Summary) {
+			t.Errorf("%s: the human help does not carry the table's description", option.Flag)
+		}
 	}
 }
 
