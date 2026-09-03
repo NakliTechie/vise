@@ -2,6 +2,7 @@ package vise
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -120,6 +121,51 @@ timeout = 30
 		}
 		if len(outcome.Metrics) != 0 {
 			t.Errorf("a metric was evaluated on a verify that ran one probe: %#v", outcome.Metrics)
+		}
+	})
+}
+
+// DiffRuns explains a divergence, and it used to walk the baseline's artifact
+// list alone. Its two sibling renderers walk the union. An artifact on only one
+// side fell through to the bare string "observation differs", which names
+// nothing an operator could act on.
+//
+// The case is unreachable through the CLI today — the manifest's `files` list
+// is part of the probe definition, so adding or removing one is caught as
+// definition drift three functions earlier. That guard is what makes this safe,
+// not this function, and a guard three functions away is not a thing to rely on
+// for the quality of an error message.
+func TestTheExplanationNamesAnArtifactOnEitherSide(t *testing.T) {
+	root := testGitRepo(t)
+
+	t.Run("the run produced one the baseline has no record of", func(t *testing.T) {
+		expected := ProbeLock{Exit: 0, Stdout: "sha256:out", Stderr: "sha256:err", Files: map[string]string{}}
+		got := RunResult{
+			Exit:   0,
+			Stdout: Capture{Hash: "sha256:out"},
+			Stderr: Capture{Hash: "sha256:err"},
+			Files:  map[string]Capture{"out/surprise.txt": {Hash: "sha256:new"}},
+		}
+		detail := DiffRuns(root, expected, got)
+		if !strings.Contains(detail, "out/surprise.txt") {
+			t.Errorf("the explanation does not name the artifact: %q", detail)
+		}
+	})
+
+	t.Run("the baseline records one the run did not produce", func(t *testing.T) {
+		expected := ProbeLock{
+			Exit: 0, Stdout: "sha256:out", Stderr: "sha256:err",
+			Files: map[string]string{"out/expected.txt": "sha256:old"},
+		}
+		got := RunResult{
+			Exit:   0,
+			Stdout: Capture{Hash: "sha256:out"},
+			Stderr: Capture{Hash: "sha256:err"},
+			Files:  map[string]Capture{},
+		}
+		detail := DiffRuns(root, expected, got)
+		if !strings.Contains(detail, "out/expected.txt") {
+			t.Errorf("the explanation does not name the artifact: %q", detail)
 		}
 	})
 }

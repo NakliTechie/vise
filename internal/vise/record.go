@@ -631,10 +631,25 @@ func DiffRuns(root string, expected ProbeLock, got RunResult) string {
 			return diff
 		}
 	}
-	for _, path := range sortedKeys(expected.Files) {
-		actual := got.Files[path]
-		if expected.Files[path] != actual.Hash {
-			if diff := captureDiff(root, "file/"+path, expected.Files[path], expected.FilesLarge[path], actual); diff != "" {
+	// The union of both sides, not the baseline's alone. An artifact the run
+	// produced and the baseline does not have is currently unreachable — the
+	// manifest's `files` list is part of the probe definition, so adding one is
+	// caught as definition drift before this renders anything. That guard lives
+	// three functions away, and if it ever moves, this loop's answer degrades to
+	// the bare string below with no indication which artifact it means.
+	//
+	// The two sibling renderers already walk the union. This one reading the
+	// same situation differently is an asymmetry a reader assumes is not there.
+	for _, path := range sortedUnionKeys(expected.Files, got.Files) {
+		want, inLock := expected.Files[path]
+		actual, inRun := got.Files[path]
+		switch {
+		case !inLock:
+			return fmt.Sprintf("file/%s: the run produced it and the baseline has no record of it", path)
+		case !inRun:
+			return fmt.Sprintf("file/%s: the baseline records it and the run produced nothing", path)
+		case want != actual.Hash:
+			if diff := captureDiff(root, "file/"+path, want, expected.FilesLarge[path], actual); diff != "" {
 				return diff
 			}
 		}
@@ -782,4 +797,22 @@ func captureStableFingerprint(root string, manifest Manifest) (Fingerprint, erro
 		return Fingerprint{}, fmt.Errorf("environment fingerprint is not deterministic: %s; a fingerprint command must print the same bytes every time, or every later run reports environment drift against a toolchain that never moved", mismatch)
 	}
 	return first, nil
+}
+
+// sortedUnionKeys returns every key in either map, in a stable order. Several
+// renderers built this by hand and one of them built only half of it.
+func sortedUnionKeys[A any, B any](a map[string]A, b map[string]B) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	for key := range a {
+		seen[key] = true
+	}
+	for key := range b {
+		seen[key] = true
+	}
+	keys := make([]string, 0, len(seen))
+	for key := range seen {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
