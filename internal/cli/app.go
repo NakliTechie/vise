@@ -241,44 +241,87 @@ func runInit(args []string, root string, jsonMode bool, stdout, stderr io.Writer
 	return vise.ExitOK
 }
 
-func runRecord(args []string, root string, jsonMode bool, stdout, stderr io.Writer) int {
+type recordFlags struct {
+	allowDirty bool
+	reviewed   bool
+	preview    bool
+	accept     string
+	acceptSet  bool
+}
+
+func parseRecordFlags(args []string) (recordFlags, error) {
+	var flags recordFlags
 	fs := flag.NewFlagSet("record", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	allowDirty := fs.Bool("allow-dirty", false, "allow recording a dirty work tree")
-	reviewed := fs.Bool("i-reviewed-the-diff", false, "accept overwriting the current lockfile")
-	preview := fs.Bool("preview", false, "run the passes and show the candidate diff and digest without writing")
-	accept := fs.String("accept", "", "write the candidate only if its digest equals this value")
+	fs.BoolVar(&flags.allowDirty, "allow-dirty", false, "allow recording a dirty work tree")
+	fs.BoolVar(&flags.reviewed, "i-reviewed-the-diff", false, "accept overwriting the current lockfile")
+	fs.BoolVar(&flags.preview, "preview", false, "run the passes and show the candidate diff and digest without writing")
+	fs.StringVar(&flags.accept, "accept", "", "write the candidate only if its digest equals this value")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
 		if err == nil {
 			err = fmt.Errorf("record accepts no positional arguments")
 		}
+		return recordFlags{}, err
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "accept" {
+			flags.acceptSet = true
+		}
+	})
+	return flags, nil
+}
+
+func validateRecordFlags(flags recordFlags) error {
+	if flags.preview && flags.accept != "" {
+		return fmt.Errorf("--preview and --accept are mutually exclusive")
+	}
+	if flags.acceptSet && flags.accept == "" {
+		return fmt.Errorf("--accept needs the candidate digest printed by --preview")
+	}
+	return nil
+}
+
+func chooseRecordRoute(flags recordFlags) vise.RecordOptions {
+	opts := vise.RecordOptions{AllowDirty: flags.allowDirty, ReviewedDiff: flags.reviewed}
+	switch {
+	case flags.preview:
+		opts.Preview = true
+	case flags.accept != "":
+		opts.Accept = flags.accept
+	}
+	return opts
+}
+
+func wireRecordConfirmation(opts *vise.RecordOptions, jsonMode bool, stdout io.Writer) {
+	if !opts.ReviewedDiff || jsonMode {
+		return
+	}
+	opts.BeforeOverwrite = func(diff string) error {
+		fmt.Fprintln(stdout, "BEHAVIOR DIFF UNDER REVIEW")
+		fmt.Fprintln(stdout, terminalSafe(diff, true))
+		return nil
+	}
+}
+
+func runRecord(args []string, root string, jsonMode bool, stdout, stderr io.Writer) int {
+	flags, err := parseRecordFlags(args)
+	if err != nil {
 		return renderSimpleError("record", err.Error(), jsonMode, stdout, stderr)
 	}
 	manifest, manifestBytes, err := vise.LoadManifest(root)
 	if err != nil {
 		return renderOperatorError("record", err.Error(), jsonMode, stdout, stderr)
 	}
-	if *preview && *accept != "" {
-		return renderSimpleError("record", "--preview and --accept are mutually exclusive", jsonMode, stdout, stderr)
+	if err := validateRecordFlags(flags); err != nil {
+		return renderSimpleError("record", err.Error(), jsonMode, stdout, stderr)
 	}
-	acceptSet := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "accept" {
-			acceptSet = true
-		}
-	})
-	if acceptSet && *accept == "" {
-		return renderSimpleError("record", "--accept needs the candidate digest printed by --preview", jsonMode, stdout, stderr)
-	}
-	opts := vise.RecordOptions{AllowDirty: *allowDirty, ReviewedDiff: *reviewed, Preview: *preview, Accept: *accept}
-	if *reviewed && !jsonMode {
-		opts.BeforeOverwrite = func(diff string) error {
-			fmt.Fprintln(stdout, "BEHAVIOR DIFF UNDER REVIEW")
-			fmt.Fprintln(stdout, terminalSafe(diff, true))
-			return nil
-		}
-	}
+	opts := chooseRecordRoute(flags)
+	wireRecordConfirmation(&opts, jsonMode, stdout)
 	result := vise.Record(root, manifest, manifestBytes, opts)
+	return renderRecordResult(result, manifest, flags.preview, jsonMode, stdout, stderr)
+}
+
+func renderRecordResult(result vise.RecordResult, manifest vise.Manifest, preview, jsonMode bool, stdout, stderr io.Writer) int {
 	if jsonMode {
 		extra := map[string]any{}
 		if result.ReviewDiff != "" {
@@ -289,7 +332,7 @@ func runRecord(args []string, root string, jsonMode bool, stdout, stderr io.Writ
 		}
 		return writeOutcomeJSON(stdout, result.Outcome, extra)
 	}
-	if *preview && result.Outcome.Exit == vise.ExitOK {
+	if preview && result.Outcome.Exit == vise.ExitOK {
 		fmt.Fprintln(stdout, "CANDIDATE BASELINE — no baseline state written (probes ran; declared artifacts were regenerated)")
 		if result.ReviewDiff != "" {
 			fmt.Fprintln(stdout, terminalSafe(result.ReviewDiff, true))
