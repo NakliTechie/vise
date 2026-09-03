@@ -62,6 +62,19 @@ func GitDirty(root string) (bool, error) {
 type WorkspaceSnapshot struct {
 	Tracked   string
 	Untracked map[string]string
+	// Git holds the parts of the repository's own state that the rest of this
+	// snapshot trusts: HEAD, and the ignore rules that decide which files the
+	// untracked scan even looks at.
+	//
+	// Without it the check could be walked past with three ordinary commands.
+	// A probe stages its edit, writes a tree, commits it, and moves HEAD onto
+	// that commit; the working tree now matches the new HEAD exactly, so the
+	// diff against HEAD sees nothing and vise reports a clean run. The same
+	// shape applies to .git/info/exclude: a probe that adds a pattern there
+	// makes its own strays invisible to `git ls-files --others
+	// --exclude-standard`. Both were found by a cold read, and the first was
+	// reproduced before this field existed.
+	Git string
 }
 
 // ChangedUntracked names the paths that appeared, vanished, or changed
@@ -102,7 +115,11 @@ func GitWorkspaceSnapshot(root string, exclude []string) (WorkspaceSnapshot, err
 	if err != nil {
 		return WorkspaceSnapshot{}, fmt.Errorf("snapshot tracked files: %w", err)
 	}
-	snapshot := WorkspaceSnapshot{Tracked: HashBytes(data)}
+	gitState, err := gitOwnState(root)
+	if err != nil {
+		return WorkspaceSnapshot{}, err
+	}
+	snapshot := WorkspaceSnapshot{Tracked: HashBytes(data), Git: gitState}
 
 	skip := make(map[string]bool, len(exclude))
 	for _, rel := range exclude {
@@ -263,4 +280,39 @@ func GitTrackedPaths(root string, rels []string) ([]string, error) {
 		}
 	}
 	return tracked, nil
+}
+
+// gitOwnState digests the repository state this snapshot depends on: the
+// commit the tracked diff is taken against, and the ignore rules that decide
+// which files the untracked scan reports. A probe that changes either one
+// changes what "the checkout is unchanged" means, without changing a file the
+// snapshot would otherwise look at.
+//
+// The config file is in there because core.excludesFile points the ignore
+// rules somewhere else, and a probe that repoints it has the same effect as
+// editing the rules directly.
+func gitOwnState(root string) (string, error) {
+	digest := sha256.New()
+
+	head, err := gitOutput(root, "rev-parse", "HEAD")
+	if err != nil {
+		// A repository with no commits yet has no HEAD, and that is a state
+		// vise supports: record refuses it for other reasons, and a probe run
+		// through `vise run` should not fail here.
+		head = ""
+	}
+	writeHashPart(digest, "head", []byte(head))
+
+	gitDir, err := gitOutput(root, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return "", fmt.Errorf("locate the git directory: %w", err)
+	}
+	for _, rel := range []string{filepath.Join("info", "exclude"), "config"} {
+		data, err := os.ReadFile(filepath.Join(gitDir, rel))
+		if err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("read git %s: %w", rel, err)
+		}
+		writeHashPart(digest, rel, data)
+	}
+	return hex.EncodeToString(digest.Sum(nil)), nil
 }

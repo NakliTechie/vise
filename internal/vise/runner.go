@@ -82,6 +82,8 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 		switch {
 		case err != nil:
 			mutation = err.Error()
+		case before.Git != after.Git:
+			mutation = "probe modified git's own state (HEAD, the ignore rules, or the config); the checkout is judged against those, so changing them changes what unchanged means"
 		case before.Tracked != after.Tracked:
 			mutation = "probe modified tracked files"
 		default:
@@ -137,6 +139,9 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 	after, err := GitWorkspaceSnapshot(r.Root, nil)
 	if err != nil {
 		return MetricResult{Value: value, ToolVersion: version, HarnessError: err.Error()}
+	}
+	if before.Git != after.Git {
+		return MetricResult{Value: value, ToolVersion: version, HarnessError: "metric modified git's own state (HEAD, the ignore rules, or the config)"}
 	}
 	if before.Tracked != after.Tracked {
 		return MetricResult{Value: value, ToolVersion: version, HarnessError: "metric modified tracked files"}

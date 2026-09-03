@@ -132,6 +132,9 @@ func CaptureFingerprint(root string, manifest Manifest) (Fingerprint, error) {
 	if err != nil {
 		return Fingerprint{}, err
 	}
+	if before.Git != after.Git {
+		return Fingerprint{}, fmt.Errorf("environment fingerprint command modified git's own state")
+	}
 	if before.Tracked != after.Tracked {
 		return Fingerprint{}, fmt.Errorf("environment fingerprint command modified tracked files")
 	}

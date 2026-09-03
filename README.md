@@ -155,6 +155,8 @@ substitutes for each other; defects live where they fail to overlap.
 
 **Determinism is the price of entry.** A probe that cannot be made deterministic gets normalized or it is not a probe. [RUNTIMES.md](RUNTIMES.md) catalogues the traps per language and runtime.
 
+**vise is not an adversary.** A probe runs with `VISE=1`, inside the repository, where the baseline is a committed file it can read. A program written to return its recorded output when `VISE=1` and its new behavior otherwise gates green forever, and no probe can catch that, because the probe is what it is lying to. vise defends a cooperative agent against its own mistakes — that is the whole claim. What catches deliberate deception is the same thing that catches an edited lockfile: a human reading the diff, and CI recomputing the hash from a trusted branch.
+
 **The judge lives outside the loop.** `vise.toml`, `vise.lock`, `.vise/blobs/`, and the local `.vise/journal.jsonl` are operator territory: the gated agent reads them and never writes them. vise cannot authenticate its caller and says so — your harness policy must deny the agent writes to those paths and deny `vise record` mid-campaign.
 
 **Containment ends at the session boundary.** Probes run in their own process group; vise kills that group on timeout and again when the shell exits, bounds the wait on output pipes, refuses any run that touched evaluator state, and compares the tracked tree around every judged run. A child that starts a *new session* escapes all of it. That limit is stated in [SPEC §2.2](SPEC.md#22-probe-execution-contract) rather than papered over.
