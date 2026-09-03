@@ -33,6 +33,23 @@ that first verdict you cannot tell a failure you caused from one that was
 waiting for you, and the two have opposite responses: fix your change, or stop
 and report a blocked repository. It costs one run.
 
+**Know which binary you are running.** `vise` comes from your `PATH`, and the
+one there may be older than the repository, or built from somebody's dirty
+tree. `vise version --json` tells you: `version`, `revision`, and `modified`.
+
+- Put the revision and `modified` in your final report, always. An operator
+  reading a green gate needs to know which build produced it, and that costs
+  you one line.
+- If `modified` is `true`, the binary was built from a tree that had
+  uncommitted changes, so its behaviour matches no commit. Say so; that is
+  information an operator will want and cannot recover later.
+- If the tool behaves oddly, or a lockfile will not parse, or you are told the
+  baseline was `written by a newer vise`, the tool is the suspect and not the
+  code. Stop and report the revision.
+
+You are not expected to build or install vise. Which binary is on the `PATH`
+is the operator's decision; saying which one you used is yours.
+
 ## The loop
 
 ```sh
@@ -106,6 +123,20 @@ in one of those, the tool says `next.action: human` rather than `fix_probe`,
 and your move is to stop and report. You should never be in a position where
 obeying `next.action` means breaking a rule; if you ever are, that is a defect
 in vise and worth saying so.
+
+**Exit 2 has two halves, and one field separates them.** The JSON failure
+carries `operator: true` when the repair lives in a file you may not write.
+Read that rather than matching on the message:
+
+| `next.action` | `operator` | whose repair | what you do |
+|---|---|---|---|
+| `fix_probe` | absent | yours | a probe command your change broke; fix your change |
+| `human` | `true` | the operator's | `vise.toml`, `vise.lock`, `.vise/blobs/`, the journal, or the recorded environment; stop and report |
+
+The message table below is for reading, not for branching. If you ever get
+`fix_probe` on a failure whose only repair is in one of those files, that is a
+defect in vise: say so, and stop rather than choosing which instruction to
+disobey.
 
 | message | cause | your move |
 |---|---|---|
@@ -211,7 +242,9 @@ careful.
 
 ## When you finish
 
-State plainly, in this order: the gate's final verdict and exit code; what you
-changed; anything you changed that no probe covers; anything that looked wrong
-while you were in there; what you could not do and why. If the gate is not green, say that first. A red gate is never "done", and
+State plainly, in this order: the gate's final verdict and exit code; the
+`revision` and `modified` from `vise version --json`, so a reader knows which
+build produced that verdict; what you changed; anything you changed that no
+probe covers; anything that looked wrong while you were in there; what you
+could not do and why. If the gate is not green, say that first. A red gate is never "done", and
 neither is a green gate you reached by narrowing what is checked.
