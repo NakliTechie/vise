@@ -383,7 +383,11 @@ func runVerify(args []string, root string, jsonMode, gate bool, stdout, stderr i
 	if !result.RerunRefused && result.Outcome.Lock != "" {
 		if result.Commit != "" {
 			if err := vise.JournalVerifyResult(root, name, result); err != nil {
-				result.Outcome.AddFailure("journal", vise.Failure{Class: "harness", Detail: err.Error()})
+				// The journal is on the protected surface: the rerun budget is
+				// derived from it, so an agent may not write it. Without the
+				// flag this said fix_probe, which is an instruction the agent
+				// contract forbids it from following.
+				result.Outcome.AddFailure("journal", vise.Failure{Class: "harness", Detail: err.Error(), Operator: true})
 				result.Outcome.Finalize()
 				result.Outcome.Cmd = name
 			}

@@ -20,14 +20,21 @@ type RunResult struct {
 	Files        map[string]Capture
 	TimedOut     bool
 	HarnessError string
+	// HarnessOperator marks a harness error whose repair is in a file the
+	// agent contract forbids an agent from writing. It travels with the result
+	// rather than being recovered from the message, because matching on a
+	// message is what the contract tells agents not to do, and a guard that
+	// scanned literal strings could not see an error built at run time.
+	HarnessOperator bool
 }
 
 type MetricResult struct {
-	Value        float64
-	ToolVersion  string
-	Stdout       Capture
-	Stderr       Capture
-	HarnessError string
+	Value           float64
+	ToolVersion     string
+	Stdout          Capture
+	Stderr          Capture
+	HarnessError    string
+	HarnessOperator bool
 }
 
 type Runner struct {
@@ -56,7 +63,7 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 	}
 	artifacts := newDeclaredArtifacts(r.Root, probe.Files)
 	if err := artifacts.reset(); err != nil {
-		return RunResult{HarnessError: err.Error()}
+		return RunResult{HarnessError: err.Error(), HarnessOperator: true}
 	}
 
 	result := r.runShell(probe.ID, probe.Run, probe.Timeout, probe.Env)
@@ -109,7 +116,7 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 	}
 	result := r.runShell(metric.ID, metric.Run, metric.Timeout, metric.Env)
 	if result.HarnessError != "" {
-		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: result.HarnessError}
+		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: result.HarnessError, HarnessOperator: result.HarnessOperator}
 	}
 	if result.Exit != 0 {
 		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: fmt.Sprintf("metric exited %d", result.Exit)}
@@ -399,4 +406,17 @@ func firstShellDiagnostic(stderr Capture) string {
 		return line
 	}
 	return ""
+}
+
+// harnessFailure is the one conversion from a run's harness error to the
+// failure an outcome carries. Eight call sites built this struct by hand and
+// every one of them dropped the ownership flag, so the gate answered fix_probe
+// — "repair the probe your change broke" — for a tracked declared artifact the
+// agent had not touched and could not fix.
+func (r RunResult) harnessFailure() Failure {
+	return Failure{Class: "harness", Detail: r.HarnessError, Operator: r.HarnessOperator}
+}
+
+func (m MetricResult) harnessFailure() Failure {
+	return Failure{Class: "harness", Detail: m.HarnessError, Operator: m.HarnessOperator}
 }

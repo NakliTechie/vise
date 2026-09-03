@@ -110,7 +110,7 @@ func newRecordRun(root string, manifest Manifest, manifestBytes []byte, opts Rec
 
 func (r *recordRun) checkManifest() bool {
 	if len(r.manifest.Probes) == 0 {
-		r.result.Outcome = harnessWithNext("record", "manifest", "manifest must declare at least one [[probe]] before recording", Next{Action: NextHuman, Detail: "an operator declares a probe in vise.toml, commits the harness, and reruns vise record"})
+		r.result.Outcome = harnessForOperatorSaying("record", "manifest", "manifest must declare at least one [[probe]] before recording", "an operator declares a probe in vise.toml, commits the harness, and reruns vise record")
 		return false
 	}
 	return true
@@ -124,7 +124,7 @@ func (r *recordRun) checkWorkingTree() bool {
 	}
 	r.dirty = dirty
 	if dirty && !r.opts.AllowDirty {
-		r.result.Outcome = harnessWithNext("record", "working-tree", "record requires a clean working tree; commit or stash changes, or pass --allow-dirty", Next{Action: NextHuman, Detail: "commit or stash the current tree, or rerun record with --allow-dirty"})
+		r.result.Outcome = harnessForOperatorSaying("record", "working-tree", "record requires a clean working tree; commit or stash changes, or pass --allow-dirty", "commit or stash the current tree, or rerun record with --allow-dirty")
 		return false
 	}
 	return true
@@ -134,12 +134,12 @@ func (r *recordRun) loadBaselineForReview() bool {
 	oldLock, _, oldErr := LoadLockfile(r.root)
 	r.hasOld = oldErr == nil
 	if oldErr != nil && !os.IsNotExist(oldErr) {
-		r.result.Outcome = harnessOnly("record", "vise.lock", oldErr.Error())
+		r.result.Outcome = harnessForOperator("record", "vise.lock", oldErr.Error())
 		return false
 	}
 	r.oldLock = oldLock
 	if r.hasOld && !r.opts.ReviewedDiff && !r.opts.Preview && r.opts.Accept == "" {
-		r.result.Outcome = harnessWithNext("record", "operator-review", "vise.lock already exists; preview the behavior diff with --preview and accept its digest with --accept, or rerun with --i-reviewed-the-diff", Next{Action: NextHuman, Detail: "run record --preview, review the diff, then record --accept <digest>; or rerun with --i-reviewed-the-diff to review and write in one step"})
+		r.result.Outcome = harnessForOperatorSaying("record", "operator-review", "vise.lock already exists; preview the behavior diff with --preview and accept its digest with --accept, or rerun with --i-reviewed-the-diff", "run record --preview, review the diff, then record --accept <digest>; or rerun with --i-reviewed-the-diff to review and write in one step")
 		return false
 	}
 	return true
@@ -148,7 +148,7 @@ func (r *recordRun) loadBaselineForReview() bool {
 func (r *recordRun) captureEnvironment() bool {
 	fingerprint, err := captureStableFingerprint(r.root, r.manifest)
 	if err != nil {
-		r.result.Outcome = harnessWithNext("record", "fingerprint", err.Error(), Next{Action: NextHuman, Detail: "repair the [env] fingerprint command in vise.toml; an agent may not write it"})
+		r.result.Outcome = harnessForOperatorSaying("record", "fingerprint", err.Error(), "repair the [env] fingerprint command in vise.toml; an agent may not write it")
 		return false
 	}
 	r.fingerprint = fingerprint
@@ -163,9 +163,9 @@ func (r *recordRun) resolveHead() bool {
 		// fix_probe — telling an agent to repair a probe when the actual
 		// situation is that nothing has ever been committed. Say what it is.
 		if !GitHasCommits(r.root) {
-			r.result.Outcome = harnessWithNext("record", "git",
+			r.result.Outcome = harnessForOperatorSaying("record", "git",
 				"this repository has no commits, so there is nothing to record a baseline against",
-				Next{Action: NextHuman, Detail: "commit the harness first; a baseline freezes behavior at a commit somebody can return to"})
+				"commit the harness first; a baseline freezes behavior at a commit somebody can return to")
 			return false
 		}
 		r.result.Outcome = harnessOnly("record", "git", err.Error())
@@ -229,7 +229,7 @@ func (r *recordRun) assembleLockfile() bool {
 func (r *recordRun) computeCandidate() bool {
 	candidateBytes, err := CanonicalJSON(r.lock)
 	if err != nil {
-		r.result.Outcome = harnessOnly("record", "persistence", err.Error())
+		r.result.Outcome = harnessForOperator("record", "persistence", err.Error())
 		return false
 	}
 	r.result.Candidate = HashBytes(candidateBytes)
@@ -243,9 +243,9 @@ func (r *recordRun) computeCandidate() bool {
 		// the honest path is to delete vise.lock and record afresh, which says
 		// out loud that nothing was compared.
 		if len(incomplete) > 0 {
-			r.result.Outcome = harnessWithNext("record", "operator-review",
+			r.result.Outcome = harnessForOperatorSaying("record", "operator-review",
 				"the behavior diff is incomplete, so accepting it would not be a review: "+strings.Join(incomplete, "; "),
-				Next{Action: NextHuman, Detail: "restore the recorded blobs (they are committed) and rerun, or delete vise.lock and record a fresh baseline"})
+				"restore the recorded blobs (they are committed) and rerun, or delete vise.lock and record a fresh baseline")
 			return false
 		}
 	}
@@ -267,7 +267,7 @@ func (r *recordRun) finishedAfterPreview() bool {
 
 func (r *recordRun) checkAcceptance() bool {
 	if r.opts.Accept != "" && r.opts.Accept != r.result.Candidate {
-		r.result.Outcome = harnessWithNext("record", "operator-review", "candidate "+r.result.Candidate+" differs from the accepted "+r.opts.Accept+"; the tree or environment changed since the preview", Next{Action: NextHuman, Detail: "rerun record --preview and review the new diff"})
+		r.result.Outcome = harnessForOperatorSaying("record", "operator-review", "candidate "+r.result.Candidate+" differs from the accepted "+r.opts.Accept+"; the tree or environment changed since the preview", "rerun record --preview and review the new diff")
 		return false
 	}
 	return true
@@ -276,7 +276,7 @@ func (r *recordRun) checkAcceptance() bool {
 func (r *recordRun) reviewOverwrite() bool {
 	if r.hasOld && r.opts.BeforeOverwrite != nil {
 		if err := r.opts.BeforeOverwrite(r.result.ReviewDiff); err != nil {
-			r.result.Outcome = harnessOnly("record", "operator-review", err.Error())
+			r.result.Outcome = harnessForOperator("record", "operator-review", err.Error())
 			return false
 		}
 	}
@@ -286,7 +286,7 @@ func (r *recordRun) reviewOverwrite() bool {
 func (r *recordRun) writeGeneration() bool {
 	lockBytes, err := WriteGeneration(r.root, r.lock, r.blobs)
 	if err != nil {
-		r.result.Outcome = harnessOnly("record", "persistence", err.Error())
+		r.result.Outcome = harnessForOperator("record", "persistence", err.Error())
 		return false
 	}
 	r.lockBytes = lockBytes
@@ -296,7 +296,7 @@ func (r *recordRun) writeGeneration() bool {
 func (r *recordRun) computeTamperHash() bool {
 	lockHash, err := TamperHash(r.root, r.manifestBytes, r.lockBytes)
 	if err != nil {
-		r.result.Outcome = harnessOnly("record", "tamper-hash", err.Error())
+		r.result.Outcome = harnessForOperator("record", "tamper-hash", err.Error())
 		return false
 	}
 	r.lockHash = lockHash
@@ -307,7 +307,7 @@ func (r *recordRun) appendJournal() bool {
 	declared := len(r.manifest.Probes) + len(r.manifest.Metrics)
 	counts := Counts{Declared: declared, Pass: declared}
 	if err := appendJournal(r.root, JournalEvent{Event: "record", Commit: r.commit, Dirty: r.dirty, Counts: &counts, Lock: r.lockHash}); err != nil {
-		r.result.Outcome = harnessOnly("record", "journal", "baseline was written but journal append failed: "+err.Error())
+		r.result.Outcome = harnessForOperator("record", "journal", "baseline was written but journal append failed: "+err.Error())
 		return false
 	}
 	return true
@@ -327,7 +327,7 @@ func runRecordSelfTest(root string, manifest Manifest, outcome *Outcome) (record
 	for _, probe := range manifest.Probes {
 		run := runner.RunProbe(probe, true)
 		if run.HarnessError != "" {
-			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: run.HarnessError})
+			outcome.AddFailure(probe.ID, run.harnessFailure())
 		} else {
 			first.probes[probe.ID] = run
 		}
@@ -335,7 +335,7 @@ func runRecordSelfTest(root string, manifest Manifest, outcome *Outcome) (record
 	for _, metric := range manifest.Metrics {
 		run := runner.RunMetric(metric)
 		if run.HarnessError != "" {
-			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: run.HarnessError})
+			outcome.AddFailure(metric.ID, run.harnessFailure())
 		} else {
 			first.metrics[metric.ID] = run
 		}
@@ -349,7 +349,7 @@ func runRecordSelfTest(root string, manifest Manifest, outcome *Outcome) (record
 	for _, probe := range manifest.Probes {
 		run := runner.RunProbe(probe, true)
 		if run.HarnessError != "" {
-			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: run.HarnessError})
+			outcome.AddFailure(probe.ID, run.harnessFailure())
 			continue
 		}
 		if !RunResultsEqual(first.probes[probe.ID], run) {
@@ -363,7 +363,7 @@ func runRecordSelfTest(root string, manifest Manifest, outcome *Outcome) (record
 	for _, metric := range manifest.Metrics {
 		run := runner.RunMetric(metric)
 		if run.HarnessError != "" {
-			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: run.HarnessError})
+			outcome.AddFailure(metric.ID, run.harnessFailure())
 			continue
 		}
 		firstMetric := first.metrics[metric.ID]
@@ -413,9 +413,18 @@ func harnessForOperator(cmd, id, detail string) Outcome {
 	return outcome
 }
 
-func harnessWithNext(cmd, id, detail string, next Next) Outcome {
-	outcome := harnessOnly(cmd, id, detail)
-	outcome.Next = next
+// harnessForOperatorSaying is harnessForOperator with a remedy written for
+// this particular failure rather than the generic one.
+//
+// It replaces a harnessWithNext that took the whole Next as a parameter. Every
+// one of its eight callers passed NextHuman and differed only in the detail, so
+// the action parameter bought nothing and cost something real: each call site
+// routed independently, none of them set Operator, and eight operator-owned
+// failures shipped telling an agent to read a field that was not there. The
+// action is not a parameter any more, so a caller cannot get it wrong.
+func harnessForOperatorSaying(cmd, id, detail, nextDetail string) Outcome {
+	outcome := harnessForOperator(cmd, id, detail)
+	outcome.Next.Detail = nextDetail
 	return outcome
 }
 

@@ -119,7 +119,8 @@ func prepareVerifyChecks(manifest Manifest, probeID string, outcome *Outcome) ([
 	if len(manifest.Probes) == 0 {
 		// Green requires every declared probe to pass; with none declared there
 		// is nothing to judge, and a 0/0 green would be a verdict without a judge.
-		failure := harnessWithNext("verify", "manifest", "manifest declares no [[probe]]; nothing can be judged", Next{Action: NextHuman, Detail: "an operator declares a probe in vise.toml and records a baseline"})
+		failure := harnessForOperator("verify", "manifest", "manifest declares no [[probe]]; nothing can be judged")
+		failure.Next.Detail = "an operator declares a probe in vise.toml and records a baseline"
 		return nil, nil, &failure
 	}
 	selected, checkSet, err := selectVerifyChecks(manifest, probeID)
@@ -134,14 +135,14 @@ func prepareVerifyChecks(manifest Manifest, probeID string, outcome *Outcome) ([
 func checkVerifyRerunLimit(root string, state verifyState, checkSet []string) (*Outcome, bool) {
 	refused, detail, err := RerunLimitReached(root, state.commit, state.lockHash, checkSet)
 	if err != nil {
-		failure := harnessOnly("verify", "journal", err.Error())
+		failure := harnessForOperator("verify", "journal", err.Error())
 		return &failure, false
 	}
 	if !refused {
 		return nil, false
 	}
-	blocked := harnessOnly("verify", "rerun-limit", detail)
-	blocked.Next = Next{Action: NextHuman, Detail: "operator intervention is required before another rerun"}
+	blocked := harnessForOperator("verify", "rerun-limit", detail)
+	blocked.Next.Detail = "operator intervention is required before another rerun"
 	return &blocked, true
 }
 
@@ -166,7 +167,7 @@ func validateVerifyInputs(root string, outcome *Outcome, manifest Manifest, lock
 
 	outcome.Finalize()
 	if _, ok := outcome.Failures["fingerprint"]; ok {
-		outcome.Next = Next{Action: NextHuman, Detail: "restore the recorded toolchain or ask an operator to re-record on this machine"}
+		outcome.Next.Detail = "restore the recorded toolchain or ask an operator to re-record on this machine"
 	}
 	// No probe ran, so nothing passed; the count must not imply otherwise.
 	outcome.Counts.Pass = 0
@@ -199,7 +200,7 @@ func replayProbes(root string, outcome *Outcome, runner Runner, probes []Probe, 
 		expected := expectedProbes[probe.ID]
 		first := runner.RunProbe(probe, true)
 		if first.HarnessError != "" {
-			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: first.HarnessError})
+			outcome.AddFailure(probe.ID, first.harnessFailure())
 			continue
 		}
 		if RunMatchesLock(first, expected) {
@@ -207,7 +208,7 @@ func replayProbes(root string, outcome *Outcome, runner Runner, probes []Probe, 
 		}
 		second := runner.RunProbe(probe, true)
 		if second.HarnessError != "" {
-			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: second.HarnessError})
+			outcome.AddFailure(probe.ID, second.harnessFailure())
 			continue
 		}
 		if RunResultsEqual(first, second) {
@@ -238,7 +239,7 @@ func evaluateMetrics(outcome *Outcome, runner Runner, metrics []Metric, expected
 		expected := expectedMetrics[metric.ID]
 		first := runner.RunMetric(metric)
 		if first.HarnessError != "" {
-			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: first.HarnessError})
+			outcome.AddFailure(metric.ID, first.harnessFailure())
 			continue
 		}
 		if first.ToolVersion != expected.ToolVersion {
@@ -248,7 +249,7 @@ func evaluateMetrics(outcome *Outcome, runner Runner, metrics []Metric, expected
 		if first.Value != expected.Value {
 			second := runner.RunMetric(metric)
 			if second.HarnessError != "" {
-				outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: second.HarnessError})
+				outcome.AddFailure(metric.ID, second.harnessFailure())
 				continue
 			}
 			if first.Value != second.Value || first.ToolVersion != second.ToolVersion {

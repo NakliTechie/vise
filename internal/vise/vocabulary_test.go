@@ -14,10 +14,10 @@ import (
 // default, leaving the agent with no defined next move. The constants make a
 // typo a compile error; this catches the literal that goes in beside them.
 func TestEveryNextActionIsInTheClosedVocabulary(t *testing.T) {
-	// Every emitted action now goes through a Next value, so one pattern
-	// covers the whole surface. harnessWithNext used to take the action as a
-	// bare positional string, where a scan could not tell it apart from the
-	// probe id beside it; it takes a Next now, which is why this is simple.
+	// Every emitted action now goes through a Next value or a named constant,
+	// so one pattern covers the whole surface. The helper that used to take an
+	// action as a parameter takes none: it always means human, so there is no
+	// action literal at those seven call sites for a scan to miss.
 	actionLiteral := regexp.MustCompile(`Action:\s*"([a-z_]+)"`)
 
 	roots := []string{filepath.Join("..", "vise"), filepath.Join("..", "cli")}

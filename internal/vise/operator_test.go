@@ -1,9 +1,11 @@
 package vise
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -197,4 +199,121 @@ func TestNoFixProbeActionPointsAtAFileTheAgentMayNotWrite(t *testing.T) {
 		t.Fatal("scanned no next actions; the pattern is not matching what the code writes")
 	}
 	t.Logf("scanned %d next actions", checked)
+}
+
+// Finalize decides next.action from the failures an outcome carries, and it
+// gets the operator question right: harness plus any operator-owned failure is
+// human, harness alone is fix_probe. Every bug in this area came from code
+// assigning a whole Next over the top of that decision afterwards.
+//
+// Eight of them shipped. A rerun refusal, an empty manifest, and seven record
+// failures all set next.action human by hand and left the operator field
+// absent — the field AGENTS.md tells an agent to read instead of matching on
+// the message. An agent that did as it was told saw no operator flag on a
+// refused rerun and read the fix_probe row: repair the probe your change broke.
+// It had not broken anything, and the repair was an operator's.
+//
+// So overriding the action is the thing to police, not the flag. A detail
+// override is fine: it changes the wording of the remedy, never the branch.
+// Anything that replaces the whole Next has to appear here with a reason.
+func TestNothingOverridesTheActionFinalizeChose(t *testing.T) {
+	allowed := map[string]string{
+		"record.go:264": "record --preview: no failure exists, so there is nothing for the operator flag to mark; human means an operator reviews a diff",
+		"record.go:378": "record's flake path: no harness failure exists, and a nondeterministic probe is usually a nondeterministic program, which an agent may fix",
+	}
+	// Not `outcome.Next`: the first version of this guard matched that literal
+	// name, and the very bug it was written for assigns to `blocked.Next`. It
+	// passed against the real defect, restored on purpose to check it. Match
+	// the field on any receiver instead, and skip the files that carry a
+	// different type entirely.
+	override := regexp.MustCompile(`\.Next\s*=\s*Next\{`)
+	skip := map[string]string{
+		"types.go":  "Finalize is the decision this guard protects",
+		"status.go": "StatusReport, not an Outcome: it carries no failures and no operator field",
+		"doctor.go": "DoctorReport, same",
+	}
+	for _, dir := range []string{filepath.Join("..", "vise"), filepath.Join("..", "cli")} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			if _, ok := skip[name]; ok {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for number, line := range strings.Split(string(data), "\n") {
+				if !override.MatchString(line) {
+					continue
+				}
+				site := fmt.Sprintf("%s:%d", name, number+1)
+				if _, ok := allowed[site]; !ok {
+					t.Errorf("%s replaces the whole Next that Finalize chose:\n\t%s\nSet Operator on the failure instead, so next.action and the operator field agree. If this really is neither, add the site here with a reason.", site, strings.TrimSpace(line))
+				}
+			}
+		}
+	}
+}
+
+// The third way this bug got in, after the two the guards above close: a
+// failure built with the right id and no Operator flag at all. The CLI's
+// journal-append failure shipped that way, and neither the literal-detail scan
+// nor the override guard could see it — nothing was overridden and the detail
+// was err.Error(), built at run time.
+//
+// These ids name the protected surface itself. A failure carrying one of them
+// is an operator's by definition, whatever its message says, so the id is the
+// thing to check. Only literal ids are scanned, which is exactly right: a
+// failure keyed by a probe id is a variable, so a probe some operator happened
+// to name "journal" is not swept up by this.
+func TestAFailureNamedForAProtectedFileIsMarkedAsTheOperatorsOwn(t *testing.T) {
+	protected := []string{
+		"journal",         // .vise/journal.jsonl, from which the rerun budget is derived
+		"manifest",        // vise.toml
+		"vise.lock",       // the baseline
+		"tamper-hash",     // the baseline again
+		"fingerprint",     // the [env] block of vise.toml
+		"rerun-limit",     // only an operator lifts it
+		"operator-review", // by name
+		"persistence",     // a write to .vise/ failed
+		"working-tree",    // commit or stash; not an agent's call
+	}
+	// A construction is either AddFailure("id", ...) or one of the harness
+	// helpers, whose second argument is the id.
+	built := regexp.MustCompile(`(?:AddFailure|harnessOnly|harnessForOperator|harnessForOperatorSaying)\((?:"[a-z]+", )?"([a-z.-]+)"`)
+	for _, dir := range []string{filepath.Join("..", "vise"), filepath.Join("..", "cli")} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for number, line := range strings.Split(string(data), "\n") {
+				match := built.FindStringSubmatch(line)
+				if match == nil || !slices.Contains(protected, match[1]) {
+					continue
+				}
+				// harnessOnly is the one that cannot be an operator's, by
+				// construction; the others either set the flag or take it.
+				marked := strings.Contains(line, "harnessForOperator") || strings.Contains(line, "Operator: true")
+				if !marked {
+					t.Errorf("%s:%d builds a failure named %q — a file an agent may not write — and does not mark it as the operator's:\n\t%s\nThe agent is told to read the operator field; without it this answers fix_probe.", name, number+1, match[1], strings.TrimSpace(line))
+				}
+			}
+		}
+	}
 }
