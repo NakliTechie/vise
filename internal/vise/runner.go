@@ -384,14 +384,20 @@ func strayFilesError(kind string, paths []string) string {
 // the command is the fallback, since it is what the reader will go and look
 // for either way.
 func launchFailureDetail(command string, stderr Capture) string {
-	if line := firstShellDiagnostic(stderr); line != "" {
-		return fmt.Sprintf("probe command could not be launched (exit 127): %s", line)
-	}
 	word := command
 	if fields := strings.Fields(command); len(fields) > 0 {
 		word = fields[0]
 	}
-	return fmt.Sprintf("probe command could not be launched (exit 127): %q is not on the probe's PATH; install it or name it by an absolute path", word)
+	// The remedy goes on both branches. It used to appear only when the shell
+	// said nothing useful, so the case where the shell *did* speak — the common
+	// one — lost the sentence telling the reader what to do about it. The
+	// README's claim that a missing tool is "exit 2 with the remedy in the
+	// message" was true of the rarer half.
+	remedy := fmt.Sprintf("install %s, or name it by an absolute path", word)
+	if line := firstShellDiagnostic(stderr); line != "" {
+		return fmt.Sprintf("probe command could not be launched (exit 127): %s; %s", line, remedy)
+	}
+	return fmt.Sprintf("probe command could not be launched (exit 127): %q is not on the probe's PATH; %s", word, remedy)
 }
 
 // firstShellDiagnostic returns the shell's own not-found line, bounded, or "".

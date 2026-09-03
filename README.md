@@ -31,7 +31,7 @@ job.
 
 ## Status
 
-v0.3, developed in the open, not yet packaged. Build from this checkout. The command surface is implemented and exercised by a committed harness; Windows, service probes, network enforcement, partial recording, and `vise map` are non-goals for v0 ([SPEC §8](SPEC.md#8-non-goals-v0)).
+v0.3, developed in the open, not yet packaged. Build from this checkout. The command surface is implemented and exercised by a committed harness; Service probes, network enforcement, partial recording, and `vise map` are non-goals for v0 ([SPEC §8](SPEC.md#8-non-goals-v0)); Windows is out of scope for a different reason, the POSIX process-group kill the probe lifecycle depends on ([SPEC §2.2](SPEC.md#22-probe-execution-contract)).
 
 ```sh
 go install ./cmd/vise     # Go 1.25.8+, git, a POSIX /bin/sh
@@ -40,14 +40,28 @@ vise version              # vise 0.3.0-dev
 
 ## Five minutes
 
-Inside the repository whose behavior you want to hold still:
+This runs. Every line is meant to be typed, in order, inside the repository
+whose behavior you want to hold still.
 
 ```sh
-vise status               # exit 0 whatever it finds; tells you what to do next
-vise init                 # writes a commented vise.toml and local-state ignores
+vise status               # tells you what to do next; exit 0 for any call it understands
+vise init                 # writes vise.toml, AGENTS.md, and the local-state ignores
 ```
 
-Declare at least one probe — a command whose output is identical every time it runs:
+`init` writes a commented manifest. Replace it with a probe of your own — a
+command whose output is identical every time it runs. Here the program under
+test is a one-line script, so the walkthrough is self-contained; yours is
+whatever you already build.
+
+```sh
+mkdir -p bin fixtures
+printf 'col\n1\n' > fixtures/in.csv
+printf '#!/bin/sh\nprintf "usage: mytool [--help]\\n"\n' > bin/mytool
+chmod +x bin/mytool
+```
+
+Now **replace** `vise.toml` — do not append to it, or `[vise]` is defined twice
+and the manifest will not parse:
 
 ```toml
 [vise]
@@ -63,16 +77,26 @@ network = "declared-off"  # a promise probes make; vise does not enforce it
 id = "cli-help"
 run = "./bin/mytool --help"
 timeout = 30
-deps  = ["fixtures/in.csv"]     # fixtures and wrappers, never the code under test
-files = ["out/result.json"]     # artifacts to hash; must be untracked
+deps = ["fixtures/in.csv"]  # fixtures and wrappers, never the code under test
 ```
 
-Commit the harness, freeze the baseline, commit that too:
+Commit everything the probe touches, freeze the baseline, commit that too.
+`record` needs a clean tree, so anything the probe reads has to be committed
+first — its `deps`, and the program itself:
 
 ```sh
-git add vise.toml AGENTS.md .gitignore && git commit -m "Add vise probes"
+git add vise.toml AGENTS.md .gitignore bin fixtures
+git commit -m "Add vise probes"
 vise record
 git add vise.lock .vise/blobs && git commit -m "Record behavior baseline"
+```
+
+If a probe writes an artifact you want hashed, declare it with `files` and
+ignore it — a declared artifact must be untracked, and an untracked file that
+git does not ignore makes the next `record` refuse a dirty tree:
+
+```sh
+echo 'out/' >> .gitignore     # before adding files = ["out/result.json"]
 ```
 
 Now run the gate after every focused change:
@@ -87,16 +111,19 @@ GATE RED [behavior] — 6/7: cli-help
 GATE INDETERMINATE [flake] — 6/7: convert-fixture
 ```
 
-`vise verify` explains a red gate with the first divergence. `vise run <probe>` executes one probe raw. [GUIDE.md](GUIDE.md) walks a whole campaign with the real output of every command, including the recovery paths.
+`vise verify` explains a red gate, printing a diff for every probe that
+diverged. `vise run <probe>` executes one probe and streams its output.
+[GUIDE.md](GUIDE.md) walks a whole campaign with the real output of every
+command, including the recovery paths.
 
 ## Built for the agent in the driver's seat
 
 vise's primary user is a coding agent mid-loop: context-poor, liable to be killed mid-turn, prone to rationalizing its own failures. Every interface decision follows from that.
 
-- **One perception act.** `vise status` renders the entire situation — manifest, lockfile, environment drift, baseline drift, rerun state, journal tail — in one bounded read. It exits 0 whatever it finds.
+- **One perception act.** `vise status` renders the entire situation — manifest, lockfile, environment drift, baseline drift, rerun state, journal tail — in one bounded read. It exits 0 whatever it finds, because it reports a red repository rather than failing red. A usage error is exit 2 like anywhere else: that is a complaint about the command line, not a report about the repository.
 - **Machine-decidable, not merely machine-readable.** `--json` on every command; every failing outcome carries a typed class, and every outcome carries one `next.action` from a closed vocabulary. A green outcome carries no classes and no failures, because there are none. The agent branches on the exit code and the class, never on prose.
 - **The exit code is the branch; `next.action` is the instruction.** They are not one-to-one and the difference matters: exit 2 asks the agent to repair a probe it broke, or to stop because the repair is in a file it may not write, and only `next.action` separates those. Exits 1 and 5 both say revert, and what to revert differs. Branch on the code, then read the action.
-- **Bounded output, always.** Green is one line. Red shows the first divergence and counts, never a dump. Output grows with divergence, never with repository size — and a long line is clipped around the differing column, so a probe that prints one 8,000-character line still renders a diff you can read.
+- **Bounded output, always.** A green gate is the verdict line plus the lockfile hash, and `--quiet` drops the hash to leave one line. Red names the probes that failed and the counts, never a dump; `vise verify` is where the diff lives, one per diverging probe, each showing the first line that stopped matching. Output grows with divergence, never with repository size — and a long line is clipped around the differing column, so a probe that prints one 8,000-character line still renders a diff you can read.
 - **Every failure names its remedy.** The error message is the documentation, delivered when it is needed.
 - **Fail closed.** A flaky probe makes the verdict *indeterminate*, never green, and never leaves the denominator. An agent cannot eject a judge by making it flaky, and after a probe has flaked twice at one commit the third run is refused.
 
@@ -119,8 +146,8 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 | `vise record --accept <digest>` | Freeze exactly the candidate that was previewed. |
 | `vise verify [--probe ID]` | Replay and diagnose the suite, or one probe. |
 | `vise gate [--quiet]` | The refactor-loop verdict, journaled. |
-| `vise run <probe-id>` | Run one probe and report what it observed, without comparing it to the baseline. The lifecycle still applies: artifacts are deleted first, the checks still run. Exit mirrors the probe. |
-| `vise status` | The whole situation in one bounded read. Always exit 0. |
+| `vise run <probe-id>` | Run one probe without comparing it to the baseline, streaming its output to your terminal. `--json` reports what it observed: hashes, sizes, artifacts. The lifecycle still applies — artifacts are deleted first, the work-tree and evaluator-state checks still run. Exit mirrors the probe. |
+| `vise status` | The whole situation in one bounded read. Exit 0 for any call it understands. |
 | `vise doctor` | Check the repository is fit to hand to an agent. Read-only; exit 0 whatever it finds. |
 | `vise version` | The version, and with `--json` the build revision. |
 
@@ -176,7 +203,7 @@ enforce = "no-regress"       # worse → exit 5, after behavior held
 version_cmd = "oxlint --version"
 ```
 
-vise ships no analyzer and provisions nothing. A missing tool is exit 2 with the remedy in the message. The metric's definition is frozen with its baseline, so swapping the analyzer is harness drift, never a free improvement.
+vise ships no analyzer and provisions nothing. A missing tool is exit 2, naming the tool and what to do about it. The metric's definition is frozen with its baseline, so swapping the analyzer is harness drift, never a free improvement.
 
 ## Not a refactorer
 

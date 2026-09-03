@@ -254,11 +254,11 @@ next: human — the next gate is refused (this probe has already flaked twice at
 [exit 0]
 ```
 
-Recovery is operator-shaped: fix the nondeterminism (app or probe) and re-record, remove the probe, or commit (a new commit starts a fresh chain). Restoring the deterministic script alone is not enough at the same commit; after `git commit`, the gate runs again and goes green.
+Recovery is operator-shaped: fix the nondeterminism (app or probe) and re-record, remove the probe *and* re-record, or commit (a new commit starts a fresh chain). Removing the probe from `vise.toml` alone lifts the refusal and buys nothing: the manifest and the lockfile then disagree, and the next gate is harness class with `probe exists in vise.lock but not vise.toml`. Restoring the deterministic script alone is not enough at the same commit; after `git commit`, the gate runs again and goes green.
 
 ## 7. Harness failures: the judge itself is broken
 
-Anything that stops judgment before behavior can be compared is harness class, exit 2, and names its remedy. Three you will meet:
+Anything that stops judgment before behavior can be compared is harness class, exit 2, and names its remedy. Three you will meet, the first of which arrives two ways:
 
 **`deps` is for fixtures and harness wrappers, never for the code under test.**
 This is the easiest way to make a gate useless, and it looks tidy while you do
@@ -301,7 +301,7 @@ next: human — vise.toml and vise.lock disagree (read-fixture: probe is declare
 
 Also harness, also exit 2: a probe that cannot be launched (127), a timeout, a probe that modifies tracked files or leaves behind a file Git neither tracks nor ignores, a declared artifact that is tracked by git (vise deletes artifacts before every run and refuses to delete a tracked file), a probe that leaves a background process holding its stdout, and a manifest with no probes.
 
-**A note on very large output.** vise hashes and counts every byte a probe produces but keeps only the first 256 KiB. Two probes that print a gigabyte are still compared exactly, by hash; what changes is the diff, which degrades to a line naming both hashes and the byte count when the divergence lies beyond the retained prefix:
+**A note on very large output.** vise hashes and counts every byte a probe produces but keeps only the first 256 KiB. Two probes that print a gigabyte are still compared exactly, by hash; what changes is the diff, which degrades to a line naming both hashes and the byte count whenever the *recorded* observation was over the bound — wherever the divergence lies, including the first line, because an observation over the bound is never stored as a blob and there is nothing to diff against:
 
 ```
 $ vise verify
@@ -494,9 +494,13 @@ gated agent pushed one probe here from seconds past two minutes, and a probe
 that times out is exit 2 — a harness error the agent reports as its own
 blocker. On one machine, either leave the CPU alone or give the probes room.
 
-**Declare each probe's environment; do not inherit it.** vise sanitizes the
-environment down to `PATH`, `HOME`, and the stub set. Anything else your probe
-needs must be in the manifest, or the probe behaves differently for every
+**Declare each probe's environment; do not inherit it.** vise replaces the
+environment with fifteen variables it sets itself: `PATH` and `HOME` inherited,
+the stub set (`TZ`, `LANG`, `LC_ALL`, `VISE_SEED`), determinism helpers
+(`SOURCE_DATE_EPOCH`, `PYTHONHASHSEED`), output stabilizers (`NO_COLOR`,
+`TERM`, `COLUMNS`, `CI`), the marker `VISE`, and the scratch pair `VISE_TMP`
+and `TMPDIR`. All fifteen are reserved, so `env` cannot set them. Anything else
+your probe needs must be in the manifest, or the probe behaves differently for every
 caller — and an agent is a different caller:
 
 ```toml
@@ -562,7 +566,8 @@ agent diagnosed it correctly and was disbelieved. Three defences, in order:
 check `vise version --json` (it carries `revision` and `modified`), keep exactly
 one `vise` on the `PATH` the agent actually gets — remember a login shell
 re-reads its own profile and may reorder what you exported — and prefer a
-committed wrapper the repository controls:
+committed wrapper the repository controls. vise ships no such wrapper; write
+one, because which vise it points at is your decision, not the tool's:
 
 ```sh
 #!/bin/sh
@@ -620,17 +625,26 @@ This repository ships its own as a starting point.
 ## Command reference
 
 ```
-vise init                          write a starter vise.toml and .gitignore entries; never overwrites
-vise record [--allow-dirty] [--i-reviewed-the-diff | --preview | --accept DIGEST]
+vise init                          write whatever of vise.toml, AGENTS.md and the .gitignore
+                                   entries is missing; never overwrites, safe to rerun
+vise record [--allow-dirty] [--i-reviewed-the-diff] [--preview | --accept DIGEST]
                                    two full passes, atomic write of vise.lock and blobs, journal event;
                                    --preview shows the candidate diff and digest without writing baseline
-                                   state, --accept writes only that candidate
-vise verify [--probe ID]           replay all probes or one; bounded diagnosis
+                                   state, --accept writes only that candidate. --preview and --accept
+                                   are the exclusive pair; --i-reviewed-the-diff combines with either
+vise verify [--probe ID]           replay all probes or one; bounded diagnosis; journals the event
 vise gate [--probe ID] [--quiet]   verify plus the one-line verdict; journals the event
-vise run <probe-id>                one probe raw; exit mirrors the probe
+vise run <probe-id>                one probe, streamed and not judged; exit mirrors the probe
+vise doctor                        what an operator should fix before an agent works here;
+                                   runs no probe, writes nothing, exit 0
 vise status                        the whole situation in one bounded read; exit 0
 vise version                       0.3.0-dev
 --json on every command            one JSON object instead of the human rendering
 ```
+
+Every *judged* run is journaled, `verify` and `gate` alike. That matters more
+than it looks: a green `verify` ends a flake chain exactly as a green `gate`
+does, and a flaky `verify --probe` spends rerun budget. Only `run` judges
+nothing and journals nothing.
 
 Runtime-specific determinism traps (timestamps, hash ordering, preloaders, locale) are catalogued in [RUNTIMES.md](RUNTIMES.md).
