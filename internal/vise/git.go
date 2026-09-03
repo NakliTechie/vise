@@ -109,17 +109,33 @@ func (s WorkspaceSnapshot) ChangedUntracked(other WorkspaceSnapshot) []string {
 // artifacts, which vise deletes and recreates on every run by design, and
 // which are hashed and compared separately.
 func GitWorkspaceSnapshot(root string, exclude []string) (WorkspaceSnapshot, error) {
+	// Streamed into the hash rather than buffered. The diff of a large dirty
+	// tree is proportional to the change, not to the observation bound, and
+	// only its digest is wanted — so buffering it was memory spent on bytes
+	// nobody reads.
 	cmd := exec.Command("git", "diff", "--binary", "--no-ext-diff", "HEAD", "--", ".")
 	cmd.Dir = root
-	data, err := cmd.Output()
+	pipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return WorkspaceSnapshot{}, fmt.Errorf("snapshot tracked files: %w", err)
 	}
+	if err := cmd.Start(); err != nil {
+		return WorkspaceSnapshot{}, fmt.Errorf("snapshot tracked files: %w", err)
+	}
+	digest := sha256.New()
+	if _, copyErr := io.Copy(digest, pipe); copyErr != nil {
+		_ = cmd.Wait()
+		return WorkspaceSnapshot{}, fmt.Errorf("snapshot tracked files: %w", copyErr)
+	}
+	if err := cmd.Wait(); err != nil {
+		return WorkspaceSnapshot{}, fmt.Errorf("snapshot tracked files: %w", err)
+	}
+	trackedHash := "sha256:" + hex.EncodeToString(digest.Sum(nil))
 	gitState, err := gitOwnState(root)
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
-	snapshot := WorkspaceSnapshot{Tracked: HashBytes(data), Git: gitState}
+	snapshot := WorkspaceSnapshot{Tracked: trackedHash, Git: gitState}
 
 	skip := make(map[string]bool, len(exclude))
 	for _, rel := range exclude {

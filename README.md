@@ -119,7 +119,7 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 | `vise record --accept <digest>` | Freeze exactly the candidate that was previewed. |
 | `vise verify [--probe ID]` | Replay and diagnose the suite, or one probe. |
 | `vise gate [--quiet]` | The refactor-loop verdict, journaled. |
-| `vise run <probe-id>` | Execute one probe raw. Exit mirrors the probe. |
+| `vise run <probe-id>` | Run one probe and report what it observed, without comparing it to the baseline. The lifecycle still applies: artifacts are deleted first, the checks still run. Exit mirrors the probe. |
 | `vise status` | The whole situation in one bounded read. Always exit 0. |
 | `vise doctor` | Check the repository is fit to hand to an agent. Read-only, always exit 0. |
 | `vise version` | The version, and with `--json` the build revision. |

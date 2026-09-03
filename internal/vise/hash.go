@@ -18,12 +18,20 @@ func HashBytes(data []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-func HashFile(path string) (string, []byte, error) {
-	data, err := os.ReadFile(path)
+// HashFile digests a file without holding it in memory. A declared dependency
+// can be a fixture of any size, and nobody wants the contents — only the hash —
+// so reading the whole thing was a memory cost with nothing bought by it.
+func HashFile(path string) (string, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return "", nil, err
+		return "", err
 	}
-	return HashBytes(data), data, nil
+	defer file.Close()
+	digest := sha256.New()
+	if _, err := io.Copy(digest, file); err != nil {
+		return "", err
+	}
+	return "sha256:" + hex.EncodeToString(digest.Sum(nil)), nil
 }
 
 func HashDependencies(root string, deps []string) (map[string]string, error) {
@@ -32,7 +40,7 @@ func HashDependencies(root string, deps []string) (map[string]string, error) {
 		if err := ValidateRelativePath(root, rel, true); err != nil {
 			return nil, fmt.Errorf("dependency %q: %w", rel, err)
 		}
-		hash, _, err := HashFile(filepath.Join(root, rel))
+		hash, err := HashFile(filepath.Join(root, rel))
 		if err != nil {
 			return nil, fmt.Errorf("hash dependency %q: %w", rel, err)
 		}
