@@ -256,7 +256,7 @@ func runRecord(args []string, root string, jsonMode bool, stdout, stderr io.Writ
 	}
 	manifest, manifestBytes, err := vise.LoadManifest(root)
 	if err != nil {
-		return renderSimpleError("record", err.Error(), jsonMode, stdout, stderr)
+		return renderOperatorError("record", err.Error(), jsonMode, stdout, stderr)
 	}
 	if *preview && *accept != "" {
 		return renderSimpleError("record", "--preview and --accept are mutually exclusive", jsonMode, stdout, stderr)
@@ -329,7 +329,7 @@ func runVerify(args []string, root string, jsonMode, gate bool, stdout, stderr i
 	}
 	manifest, manifestBytes, err := vise.LoadManifest(root)
 	if err != nil {
-		return renderSimpleError(name, err.Error(), jsonMode, stdout, stderr)
+		return renderOperatorError(name, err.Error(), jsonMode, stdout, stderr)
 	}
 	result := vise.Verify(root, manifest, manifestBytes, vise.VerifyOptions{ProbeID: *probeID, EnforceRerunLimit: true})
 	result.Outcome.Cmd = name
@@ -367,7 +367,7 @@ func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Write
 	}
 	manifest, _, err := vise.LoadManifest(root)
 	if err != nil {
-		return renderSimpleError("run", err.Error(), jsonMode, stdout, stderr)
+		return renderOperatorError("run", err.Error(), jsonMode, stdout, stderr)
 	}
 	probe, ok := manifest.Probe(args[0])
 	if !ok {
@@ -400,9 +400,23 @@ func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Write
 }
 
 func renderSimpleError(command, detail string, jsonMode bool, stdout, stderr io.Writer) int {
+	return renderFailure(command, vise.Failure{Class: "harness", Detail: detail}, jsonMode, stdout, stderr)
+}
+
+// renderOperatorError is renderSimpleError for a failure whose repair lives in
+// a file the agent contract forbids an agent from writing. A malformed
+// vise.toml or vise.lock is the common case, and it reached the agent as
+// fix_probe — "repair the harness" — against a rule that forbids touching it,
+// leaving no legal move. The Operator flag existed and this path did not set
+// it, which is the same conflict fixed in two places out of three.
+func renderOperatorError(command, detail string, jsonMode bool, stdout, stderr io.Writer) int {
+	return renderFailure(command, vise.Failure{Class: "harness", Detail: detail, Operator: true}, jsonMode, stdout, stderr)
+}
+
+func renderFailure(command string, failure vise.Failure, jsonMode bool, stdout, stderr io.Writer) int {
 	outcome := vise.NewOutcome(command)
 	outcome.Counts.Declared = 1
-	outcome.AddFailure(command, vise.Failure{Class: "harness", Detail: detail})
+	outcome.AddFailure(command, failure)
 	outcome.Finalize()
 	if jsonMode {
 		return writeOutcomeJSON(stdout, outcome, nil)

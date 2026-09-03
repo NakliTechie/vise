@@ -92,12 +92,12 @@ func loadVerifyState(root string, manifest Manifest, manifestBytes []byte, outco
 		return verifyState{}, outcome
 	}
 	if err != nil {
-		failure := harnessOnly("verify", "vise.lock", err.Error())
+		failure := harnessForOperator("verify", "vise.lock", err.Error())
 		return verifyState{}, &failure
 	}
 	lockHash, err := TamperHash(root, manifestBytes, lockBytes)
 	if err != nil {
-		failure := harnessOnly("verify", "tamper-hash", err.Error())
+		failure := harnessForOperator("verify", "tamper-hash", err.Error())
 		return verifyState{}, &failure
 	}
 	outcome.Lock = lockHash

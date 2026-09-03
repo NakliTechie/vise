@@ -393,6 +393,16 @@ func harnessOnly(cmd, id, detail string) Outcome {
 	return outcome
 }
 
+// harnessForOperator is harnessOnly for a failure whose repair lives in a file
+// the agent contract forbids an agent from writing, so the outcome routes to
+// human rather than telling the agent to repair something it may not touch.
+func harnessForOperator(cmd, id, detail string) Outcome {
+	outcome := NewOutcome(cmd)
+	outcome.AddFailure(id, Failure{Class: "harness", Detail: detail, Operator: true})
+	outcome.Finalize()
+	return outcome
+}
+
 func harnessWithNext(cmd, id, detail string, next Next) Outcome {
 	outcome := harnessOnly(cmd, id, detail)
 	outcome.Next = next

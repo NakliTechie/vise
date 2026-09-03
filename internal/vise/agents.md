@@ -58,11 +58,18 @@ regardless; the verdict is what matters, the commit is bookkeeping.
 ## Branch on the exit code, never on the prose
 
 **This table is for `gate` and `verify`.** They are the commands that judge a
-change, and their exit code is the verdict. `status`, `doctor`, `version`, and
-`help` always exit 0 whatever they find — they report a situation rather than
-judging one — so for those, read `next.action` and ignore the exit code. An
-agent that treats exit 0 as "all is well" will walk straight past a `status`
-that just told it there is no baseline.
+change, and their exit code is the verdict.
+
+`status`, `doctor` and `version` report a situation rather than judging one, so
+a valid call to any of them exits 0 whatever it finds — read `next.action` and
+ignore the code. An agent that treats their exit 0 as "all is well" walks
+straight past a `status` that just told it there is no baseline.
+
+A call they cannot understand is different: an argument they do not take is
+exit 2, because that is a complaint about your command line rather than a
+report about the repository. So exit 0 from those commands means *the report is
+in `next.action`*, and a nonzero one means *you asked wrongly and got no
+report at all*. Do not read a usage error as a situation.
 
 | exit | verdict | meaning | what you do |
 |---|---|---|---|

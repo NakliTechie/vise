@@ -1223,3 +1223,48 @@ func TestRunJSONCarriesEveryFieldOfTheObservation(t *testing.T) {
 		t.Fatalf("the artifact hash is %q", hash)
 	}
 }
+
+// A malformed vise.toml or vise.lock is the operator's to repair, and the
+// agent contract forbids an agent from writing either. Both reached the agent
+// as fix_probe — "repair the harness" — leaving no legal move. The Operator
+// flag existed and these paths did not set it, which is the same conflict
+// fixed in two places out of three.
+func TestMalformedOperatorStateTellsTheAgentToStop(t *testing.T) {
+	t.Run("a manifest that will not parse", func(t *testing.T) {
+		root := t.TempDir()
+		cliGit(t, root, "init", "-q")
+		cliGit(t, root, "config", "user.email", "vise-tests@example.invalid")
+		cliGit(t, root, "config", "user.name", "vise tests")
+		cliWrite(t, root, "vise.toml", "not = [valid\n")
+
+		for _, command := range []string{"gate", "verify", "record"} {
+			exit, stdout, stderr := cliRun(t, root, command, "--json")
+			if exit == 0 {
+				t.Fatalf("%s accepted a malformed manifest", command)
+			}
+			document := parseCLIJSON(t, stdout+stderr)
+			next, _ := document["next"].(map[string]any)
+			if next["action"] != "human" {
+				t.Fatalf("%s said %v for a malformed manifest; the repair is in vise.toml, which an agent may not write", command, next["action"])
+			}
+		}
+	})
+
+	t.Run("a lockfile that will not parse", func(t *testing.T) {
+		root := cliRepo(t, basicManifest(""), "printf hello")
+		if exit, _, _ := cliRun(t, root, "record", "--json"); exit != 0 {
+			t.Fatal("record failed")
+		}
+		cliWrite(t, root, "vise.lock", "not json at all\n")
+
+		exit, stdout, stderr := cliRun(t, root, "gate", "--json")
+		if exit == 0 {
+			t.Fatal("gate accepted a malformed lockfile")
+		}
+		document := parseCLIJSON(t, stdout+stderr)
+		next, _ := document["next"].(map[string]any)
+		if next["action"] != "human" {
+			t.Fatalf("gate said %v for a malformed lockfile", next["action"])
+		}
+	})
+}
