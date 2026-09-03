@@ -145,6 +145,11 @@ func GitWorkspaceSnapshot(root string, exclude []string) (WorkspaceSnapshot, err
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
+	hidden, err := gitIgnoredIgnoreFiles(root)
+	if err != nil {
+		return WorkspaceSnapshot{}, err
+	}
+	paths = append(paths, hidden...)
 	// An empty directory a probe leaves behind is not detected. `git ls-files
 	// --others` lists files, so finding one means walking the whole checkout
 	// on every probe run — and that walk cannot honour the boundary this
@@ -175,6 +180,35 @@ func GitWorkspaceSnapshot(root string, exclude []string) (WorkspaceSnapshot, err
 func isViseLocalState(rel string) bool {
 	return rel == ".vise/run.lock" || rel == ".vise/journal.jsonl" ||
 		rel == ".vise/tmp" || strings.HasPrefix(rel, ".vise/tmp/")
+}
+
+// gitIgnoredIgnoreFiles lists .gitignore files that Git is ignoring.
+//
+// Ignored paths are outside the snapshot on purpose — a build cache is what a
+// probe is expected to write. A .gitignore is not that: it decides what
+// "ignored" means, so a probe can write one that names both its stray and
+// itself and leave nothing for the untracked scan to see. Demonstrated with an
+// ordinary shell probe before this existed.
+//
+// The pathspec keeps this from walking an ignored dependency tree: Git filters
+// to these two names rather than listing everything it ignores.
+func gitIgnoredIgnoreFiles(root string) ([]string, error) {
+	cmd := exec.Command("git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard",
+		"--", ".gitignore", "*/.gitignore")
+	cmd.Dir = root
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("list ignored ignore files: %s", strings.TrimSpace(stderr.String()))
+	}
+	var paths []string
+	for _, entry := range bytes.Split(stdout.Bytes(), []byte{0}) {
+		if len(entry) > 0 {
+			paths = append(paths, filepath.ToSlash(string(entry)))
+		}
+	}
+	return paths, nil
 }
 
 func gitUntrackedPaths(root string) ([]string, error) {
