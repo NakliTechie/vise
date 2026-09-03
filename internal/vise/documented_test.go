@@ -161,3 +161,64 @@ func TestNoShippedDocumentHasASubstitutionScar(t *testing.T) {
 		}
 	}
 }
+
+// The documents quote the tool's output, and nothing checked the quotes. I
+// changed a refusal message tonight and a transcript in GUIDE.md went stale
+// with the whole suite green, which is the same failure as the eight wrong
+// claims an audit had just found in AGENTS.md: a document asserting something
+// about the code with no way to notice when it stops being true.
+//
+// The `next:` line is the part worth pinning. It is the instruction an agent
+// acts on, it is quoted in all four documents, and its detail is a literal in
+// the source. The renderer interpolates a parenthetical, a digest, or a count
+// into some of them, so the line is split on those and each literal fragment
+// long enough to be distinctive has to appear in a Go file. A fragment that
+// does not is either a message somebody changed or a transcript somebody
+// invented, and both are worth failing over.
+func TestEveryNextLineTheDocumentsQuoteIsAMessageTheToolCanPrint(t *testing.T) {
+	var source strings.Builder
+	for _, dir := range []string{filepath.Join("..", "vise"), filepath.Join("..", "cli")} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			source.Write(data)
+		}
+	}
+	code := source.String()
+
+	quoted := regexp.MustCompile(`^next: [a-z_]+ — (.+)$`)
+	interpolated := regexp.MustCompile(`\([^)]*\)|sha256:[0-9a-f]+|\b\d+\b`)
+	checked := 0
+	for _, name := range []string{"GUIDE.md", "README.md", "AGENTS.md", "SPEC.md"} {
+		for number, line := range strings.Split(readRepositoryFile(t, name), "\n") {
+			match := quoted.FindStringSubmatch(strings.TrimSpace(line))
+			if match == nil {
+				continue
+			}
+			for _, fragment := range interpolated.Split(match[1], -1) {
+				fragment = strings.Trim(fragment, " ;,")
+				if len(fragment) < 20 {
+					continue
+				}
+				checked++
+				if !strings.Contains(code, fragment) {
+					t.Errorf("%s:%d quotes a next line vise cannot print:\n\t%s\nNo Go file contains %q.", name, number+1, strings.TrimSpace(line), fragment)
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no quoted next lines were checked; the pattern has stopped matching the documents")
+	}
+	t.Logf("%d quoted fragments resolve to a literal in the source", checked)
+}
