@@ -461,7 +461,17 @@ func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Write
 		runner.MirrorStdout = stdout
 		runner.MirrorStderr = stderr
 	}
-	result := runner.RunProbe(probe, false)
+	// The work-tree check applies here too, which SPEC, the README and the
+	// agent contract all say and the code did not do. `run` passed false and
+	// skipped the before/after snapshot entirely, so a probe that dropped a
+	// stray file exited 0 with the stray left in the checkout, while the same
+	// probe under record or verify was refused. An agent debugging a probe
+	// with `run` got a clean answer and then a contradicting gate.
+	//
+	// It also made the one command that does not judge the probe the only one
+	// that would let it dirty the tree — the opposite of the right way round,
+	// since `run` is what somebody reaches for when a probe is misbehaving.
+	result := runner.RunProbe(probe, true)
 	// run mirrors the probe's own exit. A launch failure is the probe's exit 127 and
 	// passes through; a timeout, a refused artifact, or a lingering pipe holder
 	// has no probe exit to mirror and stays a harness error.

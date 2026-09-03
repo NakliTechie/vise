@@ -36,11 +36,11 @@ next: record_first — run vise init, declare probes, and record a baseline
 [exit 0]
 ```
 
-`init` writes a commented starter manifest and the `.gitignore` lines for local state (`.vise/journal.jsonl`, `.vise/run.lock`, `.vise/tmp/`). It never overwrites an existing `vise.toml`.
+`init` writes a commented starter manifest, the agent contract (`AGENTS.md`), and the `.gitignore` lines for local state (`.vise/journal.jsonl`, `.vise/run.lock`, `.vise/tmp/`). It never overwrites an existing `vise.toml`.
 
 ```
 $ vise init
-INITIALIZED — wrote vise.toml and wired local state into .gitignore
+INITIALIZED — wrote vise.toml, AGENTS.md and wired local state into .gitignore
 NEXT — declare at least one probe, commit the harness, then run vise record
 [exit 0]
 ```
@@ -128,7 +128,7 @@ GATE GREEN — 2/2
 [exit 0]
 
 $ vise gate --json
-{"cmd":"gate","counts":{"behavior":0,"declared":2,"flaky":0,"harness":0,"pass":2},"exit":0,"lock":"sha256:47ea…","next":{"action":"proceed","detail":"all declared checks matched"},"v":1,"verdict":"green"}
+{"cmd":"gate","counts":{"behavior":0,"declared":2,"flaky":0,"harness":0,"metric":0,"pass":2},"exit":0,"lock":"sha256:47ea…","next":{"action":"proceed","detail":"all declared checks matched"},"v":1,"verdict":"green"}
 [exit 0]
 ```
 
@@ -308,6 +308,7 @@ $ vise verify
 VERIFY RED [behavior] — 0/1
 big [behavior] — observed behavior differs consistently from the lockfile
 stdout hash: expected sha256:…, got sha256:… (1048576 bytes, larger than the 262144-byte capture bound)
+lock: sha256:…
 next: revert — revert the unintended behavior change or ask an operator to accept a new baseline
 [exit 1]
 ```

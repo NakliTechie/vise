@@ -265,8 +265,13 @@ verify_baseline() {
   test -f "$repo/vise.lock" || fail baseline "record did not create vise.lock"
   expect_vise_json_exit baseline 0 '"state":"ready"' "$repo" status
   expect_single_json_object baseline "$repo" status
-  expect_exit 0 sh -c "cd '$repo' && '$VERIFY_BIN' run behavior >'$repo/run.out'"
-  grep -q 'value=alpha' "$repo/run.out" || fail baseline "raw probe run returned the wrong output"
+  # The capture goes outside the repository under test. It used to land in it,
+  # as run.out, which made the checkout dirty — and the moment `run` started
+  # applying the work-tree check its own documentation promises, this harness
+  # was the first thing it caught. The harness was wrong, not the check.
+  run_out=$(mktemp "$VERIFY_BASE/run.out.XXXXXX")
+  expect_exit 0 sh -c "cd '$repo' && '$VERIFY_BIN' run behavior >'$run_out'"
+  grep -q 'value=alpha' "$run_out" || fail baseline "raw probe run returned the wrong output"
   expect_vise_json_exit baseline 0 '"verdict":"green"' "$repo" verify
   expect_single_json_object baseline "$repo" verify
   expect_vise_json_exit baseline 0 '"verdict":"green"' "$repo" gate

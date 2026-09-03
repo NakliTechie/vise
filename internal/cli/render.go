@@ -108,10 +108,22 @@ func renderStatusFingerprint(w io.Writer, match *bool) {
 	}
 }
 
+// Bounded like drift, and for the same reason. A baseline recorded across N
+// commits put all N on one unclipped line, so the human status grew with the
+// probe count — which SPEC forbids in the same sentence that promises output
+// grows only with divergence. The full set stays in --json, where a consumer
+// that wants all of them can have them.
 func renderStatusRecordedCommits(w io.Writer, commits []string) {
-	if len(commits) > 0 {
-		fmt.Fprintln(w, "recorded commits: "+terminalSafe(strings.Join(commits, ", "), false))
+	if len(commits) == 0 {
+		return
 	}
+	shown := commits
+	suffix := ""
+	if len(shown) > maxDriftLines {
+		shown = shown[:maxDriftLines]
+		suffix = fmt.Sprintf(" … %d more (see --json)", len(commits)-maxDriftLines)
+	}
+	fmt.Fprintln(w, "recorded commits: "+terminalSafe(strings.Join(shown, ", "), false)+suffix)
 }
 
 func renderStatusLockHash(w io.Writer, hash string) {

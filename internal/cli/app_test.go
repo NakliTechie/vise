@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -1407,5 +1408,58 @@ func TestVersionAndStatusAgreeAboutTheBinaryAnswering(t *testing.T) {
 		if inVersion && fromVersion != fromStatus {
 			t.Errorf("%q disagrees: version says %v, status says %v", field, fromVersion, fromStatus)
 		}
+	}
+}
+
+// SPEC, the README and the agent contract all say the same thing about `vise
+// run`: it is not raw in the sense of running outside the lifecycle, and the
+// work-tree check still applies. The code passed false for that check and
+// skipped the snapshot entirely.
+//
+// So the one command that does not judge a probe was the only one that let it
+// dirty the checkout — exactly the wrong way round, because `run` is what
+// somebody reaches for when a probe is misbehaving. It exited 0 with the stray
+// still there, and the next gate refused the same probe.
+func TestRunAppliesTheWorkTreeCheckItsDocumentationPromises(t *testing.T) {
+	root := cliRepo(t, `[vise]
+version = 1
+
+[[probe]]
+id = "messy"
+run = "echo stray > stray.txt; echo hi"
+timeout = 30
+`, "")
+	var stdout, stderr bytes.Buffer
+	exit := Run([]string{"run", "messy"}, root, &stdout, &stderr)
+	said := stdout.String() + stderr.String()
+	if exit != vise.ExitHarness {
+		t.Errorf("exit %d, want %d — the stray went unreported\n%s", exit, vise.ExitHarness, said)
+	}
+	if !strings.Contains(said, "stray.txt") {
+		t.Errorf("the stray is not named:\n%s", said)
+	}
+}
+
+// SPEC promises that no output grows with the repository or the probe count,
+// only with divergence. The drift line was capped and this one was not: a
+// baseline recorded across N commits put all N sha1s on a single unclipped
+// line, about 41 characters each. Twenty probes frozen at twenty commits is
+// an 800-character line in a report whose whole promise is to be bounded.
+func TestTheStatusRecordedCommitsLineDoesNotGrowWithTheProbeCount(t *testing.T) {
+	var many []string
+	for i := 0; i < 20; i++ {
+		many = append(many, fmt.Sprintf("%040x", i))
+	}
+	var out bytes.Buffer
+	renderStatusRecordedCommits(&out, many)
+	line := strings.TrimRight(out.String(), "\n")
+	if strings.Count(line, "\n") != 0 {
+		t.Fatalf("expected one line, got:\n%s", line)
+	}
+	if len(line) > 400 {
+		t.Errorf("the line is %d characters for 20 commits, so it grows with the probe count:\n%s", len(line), line)
+	}
+	if !strings.Contains(line, "15 more") {
+		t.Errorf("the line does not say how many it left out:\n%s", line)
 	}
 }

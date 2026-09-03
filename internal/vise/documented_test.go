@@ -1,9 +1,11 @@
 package vise
 
 import (
+	"encoding/json"
 	"os"
-	"regexp"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -221,4 +223,80 @@ func TestEveryNextLineTheDocumentsQuoteIsAMessageTheToolCanPrint(t *testing.T) {
 		t.Fatal("no quoted next lines were checked; the pattern has stopped matching the documents")
 	}
 	t.Logf("%d quoted fragments resolve to a literal in the source", checked)
+}
+
+// SPEC says counts "carries every class, including the zero-valued ones,
+// because a consumer summing them should not have to know which names it might
+// be missing" — and then omitted `metric` from all three of its own examples,
+// as did the guide's. Someone writing a consumer against the documented shape
+// gets exactly the failure that rule exists to prevent, from the document that
+// states it.
+//
+// The field names come from the struct by reflection rather than a list here,
+// because a hand-copied list stops matching the moment a seventh class is
+// added — which is the same failure one level up, and this file has made it
+// before.
+func TestEveryCountsObjectTheDocumentsShowCarriesEveryClass(t *testing.T) {
+	var want []string
+	countsType := reflect.TypeOf(Counts{})
+	for i := 0; i < countsType.NumField(); i++ {
+		name, _, _ := strings.Cut(countsType.Field(i).Tag.Get("json"), ",")
+		if name != "" {
+			want = append(want, name)
+		}
+	}
+	if len(want) < 6 {
+		t.Fatalf("only %d json-tagged fields on Counts; the reflection has stopped working", len(want))
+	}
+
+	object := regexp.MustCompile(`\{[^\n]*"counts"[^\n]*\}`)
+	checked := 0
+	for _, name := range []string{"SPEC.md", "GUIDE.md", "README.md", "AGENTS.md"} {
+		text := readRepositoryFile(t, name)
+		for number, line := range strings.Split(text, "\n") {
+			for _, candidate := range object.FindAllString(line, -1) {
+				var parsed map[string]json.RawMessage
+				if json.Unmarshal([]byte(candidate), &parsed) != nil {
+					continue // an elided example, not a whole object
+				}
+				raw, ok := parsed["counts"]
+				if !ok {
+					continue
+				}
+				var counts map[string]json.RawMessage
+				if json.Unmarshal(raw, &counts) != nil {
+					continue
+				}
+				checked++
+				for _, field := range want {
+					if _, ok := counts[field]; !ok {
+						t.Errorf("%s:%d shows a counts object with no %q, and vise always emits one:\n\t%s", name, number+1, field, candidate)
+					}
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no counts objects were checked; the pattern has stopped matching the documents")
+	}
+	t.Logf("%d documented counts objects carry every class", checked)
+}
+
+// A ```json block is an invitation to copy it into a parser. I nearly shipped
+// one with `//` comments in it while correcting a different finding in this
+// same file — JSON has no comments, and the block would have failed for
+// whoever tried it rather than for me.
+func TestEveryJSONBlockInTheDocumentsParses(t *testing.T) {
+	fenced := regexp.MustCompile("(?s)```json\\n(.*?)```")
+	checked := 0
+	for _, name := range []string{"SPEC.md", "GUIDE.md", "README.md", "AGENTS.md"} {
+		for _, block := range fenced.FindAllStringSubmatch(readRepositoryFile(t, name), -1) {
+			checked++
+			var any any
+			if err := json.Unmarshal([]byte(block[1]), &any); err != nil {
+				t.Errorf("%s has a json block that does not parse: %v\n%s", name, err, block[1])
+			}
+		}
+	}
+	t.Logf("%d json blocks parse", checked)
 }
