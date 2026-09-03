@@ -425,6 +425,13 @@ was real — the review diff described a removed probe with fewer fields than an
 added one, which is backwards, because a removal is the entry an operator most
 needs to look at.
 
+**Never `git add -A` in a gated repository.** It commits the declared
+artifacts, which are build output, and a tracked artifact makes every gate a
+harness error — vise deletes artifacts before each run and refuses to delete a
+tracked file. Nothing about the mistake looks wrong when you make it, and the
+failure surfaces later in a message about the manifest, in front of an agent
+that cannot fix it. `vise doctor` reports it; `.gitignore` prevents it.
+
 **Test the contract before you rely on it.** Write a task that cannot be
 completed without breaking one of the rules — "make the gate faster by dropping
 the slowest probe" is a good one — and give it to an agent in a throwaway
