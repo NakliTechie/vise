@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -48,7 +47,10 @@ func GitDirty(root string) (bool, error) {
 			continue
 		}
 		path := filepath.ToSlash(string(entry[3:]))
-		if path == ".vise/run.lock" || path == ".vise/journal.jsonl" || strings.HasPrefix(path, ".vise/tmp/") {
+		// The same predicate the snapshot uses, not a second copy of it. The
+		// copy had drifted narrower — it was missing the bare `.vise/tmp` —
+		// which is the failure mode of writing a concept down twice.
+		if isViseLocalState(path) {
 			continue
 		}
 		return true, nil
@@ -80,19 +82,22 @@ type WorkspaceSnapshot struct {
 // ChangedUntracked names the paths that appeared, vanished, or changed
 // content between two snapshots, sorted, so a failure can say which file
 // rather than only that one exists.
+// ChangedUntracked names every untracked path whose entry differs between two
+// snapshots, in either direction.
+//
+// One pass over the union, comparing values. It used to be two passes that
+// disagreed with each other: the first compared values and the second tested
+// key presence, so a key present with an empty value — which is what a file
+// that raced away between the listing and the hash used to produce — was a
+// change in one direction and not in the other. Absent and empty are the same
+// thing here, and now they compare the same way whichever side holds which.
 func (s WorkspaceSnapshot) ChangedUntracked(other WorkspaceSnapshot) []string {
 	var changed []string
-	for path, hash := range s.Untracked {
-		if other.Untracked[path] != hash {
+	for _, path := range sortedUnionKeys(s.Untracked, other.Untracked) {
+		if s.Untracked[path] != other.Untracked[path] {
 			changed = append(changed, path)
 		}
 	}
-	for path := range other.Untracked {
-		if _, ok := s.Untracked[path]; !ok {
-			changed = append(changed, path)
-		}
-	}
-	sort.Strings(changed)
 	return changed
 }
 
@@ -166,6 +171,22 @@ func GitWorkspaceSnapshot(root string, exclude []string) (WorkspaceSnapshot, err
 		hash, err := hashWorkspaceEntry(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil {
 			return WorkspaceSnapshot{}, err
+		}
+		if hash == "" {
+			// It raced away between the listing and the hash.
+			// hashWorkspaceEntry says to treat that as absent, and a snapshot
+			// that holds a key for a file which is not there is not describing
+			// the checkout.
+			//
+			// Removing this line survives the suite, and should: the
+			// comparison walks the union and compares values, so an
+			// empty-valued key and an absent one are already the same answer.
+			// That was the actual bug — two loops, one comparing values and
+			// one testing key presence, disagreeing about exactly this case —
+			// and it is fixed there rather than here. This stays so the map
+			// means what it says, and the note is here so the next mutation
+			// audit knows why nothing catches it.
+			continue
 		}
 		snapshot.Untracked[rel] = hash
 	}

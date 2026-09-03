@@ -102,3 +102,50 @@ func TestTheSnapshotSeesAContentChangeThatHidesItsTimestamp(t *testing.T) {
 		t.Error("a file was rewritten with its timestamp restored and the snapshot did not move")
 	}
 }
+
+// A file that races away between the listing and the hash is absent, and
+// hashWorkspaceEntry says so by returning an empty hash. The caller stored it
+// anyway, as a key with an empty value, which is the opposite of absent.
+//
+// ChangedUntracked has two loops: the first compares values, the second tests
+// key presence. With an empty-valued key they disagree, so the same race
+// produced a finding or no finding depending on which of the two snapshots it
+// landed in — and when it produced one, it named a file that does not exist.
+//
+// Reported by a coding agent working under the gate, as the first of three
+// things it noticed while reading code it had been asked not to change.
+func TestASnapshotDoesNotHoldAKeyForAFileThatIsNotThere(t *testing.T) {
+	absent := WorkspaceSnapshot{Untracked: map[string]string{}}
+	raced := WorkspaceSnapshot{Untracked: map[string]string{"gone.txt": ""}}
+
+	if changed := absent.ChangedUntracked(raced); len(changed) != 0 {
+		t.Errorf("a snapshot holding an empty-valued key reads as a change: %v", changed)
+	}
+	if changed := raced.ChangedUntracked(absent); len(changed) != 0 {
+		t.Errorf("the same pair compared the other way disagrees: %v", changed)
+	}
+}
+
+// And the same concept written down twice, which had already drifted: the
+// dirty-tree check's inline list of vise's own local state was missing the bare
+// `.vise/tmp` that the snapshot's predicate covers.
+func TestOneDefinitionOfViseLocalState(t *testing.T) {
+	for _, path := range []string{".vise/run.lock", ".vise/journal.jsonl", ".vise/tmp", ".vise/tmp/scratch"} {
+		if !isViseLocalState(path) {
+			t.Errorf("%q is vise's own state and the predicate says otherwise", path)
+		}
+	}
+	for _, path := range []string{"vise.toml", "vise.lock", ".vise/blobs/ab/cd", ".viserc", "src/.vise/tmp"} {
+		if isViseLocalState(path) {
+			t.Errorf("%q is not vise's per-run state and the predicate says it is", path)
+		}
+	}
+	// The dirty check must use the predicate, not a copy of it.
+	source, err := os.ReadFile("git.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(source), `path == ".vise/run.lock"`) {
+		t.Error("git.go carries a second, inline copy of the local-state list")
+	}
+}
