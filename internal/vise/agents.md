@@ -179,9 +179,13 @@ blocked repository is a fact to report, not a puzzle to solve.
 ## Exit 3 — flake
 
 An observation differed between two runs of the same code. The gate calls this
-neither green nor red, on purpose. A probe may flake twice at one commit and
-lock; the third run is refused with `next.action: human`. That is one rerun
-after the run that first flaked, not two.
+neither green nor red, on purpose. Two flakes at one commit and lock, and the
+third run is refused with `next.action: human`. That is one rerun after the run
+that first flaked, not two — and it is two flakes, not two flakes of one probe,
+so two different probes flaking once each exhausts a full-suite budget. Each of
+them individually still has budget, so `gate --probe` on one that flaked once
+still runs. That is the one thing left to you here, and it is for diagnosing,
+not for retrying.
 
 Rerunning until it passes is the one thing you must not do. Stop and report.
 

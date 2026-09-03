@@ -691,3 +691,28 @@ func TestAtomicWriteRefusesASymlinkedTargetDirectory(t *testing.T) {
 		t.Error("the write landed outside the checkout")
 	}
 }
+
+// The budget is two flakes, not two flakes of one probe. Two different probes
+// flaking once each exhausts a full-suite run, because the run is what is not
+// converging — and each of them individually still has budget, so narrowing to
+// one that flaked once still runs.
+//
+// Everything written about this said "a probe that has already flaked twice",
+// which is false for the commonest shape of a flaky suite. The refusal message
+// said it too, so an operator was told something about one probe that no probe
+// had done.
+func TestTheBudgetCountsFlakesNotFlakesOfOneProbe(t *testing.T) {
+	events := []JournalEvent{
+		{Event: "record", Commit: "c1", Lock: "L"},
+		{Event: "flake", Commit: "c1", Lock: "L", Flaky: []string{"a"}, Probes: []string{"a", "b"}},
+		{Event: "flake", Commit: "c1", Lock: "L", Flaky: []string{"b"}, Probes: []string{"a", "b"}},
+	}
+	if count, bounded := ConsecutiveFlakes(events, "c1", "L", []string{"a", "b"}); count != 2 || !bounded {
+		t.Errorf("the whole suite counts %d flakes (bounded=%v), want 2 — a third full run must be refused", count, bounded)
+	}
+	for _, id := range []string{"a", "b"} {
+		if count, _ := ConsecutiveFlakes(events, "c1", "L", []string{id}); count != 1 {
+			t.Errorf("probe %s alone counts %d, want 1 — narrowing to diagnose must still run", id, count)
+		}
+	}
+}

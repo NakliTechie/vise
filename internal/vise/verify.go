@@ -467,7 +467,7 @@ func RerunLimitReached(root, commit, lockHash string, probeIDs []string) (bool, 
 	flakes, bounded := ConsecutiveFlakes(events, commit, lockHash, probeIDs)
 	switch {
 	case flakes >= 2:
-		return true, "this probe has already flaked twice at this commit and lock; the budget follows the unstable probe, so running it alone does not renew it", nil
+		return true, "two runs at this commit and lock already ended indeterminate for the checks this one covers; the budget follows the unstable probes, so narrowing to one that flaked once still runs and running the same set again does not renew it", nil
 	case truncated && !bounded:
 		return true, "journal tail holds only unjudged events for this commit and lock; the rerun chain cannot be bounded", nil
 	}

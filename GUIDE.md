@@ -242,7 +242,7 @@ GATE INDETERMINATE [harness] — 0/0: rerun-limit
 [exit 2]
 ```
 
-A probe may flake twice at one commit and lock; the third run is refused so a loop cannot circle. The budget follows the probe, not the set it ran in. `status` says so:
+Two flakes at one commit and lock, and the third run is refused so a loop cannot circle — two flakes, not two flakes of one probe, so two different probes flaking once each exhausts a full-suite budget. Each of them individually still has budget, so narrowing to one that flaked once still runs, which is what diagnosing needs. `status` says so:
 
 ```
 $ vise status
@@ -250,7 +250,7 @@ VISE STATUS — RERUN-REFUSED
 …
 journal: flake · d7ff97… · indeterminate · flaky=greet
 journal: flake · d7ff97… · indeterminate · flaky=greet
-next: human — the next gate is refused (this probe has already flaked twice at this commit and lock; the budget follows the unstable probe, so running it alone does not renew it); commit, re-record, or change the manifest
+next: human — the next gate is refused (two runs at this commit and lock already ended indeterminate for the checks this one covers; the budget follows the unstable probes, so narrowing to one that flaked once still runs and running the same set again does not renew it); commit, re-record, or change the manifest
 [exit 0]
 ```
 
