@@ -130,6 +130,50 @@ fi
 The fallback matters: if nothing matches, show everything rather than failing
 silently with an empty explanation.
 
+## A normalizer can erase the thing you were watching for
+
+Normalizing is how a probe survives output no baseline can hold. It is also the
+easiest way to build a gate that passes forever, and the failure is silent.
+
+Here is a program that prints a random run id, a timestamp, its pid, and its
+working directory, then a list of findings. None of the first four can be
+frozen, so a wrapper normalizes them:
+
+```sh
+python3 report.py | sed -E \
+  -e 's/report [0-9a-f]{8}/report RUNID/g' \
+  -e 's/started [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+/started TIMESTAMP/' \
+  -e 's/^pid [0-9]+$/pid PID/' \
+  -e 's#^cwd .*#cwd CWD#'
+```
+
+That works: three consecutive gates come back green on a program whose every
+run prints different bytes, and adding a finding to the program still turns the
+gate red with a readable diff.
+
+Now add one more line, of exactly the kind that gets added when a probe is
+flaky and somebody wants it to stop being flaky:
+
+```sh
+  -e 's/^  - .*/  - FINDING/'
+```
+
+Re-record, then change every finding in the program from `ok` to `BROKEN`. The
+gate is **green**. Every line the probe now emits is `  - FINDING`, so nothing
+it observes can distinguish a working program from a broken one. The verdict is
+true — no declared observation changed — and worthless.
+
+The rule that follows: **normalize the shape, never the content.** A timestamp,
+a pid, a random id, an absolute path — those are shape, and the probe was never
+watching them. A status word, a count, a name, a value — those are content, and
+they are the whole reason the probe exists. When you reach for a normalizer
+because a probe is flaky, check which of the two you are about to erase.
+
+And the test for a normalizer you have already written: break the program in
+the way you most want to catch, and confirm the gate goes red. A normalizer
+that has never been shown to let a real failure through has not been shown to
+do anything.
+
 ## The normalizer is a probe too
 
 A probe that normalizes its own output is only as deterministic as the

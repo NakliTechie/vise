@@ -137,7 +137,10 @@ Rerunning until it passes is the one thing you must not do. Stop and report.
 2. **Never run `vise record`.** Freezing a baseline is an operator action. If
    you believe the baseline is wrong, say so and stop.
 3. **Never weaken a probe** to make it pass — not by narrowing what it observes,
-   not by deleting it, not by relaxing a comparison.
+   not by deleting it, not by relaxing a comparison, and not by widening a
+   normalizer. That last one is the quiet version: a pattern that turns every
+   `- name: ok` into `- FINDING` makes a flaky probe stable and makes it blind,
+   and the gate then reports green while the program is broken.
 4. **Never delete or skip a test** for the same reason.
 5. **Never edit a design document to make your change legal.** The
    specification, the non-goals, the architecture notes: those record decisions
