@@ -666,3 +666,28 @@ func TestAJournalReadErrorIsNotMistakenForATornTail(t *testing.T) {
 		t.Error("a failed read claimed the journal was terminated")
 	}
 }
+
+// atomicWrite was the one state writer that did not apply this package's
+// symlink policy to the directory it writes into. MkdirAll follows symlinks, so
+// a symlinked target directory would have let the staged rename land outside
+// the checkout. Every other directory creation here goes through
+// ensureDirectory, whose whole purpose is to refuse exactly that.
+func TestAtomicWriteRefusesASymlinkedTargetDirectory(t *testing.T) {
+	root := testGitRepo(t)
+	elsewhere := t.TempDir()
+	target := filepath.Join(root, "redirected")
+	if err := os.Symlink(elsewhere, target); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	err := atomicWrite(root, filepath.Join(target, "vise.lock"), []byte("{}\n"), 0o644)
+	if err == nil {
+		t.Fatal("a write into a symlinked directory was accepted")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("the error does not say why: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(elsewhere, "vise.lock")); err == nil {
+		t.Error("the write landed outside the checkout")
+	}
+}

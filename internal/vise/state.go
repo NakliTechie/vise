@@ -107,9 +107,15 @@ func (l *StateLock) Close() error {
 	if l == nil || l.file == nil {
 		return nil
 	}
+	// Both errors are knowable, and returning only the first hid the second:
+	// a failed unlock masked a failed close, and the descriptor leaked with
+	// nothing said about it.
 	unlockErr := syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
 	closeErr := l.file.Close()
-	if unlockErr != nil {
+	switch {
+	case unlockErr != nil && closeErr != nil:
+		return fmt.Errorf("release the run lock: %w; and close it: %w", unlockErr, closeErr)
+	case unlockErr != nil:
 		return unlockErr
 	}
 	return closeErr
@@ -364,8 +370,26 @@ func WriteBlobs(root string, blobs map[string][]byte) error {
 // leaves the old file intact and any residue where state is expected, never
 // an untracked stray beside vise.lock.
 func atomicWrite(root, path string, data []byte, mode os.FileMode) error {
-	if err := persistence.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	// The directory this lands in gets the same policy every other directory in
+	// this package gets. It was the one state writer that did not: MkdirAll
+	// follows symlinks, so a symlinked target directory would have let the
+	// staged rename land outside the checkout. The file itself was always safe,
+	// because rename replaces a symlink rather than following it.
+	//
+	// This checks the directory the write lands in, which is the component a
+	// probe can create. An intermediate component that is a symlink is not
+	// checked, and MkdirAll would follow it — the same limit ensureDirectory
+	// has, and worth knowing rather than assuming away.
+	dir := filepath.Dir(path)
+	if err := persistence.MkdirAll(dir, 0o755); err != nil {
 		return err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("%s must be a real directory, not a symlink or special file", dir)
 	}
 	staging, err := stateScratchDir(root)
 	if err != nil {
