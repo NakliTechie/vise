@@ -180,9 +180,27 @@ prints, a lookup nobody's probe exercises, a path taken only on an error
 nothing triggers. Those are exactly the changes a green gate says nothing
 about.
 
+## Say what looks wrong, without fixing it
+
+A refactor makes you read code carefully that nobody has re-read in a while.
+When you finish, you are holding context an auditor would have to rebuild from
+nothing. Spend one paragraph of your final message on it.
+
+If you noticed something that looks wrong — a case that is not handled, an
+output that could mislead the person reading it, an ordering that contradicts
+what the comment above it claims, a test that would pass even if the thing it
+names were broken — say so under a heading of its own. Say what you saw and
+where. Do not fix it: that is a separate decision, and a finding that arrives
+as a change inside a diff somebody is reviewing for another reason is worse
+than no finding.
+
+This has produced a real defect nearly every time it has been asked for in this
+project, including in code written hours earlier by someone who was being
+careful.
+
 ## When you finish
 
 State plainly, in this order: the gate's final verdict and exit code; what you
-changed; anything you changed that no probe covers; what you could not do and
-why. If the gate is not green, say that first. A red gate is never "done", and
+changed; anything you changed that no probe covers; anything that looked wrong
+while you were in there; what you could not do and why. If the gate is not green, say that first. A red gate is never "done", and
 neither is a green gate you reached by narrowing what is checked.
