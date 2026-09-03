@@ -283,7 +283,7 @@ func (r *recordRun) computeTamperHash() bool {
 func (r *recordRun) appendJournal() bool {
 	declared := len(r.manifest.Probes) + len(r.manifest.Metrics)
 	counts := Counts{Declared: declared, Pass: declared}
-	if err := AppendJournal(r.root, JournalEvent{Event: "record", Commit: r.commit, Dirty: r.dirty, Counts: &counts, Lock: r.lockHash}); err != nil {
+	if err := appendJournal(r.root, JournalEvent{Event: "record", Commit: r.commit, Dirty: r.dirty, Counts: &counts, Lock: r.lockHash}); err != nil {
 		r.result.Outcome = harnessOnly("record", "journal", "baseline was written but journal append failed: "+err.Error())
 		return false
 	}

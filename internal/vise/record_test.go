@@ -3,6 +3,7 @@ package vise
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -313,5 +314,40 @@ func TestAnAddedOrRemovedArtifactIsNotReportedAsACorruptBlob(t *testing.T) {
 	}
 	if !strings.Contains(reverse, "out/new.txt") || !strings.Contains(reverse, "removed") {
 		t.Fatalf("a removed artifact is not described as removed:\n%s", reverse)
+	}
+}
+
+// The journal is the last of the three writes, and record reports a harness
+// error if it fails: the baseline is on disk but the record of it is not, and
+// an operator has to know that before the next gate keys a rerun budget to a
+// journal that never got the entry. Nothing injected that failure, so record
+// could have stopped checking it silently.
+func TestRecordReportsAJournalAppendFailure(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "manifest")
+
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	previous := appendJournal
+	appendJournal = func(string, JournalEvent) error { return errors.New("disk full") }
+	defer func() { appendJournal = previous }()
+
+	result := Record(root, manifest, manifestBytes, RecordOptions{})
+	if result.Outcome.Exit != ExitHarness {
+		t.Fatalf("exit = %d, want harness; outcome %#v", result.Outcome.Exit, result.Outcome)
+	}
+	failure := result.Outcome.Failures["journal"]
+	// The message has to say the baseline landed, because it did: the operator
+	// needs the state on disk, not only that something went wrong.
+	if !strings.Contains(failure.Detail, "baseline was written") {
+		t.Fatalf("the failure does not say the baseline landed: %#v", result.Outcome.Failures)
+	}
+	if _, err := os.Stat(filepath.Join(root, "vise.lock")); err != nil {
+		t.Fatalf("the lockfile is absent although record reported it written: %v", err)
 	}
 }

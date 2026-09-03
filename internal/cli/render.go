@@ -195,7 +195,12 @@ func terminalSafe(value string, allowNewline bool) string {
 			b.WriteRune(r)
 			continue
 		}
-		if unicode.IsControl(r) {
+		// U+2028 and U+2029 are line and paragraph separators, which
+		// unicode.IsControl does not report: they are category Zl and Zp. They
+		// still end a line for anything that reads output line by line, so a
+		// single-line field containing one can carry a second line nobody
+		// expected.
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
 			fmt.Fprintf(&b, "\\u%04x", r)
 			continue
 		}
@@ -213,9 +218,13 @@ func renderDoctor(w io.Writer, report vise.DoctorReport) {
 	} else {
 		fmt.Fprintf(w, "DOCTOR — %d finding(s)\n", len(report.Findings))
 	}
+	// Escaped like every other human rendering. A finding's detail can be a
+	// manifest parse error, which carries bytes from vise.toml — so without
+	// this a hostile manifest drives the operator's terminal through the one
+	// command they were told to run first.
 	for _, finding := range report.Findings {
-		fmt.Fprintf(w, "%s — %s\n", finding.Check, finding.Detail)
-		fmt.Fprintf(w, "  fix: %s\n", finding.Remedy)
+		fmt.Fprintf(w, "%s — %s\n", terminalSafe(finding.Check, false), terminalSafe(finding.Detail, false))
+		fmt.Fprintf(w, "  fix: %s\n", terminalSafe(finding.Remedy, false))
 	}
-	fmt.Fprintf(w, "next: %s — %s\n", report.Next.Action, report.Next.Detail)
+	fmt.Fprintf(w, "next: %s — %s\n", terminalSafe(report.Next.Action, false), terminalSafe(report.Next.Detail, false))
 }

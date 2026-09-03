@@ -446,6 +446,14 @@ func AddObservationBlobs(blobs map[string][]byte, result RunResult) ProbeLock {
 	return probe
 }
 
+// appendJournal is the seam record writes through, so a test can make the last
+// of the three writes fail. The first two go through the persistence seam
+// already; without this one, the branch that reports "the baseline was written
+// but the journal append failed" could stop working unnoticed — and that is
+// the message telling an operator the state on disk is half of what they
+// asked for.
+var appendJournal = AppendJournal
+
 func AppendJournal(root string, event JournalEvent) error {
 	dir := filepath.Join(root, ".vise")
 	if err := ensureDirectory(dir, 0o755); err != nil {

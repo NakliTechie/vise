@@ -488,13 +488,17 @@ func encodingFailure(command string, err error) map[string]any {
 
 // addCapture reports an observation in JSON. Output larger than the capture
 // bound is reported by its prefix, hash, and size rather than in full.
+// addCapture renders one observation. The hash, the size, and the truncation
+// flag are always present, never only when truncated: a field that appears
+// some of the time is a field every consumer has to handle two ways, and the
+// whole point of this object is that a machine can read it without branching
+// on what happens to be there. The hash is also what makes `run` useful next
+// to a lockfile — it can be compared without recomputing anything.
 func addCapture(response map[string]any, key string, capture vise.Capture) {
 	addBytes(response, key, capture.Prefix)
-	if capture.Truncated() {
-		response[key+"_truncated"] = true
-		response[key+"_size"] = capture.Size
-		response[key+"_hash"] = capture.Hash
-	}
+	response[key+"_truncated"] = capture.Truncated()
+	response[key+"_size"] = capture.Size
+	response[key+"_hash"] = capture.Hash
 }
 
 func addBytes(response map[string]any, key string, data []byte) {

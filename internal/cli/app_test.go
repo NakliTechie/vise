@@ -1111,3 +1111,119 @@ func readmeSection(t *testing.T, document, heading string) string {
 	}
 	return rest
 }
+
+// Eight mutations of the CLI's argument validation survived the suite: init,
+// status and run accepting extra arguments; record, verify and gate accepting
+// positional ones; verify accepting --quiet; and three commands ignoring flag
+// parse errors outright. A command that silently accepts what it does not
+// understand is worse than one that refuses: the agent believes it asked for
+// something it did not get.
+func TestEveryCommandRefusesWhatItDoesNotUnderstand(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "printf hello")
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"init with an argument", []string{"init", "extra"}},
+		{"status with an argument", []string{"status", "extra"}},
+		{"doctor with an argument", []string{"doctor", "extra"}},
+		{"version with an argument", []string{"version", "extra"}},
+		{"run with no probe", []string{"run"}},
+		{"run with two probes", []string{"run", "a", "b"}},
+		{"record with a positional argument", []string{"record", "extra"}},
+		{"verify with a positional argument", []string{"verify", "extra"}},
+		{"gate with a positional argument", []string{"gate", "extra"}},
+		{"verify with --quiet, which is only for gate", []string{"verify", "--quiet"}},
+		{"record with an unknown flag", []string{"record", "--no-such-flag"}},
+		{"verify with an unknown flag", []string{"verify", "--no-such-flag"}},
+		{"gate with an unknown flag", []string{"gate", "--no-such-flag"}},
+		{"record --accept with no digest", []string{"record", "--accept"}},
+		{"verify --probe with no id", []string{"verify", "--probe"}},
+		{"an unknown command", []string{"no-such-command"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			exit := Run(test.args, root, &out, &errOut)
+			if exit == 0 {
+				t.Fatalf("%v was accepted (exit 0)\nstdout: %s\nstderr: %s", test.args, out.String(), errOut.String())
+			}
+			// And the refusal has to say something, in either rendering.
+			if out.Len() == 0 && errOut.Len() == 0 {
+				t.Fatalf("%v was refused silently", test.args)
+			}
+		})
+	}
+}
+
+// The same refusals in JSON mode, where an agent reads them. A refusal that is
+// not valid JSON under --json is a refusal the caller cannot parse.
+func TestRefusalsAreStillOneJSONObject(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "printf hello")
+
+	for _, args := range [][]string{
+		{"status", "extra", "--json"},
+		{"gate", "extra", "--json"},
+		{"run", "--json"},
+		{"no-such-command", "--json"},
+	} {
+		var out, errOut bytes.Buffer
+		if exit := Run(args, root, &out, &errOut); exit == 0 {
+			t.Fatalf("%v was accepted", args)
+		}
+		text := out.String() + errOut.String()
+		var document map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &document); err != nil {
+			t.Fatalf("%v did not refuse in JSON: %v\n%s", args, err, text)
+		}
+		if _, ok := document["next"]; !ok {
+			t.Fatalf("%v refused without a next action: %s", args, text)
+		}
+	}
+}
+
+// `vise run --json` is how an agent inspects one probe without judgment, and
+// its object is the whole answer. Emptying the captured output, emptying the
+// artifact hashes, and emptying the probe id all left the suite green: the
+// existing cases asserted the metadata around the values and never the values.
+func TestRunJSONCarriesEveryFieldOfTheObservation(t *testing.T) {
+	manifest := basicManifest("files = [\"out/result.txt\"]\n")
+	root := cliRepo(t, manifest, "mkdir -p out && printf produced > out/result.txt && printf hello && printf oops >&2 && exit 3")
+
+	exit, stdout, _ := cliRun(t, root, "run", "behavior", "--json")
+	if exit != 3 {
+		t.Fatalf("run exit = %d, want the probe's own 3", exit)
+	}
+	document := parseCLIJSON(t, stdout)
+
+	if document["probe"] != "behavior" {
+		t.Fatalf("probe = %v", document["probe"])
+	}
+	if document["exit"] != float64(3) {
+		t.Fatalf("exit = %v, want 3", document["exit"])
+	}
+	if got, _ := document["stdout"].(string); got != "hello" {
+		t.Fatalf("stdout = %q, want the bytes the probe printed", got)
+	}
+	if got, _ := document["stderr"].(string); got != "oops" {
+		t.Fatalf("stderr = %q, want the bytes the probe printed", got)
+	}
+	// The hashes are what a baseline is made of, so an empty one is not a
+	// missing detail but a different observation entirely.
+	for _, field := range []string{"stdout_hash", "stderr_hash"} {
+		got, _ := document[field].(string)
+		if !strings.HasPrefix(got, "sha256:") {
+			t.Fatalf("%s = %q", field, got)
+		}
+	}
+	files, ok := document["files"].(map[string]any)
+	if !ok || len(files) != 1 {
+		t.Fatalf("files = %v, want the one declared artifact", document["files"])
+	}
+	hash, _ := files["out/result.txt"].(string)
+	if !strings.HasPrefix(hash, "sha256:") {
+		t.Fatalf("the artifact hash is %q", hash)
+	}
+}

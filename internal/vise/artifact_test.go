@@ -138,3 +138,25 @@ func TestDeclaredArtifactCaptureFailures(t *testing.T) {
 		t.Fatalf("empty = %#v, %v", empty, err)
 	}
 }
+
+// A probe that produces a directory where it declared a file. The reset path
+// refuses a directory before the run; nothing covered the capture path after
+// it, so accepting a produced directory as an empty artifact left the suite
+// green — and an empty artifact hashes to something stable, which means the
+// baseline would have frozen "the probe produced nothing" as correct.
+func TestAProducedDirectoryIsNotCapturedAsAnArtifact(t *testing.T) {
+	root := testGitRepo(t)
+	runner := Runner{Root: root}
+
+	probe := Probe{ID: "dir", Run: "mkdir -p out/result.txt", Timeout: 30, Files: []string{"out/result.txt"}}
+	result := runner.RunProbe(probe, false)
+	if result.HarnessError == "" {
+		t.Fatalf("a directory was accepted where a file was declared: %#v", result.Files)
+	}
+	if !strings.Contains(result.HarnessError, "out/result.txt") {
+		t.Fatalf("the error does not name the artifact: %q", result.HarnessError)
+	}
+	if len(result.Files) != 0 {
+		t.Fatalf("a directory was captured as an artifact: %#v", result.Files)
+	}
+}

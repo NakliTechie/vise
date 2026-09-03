@@ -82,7 +82,13 @@ func (f faultyFile) Sync() error {
 	return f.inner.Sync()
 }
 
-func (f faultyFile) Close() error { return f.inner.Close() }
+func (f faultyFile) Close() error {
+	if f.step == "close" {
+		_ = f.inner.Close()
+		return errInjected
+	}
+	return f.inner.Close()
+}
 
 // injectFailure makes the named persistence step fail for the duration of the
 // test. The seam is a package-level variable and these tests never call
@@ -105,7 +111,10 @@ func injectFailureFor(t *testing.T, step, target string) func() {
 }
 
 func TestEveryPersistenceFailureLeavesTheOldFileIntact(t *testing.T) {
-	for _, step := range []string{"mkdir", "create", "chmod", "write", "sync", "rename"} {
+	// close is in the list because ignoring its error left the suite green: a
+	// staged file that fails to close may not have reached the disk, and
+	// renaming it over a good baseline would install a partial one.
+	for _, step := range []string{"mkdir", "create", "chmod", "write", "sync", "close", "rename"} {
 		t.Run(step, func(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, "vise.lock")
