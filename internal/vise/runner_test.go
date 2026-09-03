@@ -724,3 +724,51 @@ func TestATrackedDeclaredArtifactIsTheOperatorsToRepair(t *testing.T) {
 		t.Error("the ownership is lost on the way into the outcome")
 	}
 }
+
+// runShell is shared by probes, metrics, metric version commands and the
+// environment fingerprint, and every failure it produced said "probe". A metric
+// that timed out was reported as a probe that timed out; a fingerprint command
+// that could not launch was told to check "the probe's PATH". The operator then
+// goes looking in vise.toml's [[probe]] blocks for something that is not there.
+func TestAFailureNamesWhatActuallyRan(t *testing.T) {
+	root := testGitRepo(t)
+
+	t.Run("a metric that times out is a metric", func(t *testing.T) {
+		result := Runner{Root: root}.RunMetric(Metric{ID: "m", Run: "sleep 5", Timeout: 1})
+		if !strings.Contains(result.HarnessError, "metric timed out") {
+			t.Errorf("message does not name a metric:\n\t%s", result.HarnessError)
+		}
+	})
+
+	t.Run("a metric version command that cannot launch is named as one", func(t *testing.T) {
+		result := Runner{Root: root}.RunMetric(Metric{ID: "m", Run: "printf 1", VersionCmd: "no-such-analyzer", Timeout: 10})
+		if !strings.Contains(result.HarnessError, "metric version command") {
+			t.Errorf("message does not name the version command:\n\t%s", result.HarnessError)
+		}
+	})
+
+	t.Run("a probe that times out is still a probe", func(t *testing.T) {
+		result := Runner{Root: root}.RunProbe(Probe{ID: "p", Run: "sleep 5", Timeout: 1}, false)
+		if !strings.Contains(result.HarnessError, "probe timed out") {
+			t.Errorf("message does not name a probe:\n\t%s", result.HarnessError)
+		}
+	})
+}
+
+// One wording for one condition. There were three: the probe's carried the
+// explanation of why git's own state is judged, the metric's dropped it, and
+// the fingerprint's said only that it had happened. The reader needs the
+// explanation most when the thing that did it is least expected, and a
+// fingerprint command modifying HEAD is about as unexpected as it gets.
+func TestGitStateMutationReadsTheSameWhoeverDidIt(t *testing.T) {
+	const explanation = "the checkout is judged against those, so changing them changes what unchanged means"
+	for _, kind := range []string{"probe", "metric", "environment fingerprint command"} {
+		message := gitStateMutated(kind)
+		if !strings.HasPrefix(message, kind+" modified git's own state") {
+			t.Errorf("%q does not open by naming what did it", message)
+		}
+		if !strings.Contains(message, explanation) {
+			t.Errorf("%q drops the explanation", message)
+		}
+	}
+}

@@ -66,7 +66,7 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 		return RunResult{HarnessError: err.Error(), HarnessOperator: true}
 	}
 
-	result := r.runShell(probe.ID, probe.Run, probe.Timeout, probe.Env)
+	result := r.runShell("probe", probe.ID, probe.Run, probe.Timeout, probe.Env)
 
 	// The work-tree check runs even when the probe already failed. A probe
 	// that times out, or cannot be launched, or writes to evaluator state can
@@ -90,7 +90,7 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 		case err != nil:
 			mutation = err.Error()
 		case before.Git != after.Git:
-			mutation = "probe modified git's own state (HEAD, the ignore rules, or the config); the checkout is judged against those, so changing them changes what unchanged means"
+			mutation = gitStateMutated("probe")
 		case before.Tracked != after.Tracked:
 			mutation = "probe modified tracked files"
 		default:
@@ -114,7 +114,7 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 	if err != nil {
 		return MetricResult{HarnessError: err.Error()}
 	}
-	result := r.runShell(metric.ID, metric.Run, metric.Timeout, metric.Env)
+	result := r.runShell("metric", metric.ID, metric.Run, metric.Timeout, metric.Env)
 	if result.HarnessError != "" {
 		return MetricResult{Stdout: result.Stdout, Stderr: result.Stderr, HarnessError: result.HarnessError, HarnessOperator: result.HarnessOperator}
 	}
@@ -131,9 +131,17 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 	}
 	version := ""
 	if metric.VersionCmd != "" {
-		vr := r.runShell(metric.ID+"-version", metric.VersionCmd, metric.Timeout, metric.Env)
+		vr := r.runShell("metric version command", metric.ID+"-version", metric.VersionCmd, metric.Timeout, metric.Env)
 		if vr.HarnessError != "" {
-			return MetricResult{Value: value, HarnessError: "metric version command: " + vr.HarnessError}
+			// The message already opens with "metric version command", because
+			// the kind is threaded through runShell now — prefixing it again
+			// said it twice. And the ownership travels with it: folding an
+			// error into a string and dropping HarnessOperator is exactly the
+			// bug that put fix_probe on eight operator-owned failures earlier
+			// tonight. Latent here, since nothing reachable from runShell sets
+			// the flag today, which is a property of the call sites and not of
+			// this line.
+			return MetricResult{Value: value, HarnessError: vr.HarnessError, HarnessOperator: vr.HarnessOperator}
 		}
 		if vr.Exit != 0 {
 			detail := fmt.Sprintf("metric version command exited %d", vr.Exit)
@@ -152,7 +160,7 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 		return MetricResult{Value: value, ToolVersion: version, HarnessError: err.Error()}
 	}
 	if before.Git != after.Git {
-		return MetricResult{Value: value, ToolVersion: version, HarnessError: "metric modified git's own state (HEAD, the ignore rules, or the config)"}
+		return MetricResult{Value: value, ToolVersion: version, HarnessError: gitStateMutated("metric")}
 	}
 	if before.Tracked != after.Tracked {
 		return MetricResult{Value: value, ToolVersion: version, HarnessError: "metric modified tracked files"}
@@ -174,12 +182,12 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 // a probe flaky had a hole behind it. A guard that each caller must remember
 // is a guard that some caller will forget, so it lives here now, around every
 // command the manifest can name.
-func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[string]string) RunResult {
+func (r Runner) runShell(kind, id, command string, timeoutSeconds int, extra map[string]string) RunResult {
 	stateBefore, err := evaluatorStateDigest(r.Root)
 	if err != nil {
 		return RunResult{HarnessError: err.Error()}
 	}
-	result := r.runShellUnguarded(id, command, timeoutSeconds, extra)
+	result := r.runShellUnguarded(kind, id, command, timeoutSeconds, extra)
 	stateAfter, stateErr := evaluatorStateDigest(r.Root)
 	if stateErr != nil {
 		result.HarnessError = stateErr.Error()
@@ -191,7 +199,7 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 	return result
 }
 
-func (r Runner) runShellUnguarded(id, command string, timeoutSeconds int, extra map[string]string) RunResult {
+func (r Runner) runShellUnguarded(kind, id, command string, timeoutSeconds int, extra map[string]string) RunResult {
 	tmp, err := prepareProbeScratch(r.Root, id)
 	if err != nil {
 		return RunResult{HarnessError: err.Error()}
@@ -223,7 +231,7 @@ func (r Runner) runShellUnguarded(id, command string, timeoutSeconds int, extra 
 
 	waitErr, timedOut := awaitProbe(cmd, time.Duration(timeoutSeconds)*time.Second)
 
-	return classifyProbe(command, timeoutSeconds, cmd, stdout, stderr, waitErr, timedOut)
+	return classifyProbe(kind, command, timeoutSeconds, cmd, stdout, stderr, waitErr, timedOut)
 }
 
 func startProbe(cmd *exec.Cmd) error {
@@ -244,10 +252,10 @@ func startProbe(cmd *exec.Cmd) error {
 	return nil
 }
 
-func classifyProbe(command string, timeoutSeconds int, cmd *exec.Cmd, stdout, stderr *captureWriter, waitErr error, timedOut bool) RunResult {
+func classifyProbe(kind, command string, timeoutSeconds int, cmd *exec.Cmd, stdout, stderr *captureWriter, waitErr error, timedOut bool) RunResult {
 	result := RunResult{Stdout: stdout.Capture(), Stderr: stderr.Capture(), TimedOut: timedOut}
 	if timedOut {
-		result.HarnessError = fmt.Sprintf("probe timed out after %ds", timeoutSeconds)
+		result.HarnessError = fmt.Sprintf("%s timed out after %ds", kind, timeoutSeconds)
 		return result
 	}
 	if errors.Is(waitErr, exec.ErrWaitDelay) {
@@ -267,7 +275,7 @@ func classifyProbe(command string, timeoutSeconds int, cmd *exec.Cmd, stdout, st
 			// launched" tells the reader something failed; the missing tool
 			// tells them what to install, and the whole point of these
 			// messages is that the remedy arrives with the failure.
-			result.HarnessError = launchFailureDetail(command, result.Stderr)
+			result.HarnessError = launchFailureDetail(kind, command, result.Stderr)
 		}
 		return result
 	}
@@ -383,7 +391,7 @@ func strayFilesError(kind string, paths []string) string {
 // it could not find, so that line is quoted when it is there; the first word of
 // the command is the fallback, since it is what the reader will go and look
 // for either way.
-func launchFailureDetail(command string, stderr Capture) string {
+func launchFailureDetail(kind, command string, stderr Capture) string {
 	word := command
 	if fields := strings.Fields(command); len(fields) > 0 {
 		word = fields[0]
@@ -398,9 +406,9 @@ func launchFailureDetail(command string, stderr Capture) string {
 	// and the missing tool is something helper.sh reached for. Saying "install
 	// sh" there is worse than saying nothing, because it is confidently wrong.
 	if line := firstShellDiagnostic(stderr); line != "" {
-		return fmt.Sprintf("probe command could not be launched (exit 127): %s; install what the shell named, or give it an absolute path", line)
+		return fmt.Sprintf("%s could not be launched (exit 127): %s; install what the shell named, or give it an absolute path", kind, line)
 	}
-	return fmt.Sprintf("probe command could not be launched (exit 127): %q is not on the probe's PATH; install %s, or name it by an absolute path", word, word)
+	return fmt.Sprintf("%s could not be launched (exit 127): %q is not on its PATH; install %s, or name it by an absolute path", kind, word, word)
 }
 
 // firstShellDiagnostic returns the shell's own not-found line, bounded, or "".
@@ -466,4 +474,13 @@ func metricNumberDetail(text string, truncated bool) string {
 		shown = shown[:80] + "…"
 	}
 	return fmt.Sprintf("%s; it printed %q", rule, shown)
+}
+
+// gitStateMutated is the one wording for one condition. There were three: the
+// probe's carried the explanation, the metric's dropped it, and the
+// fingerprint's said only that it happened. The reader needs the explanation
+// most when the thing that did it is the least expected, and a fingerprint
+// command modifying HEAD is about as unexpected as it gets.
+func gitStateMutated(kind string) string {
+	return kind + " modified git's own state (HEAD, the ignore rules, or the config); the checkout is judged against those, so changing them changes what unchanged means"
 }

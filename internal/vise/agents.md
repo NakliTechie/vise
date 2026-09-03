@@ -167,7 +167,7 @@ disobey.
 | `probe modified vise state` | something you did wrote to the judge's own files | revert it |
 | `probe modified git's own state` | a probe moved `HEAD`, or changed the ignore rules or Git config | revert it; the checkout is judged against those, so changing them changes what unchanged means |
 | `wrote files git neither tracks nor ignores` | a probe left a stray file in the checkout | the message names the files; remove the write, or ask an operator to add those paths to `.gitignore` |
-| `could not be launched` / `timed out` | the probe's command is broken | if your change broke the build, fix your change; if it was broken before you started, **stop and report** |
+| `could not be launched` / `timed out` | a declared command is broken — the message opens with which kind: a probe, a metric, a metric version command, or the environment fingerprint | if your change broke the build, fix your change; if it was broken before you started, **stop and report** |
 | `is tracked by git` | a declared artifact is a tracked file | **stop and report** — the manifest needs an operator |
 | `written by a newer vise` | the `vise` on your PATH is older than the baseline | **stop and report**: the tool is stale, not the code. `vise version --json` names the build you are running |
 

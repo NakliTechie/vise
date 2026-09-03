@@ -127,7 +127,7 @@ func CaptureFingerprint(root string, manifest Manifest) (Fingerprint, error) {
 	fingerprint.Env = make(map[string]string, len(manifest.Environment.Fingerprint))
 	runner := Runner{Root: root, Manifest: manifest}
 	for _, command := range manifest.Environment.Fingerprint {
-		result := runner.runShell("fingerprint", command, 30, nil)
+		result := runner.runShell("environment fingerprint command", "fingerprint", command, 30, nil)
 		if result.HarnessError != "" {
 			return Fingerprint{}, fmt.Errorf("fingerprint %q: %s", command, result.HarnessError)
 		}
@@ -144,7 +144,7 @@ func CaptureFingerprint(root string, manifest Manifest) (Fingerprint, error) {
 		return Fingerprint{}, err
 	}
 	if before.Git != after.Git {
-		return Fingerprint{}, fmt.Errorf("environment fingerprint command modified git's own state")
+		return Fingerprint{}, fmt.Errorf("%s", gitStateMutated("environment fingerprint command"))
 	}
 	if before.Tracked != after.Tracked {
 		return Fingerprint{}, fmt.Errorf("environment fingerprint command modified tracked files")

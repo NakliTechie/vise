@@ -171,7 +171,7 @@ func TestTheLaunchFailureNamesTheToolAndNotTheNoise(t *testing.T) {
 			name:    "no diagnostic at all falls back to the command",
 			stderr:  "some unrelated noise\n",
 			command: "thirdtool --flag",
-			wantIn:  `"thirdtool" is not on the probe's PATH`,
+			wantIn:  `"thirdtool" is not on its PATH`,
 			wantOut: "some unrelated noise",
 		},
 		{
@@ -184,7 +184,7 @@ func TestTheLaunchFailureNamesTheToolAndNotTheNoise(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := launchFailureDetail(test.command, CaptureBytes([]byte(test.stderr)))
+			got := launchFailureDetail("probe", test.command, CaptureBytes([]byte(test.stderr)))
 			if !strings.Contains(got, "127") {
 				t.Fatalf("the message does not say it was a launch failure: %q", got)
 			}
@@ -199,7 +199,7 @@ func TestTheLaunchFailureNamesTheToolAndNotTheNoise(t *testing.T) {
 
 	// And it is bounded, because a probe's stderr is not.
 	long := "sh: " + strings.Repeat("x", 4000) + ": command not found\n"
-	if got := launchFailureDetail("x", CaptureBytes([]byte(long))); len(got) > 400 {
+	if got := launchFailureDetail("probe", "x", CaptureBytes([]byte(long))); len(got) > 400 {
 		t.Fatalf("a 4000-character diagnostic rendered %d characters", len(got))
 	}
 }
