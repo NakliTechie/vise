@@ -376,6 +376,106 @@ EOF
   summary review pass
 }
 
+verify_example() {
+  # The copyable setup in examples/agent-ready, instantiated into a real Go
+  # project and driven end to end. A template nobody runs is a template with an
+  # unknown number of typos in it, and this one is what a new user starts from.
+  repo=$(mktemp -d "$VERIFY_RUN/example.XXXXXX")
+  git -C "$repo" init -q
+  git -C "$repo" config user.email verify@example.invalid
+  git -C "$repo" config user.name "vise verify"
+  mkdir -p "$repo/cmd/app" "$repo/fixtures"
+
+  printf 'module example.test/app\n\ngo %s\n' "${VERIFY_TOOLCHAIN#go}" > "$repo/go.mod"
+  cat > "$repo/cmd/app/main.go" <<'APP'
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: app <command>")
+		os.Exit(2)
+	}
+	switch os.Args[1] {
+	case "--help":
+		fmt.Println("app — an example gated by vise")
+	case "version":
+		fmt.Println("app 1.0.0")
+	case "render":
+		data, err := os.ReadFile(os.Args[2])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		var value map[string]any
+		if err := json.Unmarshal(data, &value); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if err := os.MkdirAll("out", 0o755); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if err := os.WriteFile("out/rendered.txt", []byte(fmt.Sprintf("%v\n", value["name"])), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println("rendered")
+	}
+}
+APP
+  printf '{"name":"example"}\n' > "$repo/fixtures/input.json"
+
+  # The shipped files, copied rather than reproduced: this feature fails if the
+  # example does, which is the point of it.
+  cp "$VISE_ROOT/examples/agent-ready/vise.toml" "$repo/vise.toml"
+  cp "$VISE_ROOT/examples/agent-ready/probe-cli.sh" "$repo/probe-cli.sh"
+  cp "$VISE_ROOT/AGENTS.md" "$repo/AGENTS.md"
+  chmod +x "$repo/probe-cli.sh"
+  grep -v '^#' "$VISE_ROOT/examples/agent-ready/gitignore" | grep -v '^$' > "$repo/.gitignore"
+  printf 'out/\n' >> "$repo/.gitignore"
+  # The example pins a toolchain; this harness pins its own, and they have to
+  # be the same or the probe builds with something the fixture did not name.
+  sed "s/GOTOOLCHAIN=go[0-9.]*/GOTOOLCHAIN=$VERIFY_TOOLCHAIN/" "$repo/probe-cli.sh" > "$repo/probe-cli.next"
+  mv "$repo/probe-cli.next" "$repo/probe-cli.sh"
+  chmod +x "$repo/probe-cli.sh"
+  sed "s/GOTOOLCHAIN=go[0-9.]*/GOTOOLCHAIN=$VERIFY_TOOLCHAIN/" "$repo/vise.toml" > "$repo/vise.next"
+  mv "$repo/vise.next" "$repo/vise.toml"
+
+  git -C "$repo" add -A >/dev/null
+  git -C "$repo" commit -qm "the project, set up the way the example says" >/dev/null
+
+  # doctor is clean but for the missing baseline, then the baseline is made.
+  # Outside the repository: a scratch file inside it makes the tree dirty, and
+  # record refuses a dirty tree. The same mistake this harness warns about.
+  (cd "$repo" && "$VERIFY_BIN" doctor --json) > "$VERIFY_RUN/example-doctor.json"
+  grep -q 'baseline-committed' "$VERIFY_RUN/example-doctor.json" || fail example "doctor did not ask for a baseline"
+  if grep -q 'portable-paths\|declared-inputs\|env-fingerprint\|agent-contract\|local-state-ignored\|tracked-artifacts' "$VERIFY_RUN/example-doctor.json"; then
+    cat "$VERIFY_RUN/example-doctor.json" >&2
+    fail example "the shipped example does not satisfy doctor"
+  fi
+
+  expect_vise_json_exit example 0 '"verdict":"green"' "$repo" record
+  git -C "$repo" add vise.lock .vise/blobs >/dev/null
+  git -C "$repo" commit -qm "Record behavior baseline" >/dev/null
+  expect_exit 0 sh -c "cd '$repo' && '$VERIFY_BIN' doctor --json | grep -q '\"ready\":true'"
+  expect_vise_json_exit example 0 '"verdict":"green"' "$repo" gate
+
+  # And the gate has to notice a change only the declared artifact shows: the
+  # case a test suite is least likely to be watching.
+  sed 's/value\["name"\]/value["NAME"]/' "$repo/cmd/app/main.go" > "$repo/cmd/app/main.next"
+  mv "$repo/cmd/app/main.next" "$repo/cmd/app/main.go"
+  expect_vise_json_exit example 1 '"verdict":"red"' "$repo" gate
+  git -C "$repo" checkout -- cmd/app/main.go
+  expect_vise_json_exit example 0 '"verdict":"green"' "$repo" gate
+  summary example pass
+}
+
 verify_dogfood() {
   repo=$(mktemp -d "$VERIFY_RUN/dogfood.XXXXXX")
   git clone -q "$VISE_ROOT" "$repo"
@@ -443,6 +543,7 @@ run_feature() {
     failure-modes) verify_failure_modes ;;
     metrics) verify_metrics ;;
     review) verify_review ;;
+    example) verify_example ;;
     dogfood) verify_dogfood ;;
     internal-checks) verify_internal_checks ;;
     *) fail "$1" "unknown feature; run scripts/verify --help" ;;
@@ -461,7 +562,7 @@ case "${1:-}" in
     if test "$#" -eq 2; then
       run_feature "$2"
     elif test "$#" -eq 1; then
-      for feature in orientation readiness initialization baseline failure-modes metrics review dogfood internal-checks; do
+      for feature in orientation readiness initialization baseline failure-modes metrics review example dogfood internal-checks; do
         run_feature "$feature"
       done
       summary full pass
