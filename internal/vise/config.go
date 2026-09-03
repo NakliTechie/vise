@@ -173,6 +173,16 @@ func (m Manifest) Validate(root string) error {
 		if metric.Direction != "down" && metric.Direction != "up" {
 			return fmt.Errorf("%s.direction must be down or up", where)
 		}
+		// A metric that enforces has to name its analyzer. Without a
+		// version_cmd the recorded tool version is the empty string, which
+		// compares equal to the empty string forever — so replacing the
+		// analyzer, or changing a script it calls, is invisible, and "swapping
+		// the analyzer is harness drift, never a free improvement" is not true.
+		// Tracking without enforcing is still allowed with no version command,
+		// because nothing is being gated on it.
+		if metric.Enforce == "no-regress" && strings.TrimSpace(metric.VersionCmd) == "" {
+			return fmt.Errorf("%s enforces no-regress and declares no version_cmd; an enforced metric must name its analyzer, or replacing the analyzer is a free improvement", where)
+		}
 		if metric.Enforce != "none" && metric.Enforce != "no-regress" {
 			return fmt.Errorf("%s.enforce must be none or no-regress", where)
 		}

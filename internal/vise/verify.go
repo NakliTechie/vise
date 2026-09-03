@@ -2,6 +2,7 @@ package vise
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"sort"
 )
@@ -63,7 +64,13 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	runner := Runner{Root: root, Manifest: manifest}
 	result.Flaky = replayProbes(root, &outcome, runner, selected, state.lock.Probes)
 
-	if opts.ProbeID == "" && outcome.Counts.Harness == 0 {
+	// Quality is only asked about once behavior has held. The verdict already
+	// ordered it that way — behavior outranks metric in Finalize — but the
+	// metrics were still being run, which means an analyzer executes against a
+	// tree whose behavior has already changed, its number is compared to a
+	// baseline recorded against different behavior, and the agent is handed a
+	// quality figure that describes something it is about to revert.
+	if opts.ProbeID == "" && outcome.Counts.Harness == 0 && outcome.Counts.Behavior == 0 && outcome.Counts.Flaky == 0 {
 		result.Flaky = append(result.Flaky, evaluateMetrics(&outcome, runner, manifest.Metrics, state.lock.Metrics)...)
 	}
 	return finalizeVerifyResult(result, outcome)
@@ -249,7 +256,17 @@ func evaluateMetrics(outcome *Outcome, runner Runner, metrics []Metric, expected
 				continue
 			}
 		}
-		delta := MetricDelta{Base: expected.Value, Now: first.Value, Delta: first.Value - expected.Value, Direction: metric.Direction, Enforce: metric.Enforce}
+		// Both values are finite by the time they get here, and their
+		// difference still need not be: two measurements near the top of the
+		// float range subtract to infinity, which is not a number JSON can
+		// carry, so the verdict would fail to encode and the agent would get a
+		// harness error about a metric that was merely enormous.
+		difference := first.Value - expected.Value
+		if math.IsInf(difference, 0) || math.IsNaN(difference) {
+			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: "the metric's change is not a finite number; the values are too far apart to subtract, which means the metric is not measuring a scale anyone can act on"})
+			continue
+		}
+		delta := MetricDelta{Base: expected.Value, Now: first.Value, Delta: difference, Direction: metric.Direction, Enforce: metric.Enforce}
 		outcome.Metrics[metric.ID] = delta
 		regressed := metricRegressed(metric.Direction, metric.Enforce, expected.Value, first.Value)
 		if regressed {

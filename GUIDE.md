@@ -324,7 +324,15 @@ id = "complexity"
 run = "cat metric.txt"
 direction = "down"
 enforce = "no-regress"
+version_cmd = "my-analyzer --version"
 ```
+
+A metric that enforces must declare a `version_cmd`. Without one the recorded
+tool version is the empty string, which compares equal to the empty string
+forever — so replacing the analyzer, or editing a script it calls, would be
+invisible, and "swapping the analyzer is harness drift, never a free
+improvement" would not be true. A metric that only tracks (`enforce = "none"`)
+needs no version command, because nothing is gated on it.
 
 ```
 $ vise gate

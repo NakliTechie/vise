@@ -279,3 +279,41 @@ func TestAProposalCannotCollideWithTheManifest(t *testing.T) {
 		t.Fatalf("proposals = %#v", proposals.Probes)
 	}
 }
+
+// A metric that enforces has to name its analyzer. Without a version_cmd the
+// recorded tool version is the empty string, which compares equal to the empty
+// string forever — so replacing the analyzer, or editing a script it calls, is
+// invisible, and "swapping the analyzer is harness drift, never a free
+// improvement" is not true. Found by an adversarial audit of the metric path.
+func TestAnEnforcedMetricMustNameItsAnalyzer(t *testing.T) {
+	root := testGitRepo(t)
+	manifest := func(enforce, versionCmd string) Manifest {
+		return Manifest{
+			Vise:    ViseSettings{Version: LockVersion},
+			Stubs:   StubSettings{Network: "declared-off"},
+			Probes:  []Probe{{ID: "p", Run: "printf p", Timeout: 30}},
+			Metrics: []Metric{{ID: "m", Run: "printf 1", Direction: "down", Enforce: enforce, Timeout: 30, VersionCmd: versionCmd}},
+		}
+	}
+
+	err := manifest("no-regress", "").Validate(root)
+	if err == nil {
+		t.Fatal("an enforced metric with no version_cmd was accepted")
+	}
+	if !strings.Contains(err.Error(), "free improvement") {
+		t.Fatalf("the error does not say why: %v", err)
+	}
+	if err := manifest("no-regress", "   ").Validate(root); err == nil {
+		t.Fatal("a blank version_cmd satisfied the rule")
+	}
+
+	// Enforced with an analyzer named: fine.
+	if err := manifest("no-regress", "analyzer --version").Validate(root); err != nil {
+		t.Fatalf("an enforced metric naming its analyzer was refused: %v", err)
+	}
+	// Tracked but not enforced: no version command needed, because nothing is
+	// gated on it.
+	if err := manifest("none", "").Validate(root); err != nil {
+		t.Fatalf("a tracked-only metric was refused: %v", err)
+	}
+}

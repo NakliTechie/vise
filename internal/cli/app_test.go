@@ -590,6 +590,7 @@ id = "complexity"
 run = "cat metric.txt"
 direction = "down"
 enforce = "no-regress"
+version_cmd = "printf analyzer-1"
 `)
 	root := cliRepo(t, manifest, "#!/bin/sh\nprintf stable")
 	cliWrite(t, root, "metric.txt", "10")

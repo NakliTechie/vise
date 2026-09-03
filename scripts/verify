@@ -351,6 +351,7 @@ id = "complexity"
 run = "cat metric.txt"
 direction = "down"
 enforce = "no-regress"
+version_cmd = "printf analyzer-1"
 EOF
   printf '10\n' > "$repo/metric.txt"
   commit_fixture "$repo"
