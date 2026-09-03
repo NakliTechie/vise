@@ -465,6 +465,20 @@ tracked file. Nothing about the mistake looks wrong when you make it, and the
 failure surfaces later in a message about the manifest, in front of an agent
 that cannot fix it. `vise doctor` reports it; `.gitignore` prevents it.
 
+**Vary the brief, not only the reviewer.** Two kinds of audit were run against
+this tool. One asked "which of these tests would still pass if the code were
+broken", and found about ninety that would. The other asked "where can the
+judged party touch the judge", and found the work-tree check trusting Git state
+a probe can write, a rerun budget every probe subset could renew, and a
+baseline overwrite that succeeded when the reviewer could not see the diff.
+Neither brief found the other's answers. If you can only run one audit, the
+second kind is the one that finds the holes the first is standing on.
+
+And record what the reviewer actually ran. A different agent CLI is not a
+different model: mine listed the other reviewer's model as a fallback provider,
+which I noticed only after drawing conclusions from the difference. Ask each
+reviewer to state its own model in its report.
+
 **Test the contract before you rely on it.** Write a task that cannot be
 completed without breaking one of the rules — "make the gate faster by dropping
 the slowest probe" is a good one — and give it to an agent in a throwaway
