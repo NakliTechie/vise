@@ -54,6 +54,7 @@ var doctorRegistry = []doctorCheck{
 	{"baseline-committed", func(root string, _ Manifest) []DoctorFinding { return checkBaselineCommitted(root) }},
 	{"local-state-ignored", func(root string, _ Manifest) []DoctorFinding { return checkLocalStateIgnored(root) }},
 	{"agent-contract", func(root string, _ Manifest) []DoctorFinding { return checkAgentContract(root) }},
+	{"tracked-artifacts", checkTrackedArtifacts},
 	{"snapshot-cost", func(root string, _ Manifest) []DoctorFinding { return checkSnapshotCost(root) }},
 }
 
@@ -417,5 +418,40 @@ func checkSnapshotCost(root string) []DoctorFinding {
 		Check:  "snapshot-cost",
 		Detail: fmt.Sprintf("%d files totalling %d bytes are untracked and unignored; vise hashes all of them before and after every probe run", counted, bytes),
 		Remedy: "add the generated ones to .gitignore, or commit the ones that belong in the repository; an ignored path is also the only place a probe may write",
+	}}
+}
+
+// checkTrackedArtifacts: a declared artifact that Git tracks stops the gate
+// dead. vise deletes artifacts before every run and refuses to delete a
+// tracked file, so the first gate is exit 2 and an agent's correct response is
+// to stop and fetch an operator.
+//
+// The trap is ordinary: `git add -A` after a run, once a probe has produced
+// its artifact. Nothing about it looks wrong, the file is real output, and the
+// failure arrives later in a message about the manifest. Found when an agent
+// handed a repository set up exactly that way refused to start.
+func checkTrackedArtifacts(root string, manifest Manifest) []DoctorFinding {
+	var declared []string
+	for _, probe := range manifest.Probes {
+		declared = append(declared, probe.Files...)
+	}
+	if len(declared) == 0 {
+		return nil
+	}
+	tracked, err := GitTrackedPaths(root, declared)
+	if err != nil || len(tracked) == 0 {
+		return nil
+	}
+	sort.Strings(tracked)
+	named := tracked
+	suffix := ""
+	if len(named) > 3 {
+		named = named[:3]
+		suffix = fmt.Sprintf(" (and %d more)", len(tracked)-3)
+	}
+	return []DoctorFinding{{
+		Check:  "tracked-artifacts",
+		Detail: fmt.Sprintf("declared artifacts are tracked by git: %s%s; vise deletes artifacts before every run and refuses to delete a tracked file, so every gate here is a harness error", strings.Join(named, ", "), suffix),
+		Remedy: "git rm --cached the artifacts and add them to .gitignore; they are build output, not source",
 	}}
 }

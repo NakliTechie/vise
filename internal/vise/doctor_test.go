@@ -446,3 +446,43 @@ func TestDoctorAsksAboutTheBlobsTheLockfileReferences(t *testing.T) {
 		t.Fatalf("uncommitted referenced blobs went unreported: %q", detail)
 	}
 }
+
+// A declared artifact that Git tracks stops the gate dead: vise deletes
+// artifacts before every run and refuses to delete a tracked file. The trap is
+// an ordinary `git add -A` after a probe has produced one — nothing about it
+// looks wrong, the file is real output, and the failure arrives later in a
+// message about the manifest. Found when an agent handed a repository set up
+// exactly that way refused to start, correctly.
+func TestDoctorNoticesADeclaredArtifactSomebodyCommitted(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "AGENTS.md", AgentContract)
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"git --version\"]\n[[probe]]\nid = \"p\"\nrun = \"mkdir -p out && printf produced > out/result.txt\"\nfiles = [\"out/result.txt\"]\n")
+	writeTestFile(t, root, "vise.lock", "{\"v\":1}")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "harness")
+
+	// Clean so far: the artifact does not exist yet.
+	for _, finding := range Doctor(root).Findings {
+		if finding.Check == "tracked-artifacts" {
+			t.Fatalf("reported before the artifact existed: %s", finding.Detail)
+		}
+	}
+
+	// The probe runs, produces its artifact, and somebody commits everything.
+	writeTestFile(t, root, filepath.Join("out", "result.txt"), "produced")
+	testGit(t, root, "add", "-A")
+	testGit(t, root, "commit", "-qm", "add everything")
+
+	var detail, remedy string
+	for _, finding := range Doctor(root).Findings {
+		if finding.Check == "tracked-artifacts" {
+			detail, remedy = finding.Detail, finding.Remedy
+		}
+	}
+	if !strings.Contains(detail, "out/result.txt") {
+		t.Fatalf("a committed declared artifact went unreported: %q", detail)
+	}
+	if !strings.Contains(remedy, "git rm --cached") {
+		t.Fatalf("the remedy does not say how to undo it: %q", remedy)
+	}
+}

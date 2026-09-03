@@ -29,7 +29,11 @@ func TestEachDoctorCheckEmitsTheNameItIsRegisteredUnder(t *testing.T) {
 	root := testGitRepo(t)
 	writeTestFile(t, root, ".gitignore", "node_modules/\n")
 	writeTestFile(t, root, "wrapper.sh", "#!/bin/sh\nprintf %s \"$VISE_TMP\"\n")
-	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"sh wrapper.sh\"\nenv = { CACHE = \"/opt/elsewhere\" }\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"sh wrapper.sh\"\nfiles = [\"out/result.txt\"]\nenv = { CACHE = \"/opt/elsewhere\" }\n")
+	// A declared artifact somebody committed, the way `git add -A` does.
+	writeTestFile(t, root, filepath.Join("out", "result.txt"), "produced")
+	testGit(t, root, "add", "out/result.txt")
+	testGit(t, root, "commit", "-qm", "commit the artifact")
 	for i := 0; i < 2001; i++ {
 		writeTestFile(t, root, filepath.Join("deps", "pkg"+strconv.Itoa(i)+".txt"), "x")
 	}
