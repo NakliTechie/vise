@@ -1521,3 +1521,32 @@ func TestTheStatusRecordedCommitsLineDoesNotGrowWithTheProbeCount(t *testing.T) 
 		t.Errorf("the line does not say how many it left out:\n%s", line)
 	}
 }
+
+// The same defect I fixed in writeOutcomeJSON earlier, sitting one function
+// away in writeJSON, and nothing caught it: making the marshal-failure path
+// return exit 0 passed both packages.
+//
+// A verdict that cannot be serialized must never be reported as a verdict. The
+// caller gets a JSON object saying so and a harness exit, not a success code
+// with a broken body — that is the one failure a machine reading stdout has no
+// way to notice.
+//
+// I could not reach it through a command: status's floats come from a lockfile,
+// and JSON cannot carry a non-finite number into one in the first place. So it
+// is defensive, and this pins the contract directly rather than pretending an
+// end-to-end path exists. The value below is a channel, which encoding/json
+// refuses by design.
+func TestAValueThatCannotBeSerializedIsNotReportedAsSuccess(t *testing.T) {
+	var out bytes.Buffer
+	exit := writeJSON(&out, map[string]any{"impossible": make(chan int)})
+	if exit != vise.ExitHarness {
+		t.Errorf("exit %d, want %d — an unserializable value reported success", exit, vise.ExitHarness)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
+		t.Fatalf("the failure report is not itself valid JSON: %v\n%s", err, out.String())
+	}
+	if parsed["exit"] != float64(vise.ExitHarness) {
+		t.Errorf("the failure report claims exit %v", parsed["exit"])
+	}
+}
