@@ -89,14 +89,8 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 		switch {
 		case err != nil:
 			mutation = err.Error()
-		case before.Git != after.Git:
-			mutation = gitStateMutated("probe")
-		case before.Tracked != after.Tracked:
-			mutation = "probe modified tracked files"
 		default:
-			if stray := before.ChangedUntracked(after); len(stray) > 0 {
-				mutation = strayFilesError("probe", stray)
-			}
+			mutation = workspaceMutation("probe", before, after)
 		}
 		if mutation != "" {
 			if result.HarnessError == "" {
@@ -159,14 +153,8 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 	if err != nil {
 		return MetricResult{Value: value, ToolVersion: version, HarnessError: err.Error()}
 	}
-	if before.Git != after.Git {
-		return MetricResult{Value: value, ToolVersion: version, HarnessError: gitStateMutated("metric")}
-	}
-	if before.Tracked != after.Tracked {
-		return MetricResult{Value: value, ToolVersion: version, HarnessError: "metric modified tracked files"}
-	}
-	if stray := before.ChangedUntracked(after); len(stray) > 0 {
-		return MetricResult{Value: value, ToolVersion: version, HarnessError: strayFilesError("metric", stray)}
+	if mutation := workspaceMutation("metric", before, after); mutation != "" {
+		return MetricResult{Value: value, ToolVersion: version, HarnessError: mutation}
 	}
 	return MetricResult{Value: value, ToolVersion: version, Stdout: result.Stdout, Stderr: result.Stderr}
 }
@@ -483,4 +471,27 @@ func metricNumberDetail(text string, truncated bool) string {
 // command modifying HEAD is about as unexpected as it gets.
 func gitStateMutated(kind string) string {
 	return kind + " modified git's own state (HEAD, the ignore rules, or the config); the checkout is judged against those, so changing them changes what unchanged means"
+}
+
+// workspaceMutation reports how a command changed the checkout, or "" if it did
+// not. Git's own state first, then tracked files, then strays — the order is
+// most-general to most-specific, so the message names the largest thing that
+// moved.
+//
+// One copy. It was written out twice, in RunProbe and RunMetric, with the same
+// order and the same predicates, differing only in the noun. This is the
+// comparison the whole tool rests on: whatever the snapshot comes to mean, it
+// has to mean the same thing for both, and two copies is how that stops being
+// true one edit at a time.
+func workspaceMutation(kind string, before, after WorkspaceSnapshot) string {
+	switch {
+	case before.Git != after.Git:
+		return gitStateMutated(kind)
+	case before.Tracked != after.Tracked:
+		return kind + " modified tracked files"
+	}
+	if stray := before.ChangedUntracked(after); len(stray) > 0 {
+		return strayFilesError(kind, stray)
+	}
+	return ""
 }
