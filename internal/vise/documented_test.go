@@ -93,3 +93,37 @@ func sectionOf(t *testing.T, document, heading string) string {
 	}
 	return rest
 }
+
+// The counts stated in prose were wrong three times tonight: the harness
+// features, doctor's checks twice. A number in a document is a claim like any
+// other, and this one is cheap to check.
+func TestTheStatedCheckCountMatchesTheRegistry(t *testing.T) {
+	// The registry plus the two names it cannot hold — "manifest" and
+	// "git-work-tree" — is what DoctorChecks reports.
+	registered := len(doctorRegistry)
+
+	words := map[int]string{
+		6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve",
+	}
+	if _, ok := words[registered]; !ok {
+		t.Skipf("no spelled-out form for %d checks; extend the table", registered)
+	}
+
+	for _, name := range []string{"README.md", "GUIDE.md", "SPEC.md"} {
+		document := strings.ToLower(readRepositoryFile(t, name))
+		var mentions int
+		for count, word := range words {
+			for _, phrase := range []string{word + " checks", word + " static checks"} {
+				if strings.Contains(document, phrase) {
+					mentions++
+					if count != registered {
+						t.Errorf("%s says %q; the registry has %d", name, phrase, registered)
+					}
+				}
+			}
+		}
+		if mentions == 0 {
+			t.Logf("note: %s states no check count", name)
+		}
+	}
+}

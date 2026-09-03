@@ -22,7 +22,7 @@ read tells you both the situation and which binary is reporting it. `version
 tell two builds apart, so check the revision whenever the tool behaves oddly,
 and always when a lockfile will not parse.
 
-`status` always exits 0 and reports the whole situation: whether a baseline
+`status` exits 0 for any call it understands, and reports the whole situation: whether a baseline
 exists, whether it agrees with the manifest, whether the environment drifted,
 whether a rerun is refused, and exactly one `next.action`. Read it before you
 touch anything.

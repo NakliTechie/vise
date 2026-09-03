@@ -43,7 +43,7 @@ vise version              # vise 0.3.0-dev
 Inside the repository whose behavior you want to hold still:
 
 ```sh
-vise status               # always exit 0; tells you what to do next
+vise status               # exit 0 whatever it finds; tells you what to do next
 vise init                 # writes a commented vise.toml and local-state ignores
 ```
 
@@ -93,7 +93,7 @@ GATE INDETERMINATE [flake] — 6/7: convert-fixture
 
 vise's primary user is a coding agent mid-loop: context-poor, liable to be killed mid-turn, prone to rationalizing its own failures. Every interface decision follows from that.
 
-- **One perception act.** `vise status` renders the entire situation — manifest, lockfile, environment drift, baseline drift, rerun state, journal tail — in one bounded read. It always exits 0.
+- **One perception act.** `vise status` renders the entire situation — manifest, lockfile, environment drift, baseline drift, rerun state, journal tail — in one bounded read. It exits 0 whatever it finds.
 - **Machine-decidable, not merely machine-readable.** `--json` on every command; every failing outcome carries a typed class, and every outcome carries one `next.action` from a closed vocabulary. A green outcome carries no classes and no failures, because there are none. The agent branches on the exit code and the class, never on prose.
 - **The exit code is the branch; `next.action` is the instruction.** They are not one-to-one and the difference matters: exit 2 asks the agent to repair a probe it broke, or to stop because the repair is in a file it may not write, and only `next.action` separates those. Exits 1 and 5 both say revert, and what to revert differs. Branch on the code, then read the action.
 - **Bounded output, always.** Green is one line. Red shows the first divergence and counts, never a dump. Output grows with divergence, never with repository size — and a long line is clipped around the differing column, so a probe that prints one 8,000-character line still renders a diff you can read.
@@ -121,7 +121,7 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 | `vise gate [--quiet]` | The refactor-loop verdict, journaled. |
 | `vise run <probe-id>` | Run one probe and report what it observed, without comparing it to the baseline. The lifecycle still applies: artifacts are deleted first, the checks still run. Exit mirrors the probe. |
 | `vise status` | The whole situation in one bounded read. Always exit 0. |
-| `vise doctor` | Check the repository is fit to hand to an agent. Read-only, always exit 0. |
+| `vise doctor` | Check the repository is fit to hand to an agent. Read-only; exit 0 whatever it finds. |
 | `vise version` | The version, and with `--json` the build revision. |
 
 ## Before you hand the repository to an agent
@@ -137,7 +137,7 @@ without declaring it as an input, a baseline that was never committed so a fresh
 cannot gate, vise's own local state left unignored, a repository with no
 written rules for the agent, a declared artifact somebody committed with , and an untracked, unignored file set large enough
 to make every gate slow for no visible reason. Every finding names its remedy. It runs no probe,
-writes nothing, and always exits 0.
+writes nothing, and exits 0 whatever it finds — a usage error is exit 2 like anywhere else, because that is a complaint about the command line rather than a report about the repository.
 
 The failures are invisible from where you sit and expensive from where the
 agent sits: the operator's shell has the toolchain, the caches, and the home

@@ -10,7 +10,7 @@ A walk through one vise campaign on the command line, with the real output of ev
 ## The loop in one screen
 
 ```
-vise status          # where am I? (always exit 0)
+vise status          # where am I? (exit 0 whatever it finds)
 vise init            # once: write a starter vise.toml
 <declare probes, commit>
 vise record          # freeze behavior into vise.lock (+ .vise/blobs/), commit both
@@ -375,7 +375,7 @@ The agent may draft a probe into `.vise/proposals.toml` (same schema as `[[probe
 | 4 | not initialized | `record_first` | an operator records a baseline |
 | 5 | metric regression under `no-regress` | `revert` | the change held behavior but worsened quality |
 
-`status` always exits 0 and reports instead of failing. `run` mirrors the probe's own exit (a launch failure is 127).
+`status` exits 0 whatever it finds and reports instead of failing; only a call it cannot understand is exit 2. `run` mirrors the probe's own exit (a launch failure is 127).
 
 ## 11. Operator territory
 
@@ -414,7 +414,7 @@ other case, and that one has a setup step people skip. These lessons come from
 running real coding agents against a vise-gated clone of vise itself.
 
 **Run `vise doctor` first.** It is the short version of this whole section:
-seven static checks, each one a failure that actually cost a session here, each
+eight static checks, each one a failure that actually cost a session here, each
 with its remedy attached.
 
 ```text
@@ -426,7 +426,7 @@ portable-paths — "/Users/you/go/pkg/mod" is outside the checkout, named by pro
 next: human — 2 finding(s) an operator should resolve before an agent works here
 ```
 
-It runs no probe, writes nothing, and always exits 0. A clean report is not a
+It runs no probe, writes nothing, and exits 0 whatever it finds. A clean report is not a
 promise that the gate will pass in a sandbox — only the cold gate below proves
 that — but every finding it does raise would have shown up there as a mystery.
 
