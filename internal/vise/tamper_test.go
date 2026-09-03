@@ -95,12 +95,23 @@ func TestFingerprintMismatchNoticesEachKindOfDrift(t *testing.T) {
 		{"a tool version that moved", func(f *Fingerprint) {
 			f.Env = map[string]string{"go version": "go1.25.9", "jq --version": "jq-1.7"}
 		}, "go version"},
+		// These used to report only "the set of fingerprint commands differs",
+		// from a length check. Naming the command is what an operator needs,
+		// and the length check could not name one because the loop under it
+		// walked the current side alone.
 		{"a fingerprint command added", func(f *Fingerprint) {
 			f.Env = map[string]string{"go version": "go1.25.8", "jq --version": "jq-1.7", "cc --version": "clang"}
-		}, "set of fingerprint commands"},
+		}, `"cc --version" is not in the recorded baseline`},
 		{"a fingerprint command removed", func(f *Fingerprint) {
 			f.Env = map[string]string{"go version": "go1.25.8"}
-		}, "set of fingerprint commands"},
+		}, `"jq --version" was recorded and is no longer declared`},
+		// The case both the length check and the one-sided loop missed. Swap a
+		// command for another and the lengths match, so the check said nothing;
+		// the loop then named the arrival and never the departure, and the
+		// operator accepted a baseline knowing half of why.
+		{"one command swapped for another", func(f *Fingerprint) {
+			f.Env = map[string]string{"go version": "go1.25.8", "cc --version": "clang"}
+		}, `"cc --version" is not in the recorded baseline`},
 	}
 
 	for _, test := range tests {
@@ -121,6 +132,24 @@ func TestFingerprintMismatchNoticesEachKindOfDrift(t *testing.T) {
 			}
 			if FingerprintEqual(current, base) {
 				t.Fatalf("%s was reported equal", test.name)
+			}
+
+			// FingerprintMismatch returns the first difference in sorted
+			// order; FingerprintMismatches is the one that promises all of
+			// them, and its own comment says reporting one and not the others
+			// is how a baseline gets accepted for a third of a reason. For the
+			// swap that is two differences, and the old one-sided loop could
+			// only ever produce the arrival.
+			if test.name == "one command swapped for another" {
+				all := strings.Join(FingerprintMismatches(current, base), "; ")
+				for _, want := range []string{
+					`"cc --version" is not in the recorded baseline`,
+					`"jq --version" was recorded and is no longer declared`,
+				} {
+					if !strings.Contains(all, want) {
+						t.Errorf("the full report does not name %q:\n\t%s", want, all)
+					}
+				}
 			}
 			// And the full list must carry it too, since that is what the
 			// review diff renders.

@@ -177,15 +177,50 @@ func FingerprintMismatches(current, recorded Fingerprint) []string {
 	if current.Stubs != recorded.Stubs {
 		all = append(all, "manifest [stubs] differ from the recorded baseline")
 	}
-	if len(current.Env) != len(recorded.Env) {
-		all = append(all, "the set of fingerprint commands differs from the recorded baseline")
+	return append(all, environmentDifferences(current, recorded)...)
+}
+
+// environmentDifferences walks the union of both sides, which is the whole
+// point and was not what it did.
+//
+// It iterated the current side only, so a fingerprint command present in the
+// baseline and gone from the manifest was never named — caught, if at all, by a
+// length check above it. Remove one command and add another and the lengths
+// match: the operator was told about the command that appeared and never about
+// the one that vanished, while the function's own comment promises that
+// reporting one difference and not the others is exactly the failure it exists
+// to prevent.
+//
+// Found by a coding agent working under the gate, which was asked to say what
+// looked wrong without fixing it, and did.
+func environmentDifferences(current, recorded Fingerprint) []string {
+	keys := make(map[string]bool, len(current.Env)+len(recorded.Env))
+	for key := range current.Env {
+		keys[key] = true
 	}
-	for _, key := range sortedKeys(current.Env) {
-		if recorded.Env[key] != current.Env[key] {
-			all = append(all, fmt.Sprintf("fingerprint %q output differs from the recorded baseline", key))
+	for key := range recorded.Env {
+		keys[key] = true
+	}
+	names := make([]string, 0, len(keys))
+	for key := range keys {
+		names = append(names, key)
+	}
+	sort.Strings(names)
+
+	var differences []string
+	for _, key := range names {
+		now, inNow := current.Env[key]
+		then, inThen := recorded.Env[key]
+		switch {
+		case !inThen:
+			differences = append(differences, fmt.Sprintf("fingerprint %q is not in the recorded baseline", key))
+		case !inNow:
+			differences = append(differences, fmt.Sprintf("fingerprint %q was recorded and is no longer declared", key))
+		case now != then:
+			differences = append(differences, fmt.Sprintf("fingerprint %q output differs from the recorded baseline", key))
 		}
 	}
-	return all
+	return differences
 }
 
 func FingerprintMismatch(current, recorded Fingerprint) string {
@@ -195,13 +230,8 @@ func FingerprintMismatch(current, recorded Fingerprint) string {
 	if current.Stubs != recorded.Stubs {
 		return "manifest [stubs] differ from the recorded baseline"
 	}
-	if len(current.Env) != len(recorded.Env) {
-		return "the set of fingerprint commands differs from the recorded baseline"
-	}
-	for _, key := range sortedKeys(current.Env) {
-		if recorded.Env[key] != current.Env[key] {
-			return fmt.Sprintf("fingerprint %q output differs from the recorded baseline", key)
-		}
+	if differences := environmentDifferences(current, recorded); len(differences) > 0 {
+		return differences[0]
 	}
 	return ""
 }
