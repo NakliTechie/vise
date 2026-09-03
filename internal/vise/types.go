@@ -52,7 +52,10 @@ type Counts struct {
 	Behavior int `json:"behavior"`
 	Flaky    int `json:"flaky"`
 	Harness  int `json:"harness"`
-	Metric   int `json:"metric,omitempty"`
+	// No omitempty, unlike the fields around it once had: a consumer summing
+	// the classes should not have to know which names might be missing, and a
+	// zero that disappears is the one a reader assumes is there.
+	Metric int `json:"metric"`
 }
 
 type ExpectedActual struct {

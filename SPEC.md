@@ -181,7 +181,7 @@ vise itself enforces **`rerun` at most once**: the third consecutive `gate` or `
 ## 5. Operator territory
 
 - `vise.toml`, `vise.lock`, and `.vise/blobs/` are the judge: the gated agent reads them, never writes them. `.vise/journal.jsonl` is local and gitignored (§6) but joins the protected surface: the rerun limit (§4.1) is derived from it, so an agent that edits the journal can buy itself reruns — vise does not detect that, the harness must prevent it. Enforcement is the caller's harness policy (hook/permission rule denying `vise record` + writes to those four paths to the agent) — vise cannot authenticate who typed a command and says so honestly. `record`'s overwrite gesture (`--i-reviewed-the-diff`, diff shown first, journaled) is deliberately human-shaped.
-- The tamper line: verify and gate print `lock: sha256(manifest+lockfile+blobs-index)`, except under `gate --quiet`, whose whole purpose is one line for a loop that reads a verdict and nothing else; the JSON form always carries it. **The trusted anchor is git** — the hash is reproducible from the committed artifacts at the recorded commit, so CI (or the operator) compares the printed hash against one recomputed from `git show` of the trusted branch. Not a cryptographic identity system; an honest tripwire, and stated as such.
+- The tamper line: verify and gate print `lock: sha256(manifest+lockfile+blobs-index)`, except under `gate --quiet`, whose whole purpose is one line for a loop that reads a verdict and nothing else; the JSON form always carries it. **The trusted anchor is git** — the hash is reproducible from the committed artifacts, so CI (or the operator) compares the printed hash against one recomputed from `git show` of the trusted branch. The commit to read them from is the one that **committed the baseline**, not `recorded_commit`: that names the commit whose behavior was observed, which is by construction earlier than the commit that added `vise.lock`. Not a cryptographic identity system; an honest tripwire, and stated as such.
 
 ### 5.1 The proposal flow (escaped defects become probes)
 
@@ -210,7 +210,7 @@ Every event carries `e`, `at` (RFC 3339, UTC, nanosecond precision), `commit` an
 
 - **The canonical loop:** operator `record` once → per micro-step: transform → `vise gate --json` → branch on `next.action` → commit only when green (`proceed` · `revert` + journal the dead end · `fix_probe` — repair harness, never code · `quarantine_ack` — continue only if the harness policy tolerates indeterminate, else stop · `human` — park). One transform type per commit; the gate runs between every commit.
 - **ntkit:** `/autopilot-nt` refactor runs use `vise gate` as the per-item verifier and `vise status` in the morning report; `/lab-nt` campaigns hill-climb a metric probe with "gate stays green" as the fence. (Parked until dogfood.)
-- **CI:** `vise gate --quiet` as a required check; recompute the `lock:` hash from the trusted branch as the tamper tripwire (§5).
+- **CI:** `vise gate --json` as a required check — `--quiet` prints the verdict and not the hash, so it cannot serve a workflow whose second half is comparing that hash. Read `lock` from the JSON and recompute it from the trusted branch as the tamper tripwire (§5).
 - **Operator-only enforcement:** a PreToolUse hook / permission rule denying the agent `vise record` and writes to `vise.toml` / `vise.lock` / `.vise/blobs/` / `.vise/journal.jsonl` (the last one guards the rerun limit, §4.1).
 
 ## 8. Non-goals (v0)

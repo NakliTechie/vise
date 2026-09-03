@@ -261,7 +261,12 @@ func ProbeRunHash(probe Probe) (string, error) {
 	return HashBytes(data), nil
 }
 
-func LoadProposals(root string) (Proposals, error) {
+// LoadProposals reads the pending probe proposals, validating them the way a
+// manifest probe is validated — and against the manifest, because a proposal
+// whose id is already taken can never be promoted. Accepting one and listing
+// it as pending tells an operator there is something to consider when there is
+// only something to rename.
+func LoadProposals(root string, manifest Manifest) (Proposals, error) {
 	path := filepath.Join(root, ".vise", "proposals.toml")
 	data, err := readRegularFile(path)
 	if os.IsNotExist(err) {
@@ -284,12 +289,22 @@ func LoadProposals(root string) (Proposals, error) {
 		return Proposals{}, fmt.Errorf("unknown proposal keys: %s", strings.Join(parts, ", "))
 	}
 	seen := make(map[string]bool)
+	taken := make(map[string]string, len(manifest.Probes)+len(manifest.Metrics))
+	for _, probe := range manifest.Probes {
+		taken[probe.ID] = "probe"
+	}
+	for _, metric := range manifest.Metrics {
+		taken[metric.ID] = "metric"
+	}
 	for i := range proposals.Probes {
 		probe := &proposals.Probes[i]
 		if probe.Timeout == 0 {
 			probe.Timeout = 30
 		}
 		where := fmt.Sprintf("proposal[%d]", i)
+		if kind, ok := taken[probe.ID]; ok {
+			return Proposals{}, fmt.Errorf("%s.id %q is already a %s in vise.toml; a proposal that collides with the manifest can never be promoted", where, probe.ID, kind)
+		}
 		if err := validateID(probe.ID, where); err != nil {
 			return Proposals{}, err
 		}

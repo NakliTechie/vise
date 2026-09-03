@@ -234,3 +234,40 @@ func TestAMetricWithNoFrozenDefinitionIsAHarnessFailureNotAPass(t *testing.T) {
 		t.Fatalf("the failure does not name the remedy: %q", failure.Detail)
 	}
 }
+
+// A proposal whose id is already a probe or a metric in the manifest can never
+// be promoted, and listing it as pending tells an operator there is something
+// to consider when there is only something to rename.
+func TestAProposalCannotCollideWithTheManifest(t *testing.T) {
+	root := testGitRepo(t)
+	manifest := Manifest{
+		Vise:    ViseSettings{Version: LockVersion},
+		Stubs:   StubSettings{Network: "declared-off"},
+		Probes:  []Probe{{ID: "taken", Run: "printf p", Timeout: 30}},
+		Metrics: []Metric{{ID: "counted", Run: "printf 1", Direction: "down", Enforce: "none", Timeout: 30}},
+	}
+
+	for _, id := range []string{"taken", "counted"} {
+		writeTestFile(t, root, filepath.Join(".vise", "proposals.toml"),
+			"[[probe]]\nid = \""+id+"\"\nrun = \"printf x\"\n")
+		_, err := LoadProposals(root, manifest)
+		if err == nil {
+			t.Fatalf("a proposal named %q was accepted although the manifest already uses it", id)
+		}
+		if !strings.Contains(err.Error(), "never be promoted") {
+			t.Fatalf("the error does not say why: %v", err)
+		}
+	}
+
+	// A free id is still accepted, or the rule would be satisfied by refusing
+	// every proposal.
+	writeTestFile(t, root, filepath.Join(".vise", "proposals.toml"),
+		"[[probe]]\nid = \"fresh\"\nrun = \"printf x\"\n")
+	proposals, err := LoadProposals(root, manifest)
+	if err != nil {
+		t.Fatalf("a proposal with a free id was refused: %v", err)
+	}
+	if len(proposals.Probes) != 1 {
+		t.Fatalf("proposals = %#v", proposals.Probes)
+	}
+}

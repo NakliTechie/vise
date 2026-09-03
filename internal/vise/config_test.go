@@ -107,7 +107,7 @@ func TestLoadManifestRejectsSymlink(t *testing.T) {
 func TestLoadProposals(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, ".vise/proposals.toml", "[[probe]]\nid='regression'\nrun='printf fixed'\n")
-	proposals, err := LoadProposals(root)
+	proposals, err := LoadProposals(root, Manifest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestProposalsGetTheValidationProbesGet(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
 			writeTestFile(t, root, ".vise/proposals.toml", test.body)
-			_, err := LoadProposals(root)
+			_, err := LoadProposals(root, Manifest{})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want it to name %q", err, test.want)
 			}
@@ -164,7 +164,7 @@ func TestProposalsGetTheValidationProbesGet(t *testing.T) {
 	// A well-formed proposal still loads.
 	root := t.TempDir()
 	writeTestFile(t, root, ".vise/proposals.toml", "[[probe]]\nid='escaped-defect'\nrun='./repro.sh'\ndeps=['fixtures/in.txt']\nfiles=['out/result.txt']\n")
-	proposals, err := LoadProposals(root)
+	proposals, err := LoadProposals(root, Manifest{})
 	if err != nil || len(proposals.Probes) != 1 || proposals.Probes[0].Timeout != 30 {
 		t.Fatalf("proposals = %#v, %v", proposals, err)
 	}

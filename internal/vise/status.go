@@ -64,15 +64,15 @@ func BuildStatus(root string) StatusReport {
 	report := StatusReport{V: LockVersion, Cmd: "status", Exit: ExitOK, State: "not-initialized", Next: Next{Action: NextRecordFirst, Detail: "run vise init, declare probes, and record a baseline"}}
 	manifest, manifestBytes, manifestErr := buildManifestStatus(root, &report)
 	buildLockStatus(root, manifest, manifestBytes, manifestErr, &report)
-	buildProposalsStatus(root, &report)
+	buildProposalsStatus(root, manifest, &report)
 	buildJournalStatus(root, &report)
 	return report
 }
 
-func buildProposalsStatus(root string, report *StatusReport) {
+func buildProposalsStatus(root string, manifest Manifest, report *StatusReport) {
 	// proposals.toml is agent-writable and judges nothing, so a malformed file
 	// is reported but never changes the state or the next action.
-	proposals, err := LoadProposals(root)
+	proposals, err := LoadProposals(root, manifest)
 	if err != nil {
 		report.ProposalError = err.Error()
 	} else {
