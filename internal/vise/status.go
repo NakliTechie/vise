@@ -36,9 +36,16 @@ type StatusLock struct {
 type StatusTool struct {
 	Version  string `json:"version"`
 	Revision string `json:"revision,omitempty"`
-	// Always present, never omitted: an agent checking whether the tool was
-	// built from a dirty tree must be able to tell false from absent.
-	Modified bool `json:"modified"`
+	// Three states, not two: built clean, built dirty, and no version stamps
+	// at all. A plain bool had only the first two and reported the third as
+	// `"modified": false` — a claim that the tree was clean, made by a binary
+	// that has no way to know. That is the exact shape of thing vise exists to
+	// refuse, asserted by vise about itself.
+	//
+	// A pointer gives the third state a representation: present true is dirty,
+	// present false is clean, absent is unknown. omitempty on a pointer omits
+	// only nil, so a known-false is still written.
+	Modified *bool `json:"modified,omitempty"`
 }
 
 type StatusReport struct {

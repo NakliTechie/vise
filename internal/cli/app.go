@@ -202,9 +202,21 @@ func answerHelpOrVersion(args []string, jsonMode bool, stdout, stderr io.Writer)
 			return renderSimpleError("version", "version accepts no arguments", jsonMode, stdout, stderr), true
 		}
 		if jsonMode {
+			// One source for the identity, so version and status cannot
+			// disagree about the same binary. They did: status always carried
+			// a tool object and version dropped revision and modified
+			// entirely on a build with no VCS stamps, while the contract asks
+			// an agent to report which tool answered it.
 			response := map[string]any{"v": 1, "cmd": "version", "exit": 0, "version": Version, "next": vise.Next{Action: vise.NextProceed, Detail: "version reported"}}
-			for key, value := range buildIdentity() {
-				response[key] = value
+			tool := toolIdentity()
+			if tool.Revision != "" {
+				response["revision"] = tool.Revision
+			}
+			if tool.Modified != nil {
+				response["modified"] = *tool.Modified
+			}
+			if built, ok := buildIdentity()["built"].(string); ok {
+				response["built"] = built
 			}
 			return writeJSON(stdout, response), true
 		}
@@ -634,7 +646,7 @@ func toolIdentity() *vise.StatusTool {
 		tool.Revision = revision
 	}
 	if modified, ok := identity["modified"].(bool); ok {
-		tool.Modified = modified
+		tool.Modified = &modified
 	}
 	return tool
 }

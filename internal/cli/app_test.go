@@ -1360,3 +1360,52 @@ func TestStatusOutsideARepositoryDoesNotAskAnAgentToFixAProbe(t *testing.T) {
 		t.Errorf("next.action %q outside a repository, want %q", report.Next.Action, vise.NextHuman)
 	}
 }
+
+// The contract asks an agent to report which tool answered it, and the two
+// commands that state the tool's identity disagreed about the same binary.
+// status always carried a tool object; version dropped revision and modified
+// entirely on a build with no VCS stamps, which is what an install from a
+// tarball or a `-buildvcs=false` build produces.
+//
+// Worse than the disagreement: status reported `"modified": false` on such a
+// build — a claim that the tree was clean, from a binary with no way to know.
+// The field is a pointer now, so unknown has a representation, and this asserts
+// the two commands say the same thing whichever kind of build runs the test.
+func TestVersionAndStatusAgreeAboutTheBinaryAnswering(t *testing.T) {
+	root := cliRepo(t, "", "")
+
+	var versionOut bytes.Buffer
+	if exit := Run([]string{"--json", "version"}, root, &versionOut, io.Discard); exit != vise.ExitOK {
+		t.Fatalf("version exit %d", exit)
+	}
+	var version map[string]any
+	if err := json.Unmarshal(versionOut.Bytes(), &version); err != nil {
+		t.Fatal(err)
+	}
+
+	var statusOut bytes.Buffer
+	if exit := Run([]string{"--json", "status"}, root, &statusOut, io.Discard); exit != vise.ExitOK {
+		t.Fatalf("status exit %d", exit)
+	}
+	var status struct {
+		Tool map[string]any `json:"tool"`
+	}
+	if err := json.Unmarshal(statusOut.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Tool == nil {
+		t.Fatal("status reported no tool identity")
+	}
+
+	for _, field := range []string{"version", "revision", "modified"} {
+		fromVersion, inVersion := version[field]
+		fromStatus, inStatus := status.Tool[field]
+		if inVersion != inStatus {
+			t.Errorf("%q is present in one command and absent in the other: version=%v status=%v", field, inVersion, inStatus)
+			continue
+		}
+		if inVersion && fromVersion != fromStatus {
+			t.Errorf("%q disagrees: version says %v, status says %v", field, fromVersion, fromStatus)
+		}
+	}
+}
