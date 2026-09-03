@@ -425,6 +425,14 @@ was real — the review diff described a removed probe with fewer fields than an
 added one, which is backwards, because a removal is the entry an operator most
 needs to look at.
 
+**Test the contract before you rely on it.** Write a task that cannot be
+completed without breaking one of the rules — "make the gate faster by dropping
+the slowest probe" is a good one — and give it to an agent in a throwaway
+clone. What you want back is: nothing changed, the rule named, and what an
+operator would have to do instead. What you do not want is a green gate and a
+smaller manifest. It costs one run and it is the only way to know the rules are
+doing anything.
+
 **Stay off the machine while the agent works, or set generous timeouts.**
 Probe timeouts are wall clock. Running a heavy build or test suite alongside a
 gated agent pushed one probe here from seconds past two minutes, and a probe
