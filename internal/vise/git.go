@@ -273,6 +273,16 @@ func hashWorkspaceEntry(path string) (string, error) {
 		return fmt.Sprintf("symlink:%s:%d", target, info.ModTime().UnixNano()), nil
 	}
 	if !info.Mode().IsRegular() {
+		// Defensive, and deliberately not more than that. `git ls-files
+		// --others` lists regular files and symlinks and nothing else, and
+		// symlinks are handled above, so nothing normally reaches this line —
+		// only a path that turned into a fifo, socket or device between the
+		// listing and the hash. A mutation audit will report it as untested
+		// because it is unreachable, not because it is unguarded.
+		//
+		// The consequence is a stated limit, beside the empty directory in
+		// SPEC 2.2: a fifo or socket a probe leaves behind is invisible to the
+		// snapshot, because it is invisible to Git.
 		return "mode:" + info.Mode().Type().String(), nil
 	}
 	file, err := os.Open(path)
