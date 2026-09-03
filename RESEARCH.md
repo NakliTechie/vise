@@ -4,7 +4,8 @@ Findings from the survey that motivated vise. Each claim carries its source; num
 
 ## Headline numbers
 
-- Raw AI refactoring fails ~60% of the time; paired with a verification layer, correctness climbs to ~98%. — [Janea Systems, "Flipping the Odds"](https://www.janeasystems.com/blog/ai-and-refactoring-part-2)
+- Raw GPT-3.5 "produces correct refactorings 26-33% of the time depending on the code smell category (with GPT-4 only slightly better at the expense of speed and cost)"; with a verification layer the "shipped-to-production rate climbs to 98% because the 60-something percent of bad outputs never make it past the filter", and "96-99% of what passes through is correct". — [Janea Systems, "Flipping the Odds"](https://www.janeasystems.com/blog/ai-and-refactoring-part-2)
+  - This line previously read "fails ~60% of the time", which is not what the source says: 26-33% correct is a 67-74% failure rate. The 60 came from the source's own phrase about bad outputs not passing the filter. Checked against the page 2026-09-03.
 - Closed-loop micro-iterations (change → check → repair) reach 90%+ unit-test pass rates vs ≤60% for single-shot LLM refactoring (RefAgent vs single-shot). — [Agentic Refactoring overview](https://www.emergentmind.com/topics/agentic-refactoring)
 - Empirical study of ChatGPT/Claude/Cursor refactoring PRs on real repos: recurring failure modes are subtle behavioral changes, type violations in statically-typed contexts, **incomplete transformations** (half-refactored code left behind), and context misunderstanding. — [Agentic Refactoring: An Empirical Study](https://arxiv.org/pdf/2511.04824)
 
