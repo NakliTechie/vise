@@ -212,25 +212,29 @@ func replayProbes(root string, outcome *Outcome, runner Runner, probes []Probe, 
 			continue
 		}
 		if RunResultsEqual(first, second) {
-			outcome.AddFailure(probe.ID, Failure{
-				Class:  "behavior",
-				Detail: "observed behavior differs consistently from the lockfile",
-				Expect: ExpectedFromLock(expected),
-				Got:    ActualFromRun(first),
-				Diff:   DiffRuns(root, expected, first),
-			})
+			outcome.AddFailure(probe.ID, probeMismatchFailure(root, "behavior", "observed behavior differs consistently from the lockfile", expected, first))
 		} else {
-			outcome.AddFailure(probe.ID, Failure{
-				Class:  "flake",
-				Detail: "mismatching observations differed across the single retry",
-				Expect: ExpectedFromLock(expected),
-				Got:    ActualFromRun(first),
-				Diff:   DiffRuns(root, expected, first),
-			})
+			outcome.AddFailure(probe.ID, probeMismatchFailure(root, "flake", "mismatching observations differed across the single retry", expected, first))
 			flaky = append(flaky, probe.ID)
 		}
 	}
 	return flaky
+}
+
+// probeMismatchFailure builds the failure for a probe whose replay did not
+// match the lockfile. Behavior and flake differ only in which class they carry
+// and what they say; the evidence an agent reads to act on either — the
+// expected side, the observed side, and the diff between them — is the same
+// three fields, and they were written out twice. Duplicating them is how one
+// class ends up carrying a diff the other does not.
+func probeMismatchFailure(root, class, detail string, expected ProbeLock, run RunResult) Failure {
+	return Failure{
+		Class:  class,
+		Detail: detail,
+		Expect: ExpectedFromLock(expected),
+		Got:    ActualFromRun(run),
+		Diff:   DiffRuns(root, expected, run),
+	}
 }
 
 func evaluateMetrics(outcome *Outcome, runner Runner, metrics []Metric, expectedMetrics map[string]MetricLock) []string {
@@ -290,32 +294,39 @@ func selectedProbes(manifest Manifest, id string) ([]Probe, error) {
 }
 
 func validateProbeSet(outcome *Outcome, manifest Manifest, lock Lockfile) {
-	declared := make(map[string]bool, len(manifest.Probes))
-	for _, probe := range manifest.Probes {
-		declared[probe.ID] = true
+	validateDeclaredSet(outcome, manifest.Probes, func(probe Probe) string { return probe.ID }, lock.Probes,
+		"probe is declared but absent from vise.lock; record a new baseline",
+		"probe exists in vise.lock but not vise.toml; restore the manifest or record a new baseline")
+}
+
+// validateDeclaredSet reports the two ways the manifest and the lockfile can
+// disagree about which checks exist: declared but never recorded, and recorded
+// but no longer declared. Both directions were written out once for probes and
+// once for metrics, which is the shape where one side of the comparison gets a
+// fix the other does not. Both are operator repairs by construction — the
+// agent contract forbids writing either file — so the flag is set here rather
+// than left to each caller to remember.
+func validateDeclaredSet[D any, R any](outcome *Outcome, declaredItems []D, idOf func(D) string, recorded map[string]R, missingDetail, unexpectedDetail string) {
+	declared := make(map[string]bool, len(declaredItems))
+	for _, item := range declaredItems {
+		declared[idOf(item)] = true
 	}
 	for id := range declared {
-		if _, ok := lock.Probes[id]; !ok {
-			outcome.AddFailure(id, Failure{Class: "harness", Detail: "probe is declared but absent from vise.lock; record a new baseline", Operator: true})
+		if _, ok := recorded[id]; !ok {
+			outcome.AddFailure(id, Failure{Class: "harness", Detail: missingDetail, Operator: true})
 		}
 	}
-	for id := range lock.Probes {
+	for id := range recorded {
 		if !declared[id] {
-			outcome.AddFailure(id, Failure{Class: "harness", Detail: "probe exists in vise.lock but not vise.toml; restore the manifest or record a new baseline", Operator: true})
+			outcome.AddFailure(id, Failure{Class: "harness", Detail: unexpectedDetail, Operator: true})
 		}
 	}
 }
 
 func validateMetricSet(outcome *Outcome, manifest Manifest, lock Lockfile) {
-	declared := make(map[string]bool, len(manifest.Metrics))
-	for _, metric := range manifest.Metrics {
-		declared[metric.ID] = true
-	}
-	for id := range declared {
-		if _, ok := lock.Metrics[id]; !ok {
-			outcome.AddFailure(id, Failure{Class: "harness", Detail: "metric is declared but absent from vise.lock", Operator: true})
-		}
-	}
+	validateDeclaredSet(outcome, manifest.Metrics, func(metric Metric) string { return metric.ID }, lock.Metrics,
+		"metric is declared but absent from vise.lock",
+		"metric exists in vise.lock but not vise.toml")
 	for _, metric := range manifest.Metrics {
 		expected, ok := lock.Metrics[metric.ID]
 		if !ok {
@@ -331,11 +342,6 @@ func validateMetricSet(outcome *Outcome, manifest Manifest, lock Lockfile) {
 			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: "metric definition was not frozen by this baseline; re-record", Operator: true})
 		case expected.RunHash != runHash:
 			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: "metric definition changed after recording", Operator: true})
-		}
-	}
-	for id := range lock.Metrics {
-		if !declared[id] {
-			outcome.AddFailure(id, Failure{Class: "harness", Detail: "metric exists in vise.lock but not vise.toml", Operator: true})
 		}
 	}
 }
