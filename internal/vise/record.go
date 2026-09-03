@@ -477,9 +477,9 @@ func appendProbeDiffs(b *strings.Builder, root string, oldProbes, newProbes map[
 		newProbe, newOK := newProbes[id]
 		switch {
 		case !oldOK:
-			appendAddedProbeDiff(b, id, newProbe)
+			appendOneSidedProbeDiff(b, '+', id, newProbe)
 		case !newOK:
-			appendRemovedProbeDiff(b, id, oldProbe)
+			appendOneSidedProbeDiff(b, '-', id, oldProbe)
 		default:
 			appendChangedProbeDiff(b, root, newBlobs, id, oldProbe, newProbe, gaps)
 		}
@@ -496,16 +496,22 @@ func appendFingerprintDiff(b *strings.Builder, oldFingerprint, newFingerprint Fi
 	}
 }
 
-func appendAddedProbeDiff(b *strings.Builder, id string, probe ProbeLock) {
-	fmt.Fprintf(b, "+ probe %s (exit %d, stdout %s, stderr %s, %d file(s), recorded at %s)\n", id, probe.Exit, probe.Stdout, probe.Stderr, len(probe.Files), probe.RecordedCommit)
+// appendOneSidedProbeDiff renders a probe that exists on only one side of the
+// review, added or removed.
+//
+// One function because a removal must show exactly what an addition shows. It
+// was two, with byte-identical format strings and a comment on the second
+// saying the fields matched the first deliberately — an invariant held by two
+// people remembering it. A removal is the entry an operator most needs to
+// scrutinise, because an observation is going away, and it had already been
+// the one showing less once.
+func appendOneSidedProbeDiff(b *strings.Builder, mark byte, id string, probe ProbeLock) {
+	fmt.Fprintf(b, "%c probe %s (exit %d, stdout %s, stderr %s, %d file(s), recorded at %s)\n", mark, id, probe.Exit, probe.Stdout, probe.Stderr, len(probe.Files), probe.RecordedCommit)
 }
 
-func appendRemovedProbeDiff(b *strings.Builder, id string, probe ProbeLock) {
-	// The same fields as an added probe, deliberately. A removal is the
-	// entry in this diff an operator most needs to scrutinise — an
-	// observation is going away — and it was showing less than an
-	// addition, which is backwards.
-	fmt.Fprintf(b, "- probe %s (exit %d, stdout %s, stderr %s, %d file(s), recorded at %s)\n", id, probe.Exit, probe.Stdout, probe.Stderr, len(probe.Files), probe.RecordedCommit)
+// appendOneSidedMetricDiff is the same idea for a metric.
+func appendOneSidedMetricDiff(b *strings.Builder, mark byte, id string, metric MetricLock) {
+	fmt.Fprintf(b, "%c metric %s (value %g, tool_version %q)\n", mark, id, metric.Value, metric.ToolVersion)
 }
 
 func appendChangedProbeDiff(b *strings.Builder, root string, newBlobs map[string][]byte, id string, oldProbe, newProbe ProbeLock, gaps *reviewGaps) {
@@ -542,21 +548,14 @@ func appendChangedProbeDiff(b *strings.Builder, root string, newBlobs map[string
 }
 
 func appendMetricDiffs(b *strings.Builder, oldMetrics, newMetrics map[string]MetricLock) {
-	metricIDs := make(map[string]bool)
-	for id := range oldMetrics {
-		metricIDs[id] = true
-	}
-	for id := range newMetrics {
-		metricIDs[id] = true
-	}
-	for _, id := range sortedKeys(metricIDs) {
+	for _, id := range sortedUnionKeys(oldMetrics, newMetrics) {
 		oldMetric, oldOK := oldMetrics[id]
 		newMetric, newOK := newMetrics[id]
 		switch {
 		case !oldOK:
-			fmt.Fprintf(b, "+ metric %s (value %g, tool_version %q)\n", id, newMetric.Value, newMetric.ToolVersion)
+			appendOneSidedMetricDiff(b, '+', id, newMetric)
 		case !newOK:
-			fmt.Fprintf(b, "- metric %s (value %g, tool_version %q)\n", id, oldMetric.Value, oldMetric.ToolVersion)
+			appendOneSidedMetricDiff(b, '-', id, oldMetric)
 		default:
 			if oldMetric.RunHash != newMetric.RunHash {
 				fmt.Fprintf(b, "%s definition changed since the recorded baseline (run, direction, enforce, env, timeout, or version_cmd; run_hash %s -> %s); see git diff vise.toml\n", id, oldMetric.RunHash, newMetric.RunHash)
