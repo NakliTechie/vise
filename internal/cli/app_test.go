@@ -333,7 +333,7 @@ func TestInitStatusAndEmptyManifestRecordRemedy(t *testing.T) {
 	}
 	exit, stdout, _ := cliRun(t, root, "record", "--json")
 	value := parseCLIJSON(t, stdout)
-	if exit != 2 || value["next"].(map[string]any)["action"] != "fix_probe" || !strings.Contains(value["next"].(map[string]any)["detail"].(string), "declare at least one probe") {
+	if exit != 2 || value["next"].(map[string]any)["action"] != "human" || !strings.Contains(value["next"].(map[string]any)["detail"].(string), "an operator declares a probe") {
 		t.Fatalf("record empty json: %d %#v", exit, value)
 	}
 }
@@ -441,7 +441,7 @@ run = "printf stable"
 		root := cliRepo(t, manifest, "")
 		exit, stdout, _ := cliRun(t, root, "record", "--json")
 		value := parseCLIJSON(t, stdout)
-		if exit != 2 || value["next"].(map[string]any)["action"] != "fix_probe" || !strings.Contains(value["next"].(map[string]any)["detail"].(string), "fingerprint") {
+		if exit != 2 || value["next"].(map[string]any)["action"] != "human" || !strings.Contains(value["next"].(map[string]any)["detail"].(string), "fingerprint") {
 			t.Fatalf("fingerprint: %d %#v", exit, value)
 		}
 	})
@@ -532,7 +532,7 @@ func TestEmptyManifestNeverGatesGreen(t *testing.T) {
 	cliWrite(t, root, "vise.lock", "{\n  \"v\": 1,\n  \"fingerprint\": {\"os\": \""+runtime.GOOS+"\", \"arch\": \""+runtime.GOARCH+"\", \"stubs\": {\"tz\": \"UTC\", \"lang\": \"C\", \"seed\": \"1729\", \"network\": \"declared-off\"}},\n  \"probes\": {}\n}\n")
 	exit, stdout, _ := cliRun(t, root, "gate", "--json")
 	value := parseCLIJSON(t, stdout)
-	if exit != 2 || value["verdict"] == "green" || value["next"].(map[string]any)["action"] != "fix_probe" {
+	if exit != 2 || value["verdict"] == "green" || value["next"].(map[string]any)["action"] != "human" {
 		t.Fatalf("empty manifest gate: exit=%d value=%#v", exit, value)
 	}
 	// status routes to human, not fix_probe: the repair is in vise.toml,

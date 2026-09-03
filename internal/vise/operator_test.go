@@ -1,6 +1,9 @@
 package vise
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -147,4 +150,51 @@ func TestTheOperatorRoutingDependsOnTheFailuresPresent(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Seven times tonight a repair living in a protected file was offered to the
+// agent as fix_probe. Each was fixed where it was found, and the next audit
+// found another. This is the exhaustive version: every next.action detail the
+// binary can emit is scanned, and one that names a file the agent contract
+// forbids the agent from writing must not be fix_probe.
+func TestNoFixProbeActionPointsAtAFileTheAgentMayNotWrite(t *testing.T) {
+	// The files rule 1 protects, as they appear in prose.
+	protected := []string{"vise.toml", "vise.lock", ".vise/blobs", ".vise/journal.jsonl"}
+
+	roots := []string{filepath.Join("..", "vise"), filepath.Join("..", "cli")}
+	action := regexp.MustCompile(`Next\{Action: (?:vise\.)?(\w+), Detail: "((?:[^"\\]|\\.)*)"`)
+
+	var checked int
+	for _, root := range roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(root, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, match := range action.FindAllStringSubmatch(string(data), -1) {
+				kind, detail := match[1], match[2]
+				checked++
+				if kind != "NextFixProbe" {
+					continue
+				}
+				for _, file := range protected {
+					if strings.Contains(detail, file) {
+						t.Errorf("%s/%s offers fix_probe for a repair in %s: %q", root, name, file, detail)
+					}
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("scanned no next actions; the pattern is not matching what the code writes")
+	}
+	t.Logf("scanned %d next actions", checked)
 }

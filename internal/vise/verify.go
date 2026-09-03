@@ -118,7 +118,7 @@ func prepareVerifyChecks(manifest Manifest, probeID string, outcome *Outcome) ([
 	if len(manifest.Probes) == 0 {
 		// Green requires every declared probe to pass; with none declared there
 		// is nothing to judge, and a 0/0 green would be a verdict without a judge.
-		failure := harnessWithNext("verify", "manifest", "manifest declares no [[probe]]; nothing can be judged", Next{Action: NextFixProbe, Detail: "declare at least one probe in vise.toml and record a baseline"})
+		failure := harnessWithNext("verify", "manifest", "manifest declares no [[probe]]; nothing can be judged", Next{Action: NextHuman, Detail: "an operator declares a probe in vise.toml and records a baseline"})
 		return nil, nil, &failure
 	}
 	selected, checkSet, err := selectVerifyChecks(manifest, probeID)

@@ -231,7 +231,7 @@ func runInit(args []string, root string, jsonMode bool, stdout, stderr io.Writer
 		"cmd":     "init",
 		"exit":    0,
 		"created": created,
-		"next":    vise.Next{Action: vise.NextFixProbe, Detail: "uncomment and configure at least one probe, then run vise record"},
+		"next":    vise.Next{Action: vise.NextHuman, Detail: "uncomment and configure at least one probe, then run vise record"},
 	}
 	if jsonMode {
 		return writeJSON(stdout, response)

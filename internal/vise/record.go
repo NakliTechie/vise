@@ -110,7 +110,7 @@ func newRecordRun(root string, manifest Manifest, manifestBytes []byte, opts Rec
 
 func (r *recordRun) checkManifest() bool {
 	if len(r.manifest.Probes) == 0 {
-		r.result.Outcome = harnessWithNext("record", "manifest", "manifest must declare at least one [[probe]] before recording", Next{Action: NextFixProbe, Detail: "declare at least one probe in vise.toml, commit the harness, then rerun vise record"})
+		r.result.Outcome = harnessWithNext("record", "manifest", "manifest must declare at least one [[probe]] before recording", Next{Action: NextHuman, Detail: "an operator declares a probe in vise.toml, commits the harness, and reruns vise record"})
 		return false
 	}
 	return true
@@ -148,7 +148,7 @@ func (r *recordRun) loadBaselineForReview() bool {
 func (r *recordRun) captureEnvironment() bool {
 	fingerprint, err := captureStableFingerprint(r.root, r.manifest)
 	if err != nil {
-		r.result.Outcome = harnessWithNext("record", "fingerprint", err.Error(), Next{Action: NextFixProbe, Detail: "repair the environment fingerprint command, then rerun record"})
+		r.result.Outcome = harnessWithNext("record", "fingerprint", err.Error(), Next{Action: NextHuman, Detail: "repair the [env] fingerprint command in vise.toml; an agent may not write it"})
 		return false
 	}
 	r.fingerprint = fingerprint
