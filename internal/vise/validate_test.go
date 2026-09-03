@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -315,5 +316,45 @@ func TestAnEnforcedMetricMustNameItsAnalyzer(t *testing.T) {
 	// gated on it.
 	if err := manifest("none", "").Validate(root); err != nil {
 		t.Fatalf("a tracked-only metric was refused: %v", err)
+	}
+}
+
+// A mistyped probe name was answered with "repair the harness or restore its
+// declared inputs" — true of nothing the caller did, and useless for what they
+// might do next. Naming what they could have asked for is the whole fix.
+func TestAnUnknownProbeNamesTheOnesThatExist(t *testing.T) {
+	manifest := Manifest{
+		Vise:  ViseSettings{Version: LockVersion},
+		Stubs: StubSettings{Network: "declared-off"},
+		Probes: []Probe{
+			{ID: "beta", Run: "printf b", Timeout: 30},
+			{ID: "alpha", Run: "printf a", Timeout: 30},
+		},
+	}
+
+	got := DeclaredProbeList(manifest)
+	// Sorted, so the message does not change between runs of the same manifest.
+	if got != "declared probes are alpha, beta" {
+		t.Fatalf("list = %q", got)
+	}
+
+	// Bounded: a manifest with many probes must not print all of them into a
+	// message that is supposed to fit on a line.
+	many := manifest
+	many.Probes = nil
+	for i := 0; i < 40; i++ {
+		many.Probes = append(many.Probes, Probe{ID: "probe" + strconv.Itoa(i), Run: "printf x", Timeout: 30})
+	}
+	long := DeclaredProbeList(many)
+	if !strings.Contains(long, "and 30 more") {
+		t.Fatalf("a 40-probe manifest rendered %q", long)
+	}
+	if len(long) > 200 {
+		t.Fatalf("a 40-probe manifest rendered %d characters", len(long))
+	}
+
+	// And an empty manifest says so rather than trailing off.
+	if got := DeclaredProbeList(Manifest{}); !strings.Contains(got, "no probes") {
+		t.Fatalf("empty manifest rendered %q", got)
 	}
 }

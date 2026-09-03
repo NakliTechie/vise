@@ -414,7 +414,7 @@ func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Write
 	}
 	probe, ok := manifest.Probe(args[0])
 	if !ok {
-		return renderSimpleError("run", fmt.Sprintf("unknown probe %q", args[0]), jsonMode, stdout, stderr)
+		return renderSimpleError("run", fmt.Sprintf("unknown probe %q; %s", args[0], vise.DeclaredProbeList(manifest)), jsonMode, stdout, stderr)
 	}
 	runner := vise.Runner{Root: root, Manifest: manifest}
 	if !jsonMode {

@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strings"
 )
 
 type VerifyOptions struct {
@@ -282,7 +283,7 @@ func selectedProbes(manifest Manifest, id string) ([]Probe, error) {
 	}
 	probe, ok := manifest.Probe(id)
 	if !ok {
-		return nil, fmt.Errorf("unknown probe %q", id)
+		return nil, fmt.Errorf("unknown probe %q; %s", id, DeclaredProbeList(manifest))
 	}
 	return []Probe{probe}, nil
 }
@@ -489,4 +490,23 @@ func metricRegressed(direction, enforce string, base, now float64) bool {
 	default:
 		return false
 	}
+}
+
+// declaredProbeList names what the caller could have asked for. A typo used to
+// be answered with "repair the harness or restore its declared inputs", which
+// is true of nothing the caller did and helps with nothing they might do next.
+// Bounded, because a manifest can declare many.
+func DeclaredProbeList(manifest Manifest) string {
+	if len(manifest.Probes) == 0 {
+		return "this manifest declares no probes"
+	}
+	ids := make([]string, 0, len(manifest.Probes))
+	for _, probe := range manifest.Probes {
+		ids = append(ids, probe.ID)
+	}
+	sort.Strings(ids)
+	if len(ids) > 10 {
+		return fmt.Sprintf("declared probes include %s (and %d more)", strings.Join(ids[:10], ", "), len(ids)-10)
+	}
+	return "declared probes are " + strings.Join(ids, ", ")
 }
