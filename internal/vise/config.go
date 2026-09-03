@@ -104,6 +104,24 @@ func LoadManifest(root string) (Manifest, []byte, error) {
 	return manifest, data, nil
 }
 
+// applyProbeDefaults normalizes one probe. Both the manifest and the proposals
+// file go through it, which they did not.
+//
+// The sort is the part that matters. ProbeRunHash marshals the whole struct,
+// so the order of `deps` and `files` is in the hash — and only manifest probes
+// were sorted. Two proposals identical but for declaration order hashed
+// differently, and a proposal's hash did not match the hash it would have once
+// promoted into a manifest that sorts. The comment above LoadProposals says
+// proposals are validated "the way a manifest probe is validated"; on
+// defaulting they were not.
+func applyProbeDefaults(probe *Probe) {
+	if probe.Timeout == 0 {
+		probe.Timeout = 30
+	}
+	sort.Strings(probe.Deps)
+	sort.Strings(probe.Files)
+}
+
 func (m *Manifest) applyDefaults() {
 	if m.Stubs.TZ == "" {
 		m.Stubs.TZ = "UTC"
@@ -118,11 +136,7 @@ func (m *Manifest) applyDefaults() {
 		m.Stubs.Network = "declared-off"
 	}
 	for i := range m.Probes {
-		if m.Probes[i].Timeout == 0 {
-			m.Probes[i].Timeout = 30
-		}
-		sort.Strings(m.Probes[i].Deps)
-		sort.Strings(m.Probes[i].Files)
+		applyProbeDefaults(&m.Probes[i])
 	}
 	for i := range m.Metrics {
 		if m.Metrics[i].Timeout == 0 {
@@ -298,7 +312,7 @@ func LoadProposals(root string, manifest Manifest) (Proposals, error) {
 		sort.Strings(parts)
 		return Proposals{}, fmt.Errorf("unknown proposal keys: %s", strings.Join(parts, ", "))
 	}
-	seen := make(map[string]bool)
+	seen := make(map[string]int)
 	taken := make(map[string]string, len(manifest.Probes)+len(manifest.Metrics))
 	for _, probe := range manifest.Probes {
 		taken[probe.ID] = "probe"
@@ -308,9 +322,7 @@ func LoadProposals(root string, manifest Manifest) (Proposals, error) {
 	}
 	for i := range proposals.Probes {
 		probe := &proposals.Probes[i]
-		if probe.Timeout == 0 {
-			probe.Timeout = 30
-		}
+		applyProbeDefaults(probe)
 		where := fmt.Sprintf("proposal[%d]", i)
 		if kind, ok := taken[probe.ID]; ok {
 			return Proposals{}, fmt.Errorf("%s.id %q is already a %s in vise.toml; a proposal that collides with the manifest can never be promoted", where, probe.ID, kind)
@@ -318,10 +330,13 @@ func LoadProposals(root string, manifest Manifest) (Proposals, error) {
 		if err := validateID(probe.ID, where); err != nil {
 			return Proposals{}, err
 		}
-		if seen[probe.ID] {
-			return Proposals{}, fmt.Errorf("duplicate proposal id %q", probe.ID)
+		if first, ok := seen[probe.ID]; ok {
+			// Naming both, the way the manifest's duplicate check does. In a
+			// file of twenty proposals, "duplicate proposal id" without an
+			// index is the difference between a fix and a search.
+			return Proposals{}, fmt.Errorf("duplicate proposal id %q in proposal[%d] and %s", probe.ID, first, where)
 		}
-		seen[probe.ID] = true
+		seen[probe.ID] = i
 		if err := validateProbeShape(root, *probe, where); err != nil {
 			return Proposals{}, err
 		}

@@ -690,3 +690,37 @@ func TestALaunchFailureDoesNotNameTheWrongTool(t *testing.T) {
 		t.Errorf("the message tells the reader to install the shell that ran fine:\n\t%s", result.HarnessError)
 	}
 }
+
+// A declared artifact that is tracked by git is a manifest fault: vise deletes
+// artifacts before every run and refuses to delete a tracked file, so the
+// repair is `git rm --cached` plus a .gitignore entry, and the manifest is the
+// thing that declared it. The agent cannot fix it and must not be told to.
+//
+// The ownership flag was added for exactly this and nothing tested it, so a
+// mutation removing it passed both packages.
+func TestATrackedDeclaredArtifactIsTheOperatorsToRepair(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "out/result.txt", "committed by mistake\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "an artifact somebody committed")
+
+	result := Runner{Root: root}.RunProbe(Probe{
+		ID:      "p",
+		Run:     "printf ok",
+		Timeout: 10,
+		Files:   []string{"out/result.txt"},
+	}, false)
+
+	if result.HarnessError == "" {
+		t.Fatal("a tracked declared artifact was accepted")
+	}
+	if !result.HarnessOperator {
+		t.Errorf("reported as the agent's to repair, and the repair is in vise.toml:\n\t%s", result.HarnessError)
+	}
+
+	// And the flag has to survive the conversion into a failure, which is the
+	// step that dropped it at eight call sites.
+	if failure := result.harnessFailure(); !failure.Operator {
+		t.Error("the ownership is lost on the way into the outcome")
+	}
+}

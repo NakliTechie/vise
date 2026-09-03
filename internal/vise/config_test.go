@@ -169,3 +169,58 @@ func TestProposalsGetTheValidationProbesGet(t *testing.T) {
 		t.Fatalf("proposals = %#v, %v", proposals, err)
 	}
 }
+
+// ProbeRunHash marshals the whole struct, so the order of `deps` and `files` is
+// in the hash. Manifest probes are sorted before hashing and proposals were
+// not, though the comment above LoadProposals says proposals are validated the
+// way a manifest probe is.
+//
+// Two consequences, both real: two proposals identical but for declaration
+// order hashed differently, and a proposal's hash did not match the hash it
+// would have once promoted into a manifest that sorts.
+func TestAProposalIsNormalizedLikeAManifestProbe(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "a.txt", "a\n")
+	writeTestFile(t, root, "b.txt", "b\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n\n[[probe]]\nid = \"kept\"\nrun = \"printf ok\"\ntimeout = 30\n")
+	manifest, _, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hashFor := func(t *testing.T, deps string) string {
+		t.Helper()
+		writeTestFile(t, root, ".vise/proposals.toml", "[[probe]]\nid = \"p\"\nrun = \"printf ok\"\ndeps = "+deps+"\n")
+		proposals, err := LoadProposals(root, manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(proposals.Probes) != 1 {
+			t.Fatalf("expected one proposal, got %d", len(proposals.Probes))
+		}
+		hash, err := ProbeRunHash(proposals.Probes[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return hash
+	}
+
+	if forward, reversed := hashFor(t, `["a.txt", "b.txt"]`), hashFor(t, `["b.txt", "a.txt"]`); forward != reversed {
+		t.Errorf("the same proposal hashes differently by declaration order:\n\t%s\n\t%s", forward, reversed)
+	}
+
+	// And the same probe, in a manifest, must reach the same hash — otherwise
+	// promoting a proposal changes its identity.
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n\n[[probe]]\nid = \"p\"\nrun = \"printf ok\"\ndeps = [\"b.txt\", \"a.txt\"]\ntimeout = 30\n")
+	promoted, _, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestHash, err := ProbeRunHash(promoted.Probes[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifestHash != hashFor(t, `["a.txt", "b.txt"]`) {
+		t.Error("a proposal and the manifest probe it becomes do not hash alike")
+	}
+}
