@@ -34,6 +34,15 @@ func (c Capture) Complete() ([]byte, bool) {
 
 // Equal compares two observations of the same stream. Hash and size decide;
 // the prefix is only for rendering.
+//
+// The size comparison is redundant and deliberate. The digest covers every
+// byte written, not the retained prefix, so equal hashes already imply equal
+// bytes and therefore equal length — removing the size check survives the
+// whole suite, and a mutation audit will report that as an untested line. It
+// is not: it is unobservable without a SHA-256 collision. Kept as defence in
+// depth against a future change that narrows what the digest covers, and
+// written down here so the next audit does not spend an hour rediscovering
+// why nothing catches it.
 func (c Capture) Equal(other Capture) bool {
 	return c.Hash == other.Hash && c.Size == other.Size
 }

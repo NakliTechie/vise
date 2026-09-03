@@ -43,3 +43,83 @@ func TestEveryDeclaredArtifactIsCompared(t *testing.T) {
 		})
 	}
 }
+
+// SPEC is emphatic about this: metrics are evaluated only when behavior held,
+// "not merely ranked below behavior in the verdict — not run at all". Running
+// an analyzer against a tree whose behavior has already moved produces a number
+// compared against a baseline recorded under different behavior, handed to an
+// agent that is about to revert the change the number describes.
+//
+// Behavior "held" has three ways to fail and only one of them was tested. A
+// flake means behavior is *unknown*, which is not the same as unchanged, and a
+// single-probe verify establishes nothing about the probes it did not run.
+// Removing either guard passed the whole suite.
+func TestMetricsAreNotEvaluatedUnlessBehaviorHeld(t *testing.T) {
+	// A probe that alternates on a gitignored counter, so the suite can be made
+	// to flake without touching anything vise watches.
+	const manifestBody = `[vise]
+version = 1
+
+[[probe]]
+id = "steady"
+run = "printf steady"
+timeout = 30
+
+[[probe]]
+id = "swing"
+run = "sh ./swing.sh"
+timeout = 30
+
+[[metric]]
+id = "size"
+run = "printf 10"
+version_cmd = "printf analyzer-1"
+direction = "down"
+enforce = "no-regress"
+timeout = 30
+`
+	newRepo := func(t *testing.T, swing string) (string, Manifest, []byte) {
+		t.Helper()
+		root := testGitRepo(t)
+		writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n.toggle\nswing.sh\n")
+		writeTestFile(t, root, "vise.toml", manifestBody)
+		writeTestFile(t, root, "swing.sh", "printf steady\n")
+		testGit(t, root, "add", ".")
+		testGit(t, root, "commit", "-qm", "manifest")
+		manifest, manifestBytes, err := LoadManifest(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+			t.Fatalf("record: %#v", result.Outcome)
+		}
+		// swing.sh is neither declared nor tracked, so replacing it after the
+		// baseline is invisible to vise and changes only what the probe prints.
+		writeTestFile(t, root, "swing.sh", swing)
+		return root, manifest, manifestBytes
+	}
+
+	t.Run("a flake leaves behavior unknown, so no metric runs", func(t *testing.T) {
+		root, manifest, manifestBytes := newRepo(t,
+			"n=$(cat .toggle 2>/dev/null || echo 0); n=$((n+1)); echo $n > .toggle; "+
+				"if [ $((n % 2)) -eq 0 ]; then printf steady; else printf drifted; fi\n")
+		outcome := Verify(root, manifest, manifestBytes, VerifyOptions{}).Outcome
+		if outcome.Counts.Flaky == 0 {
+			t.Fatalf("the probe did not flake, so this proves nothing: %#v", outcome.Counts)
+		}
+		if len(outcome.Metrics) != 0 {
+			t.Errorf("a metric was evaluated while behavior was unknown: %#v", outcome.Metrics)
+		}
+	})
+
+	t.Run("a single-probe verify establishes nothing, so no metric runs", func(t *testing.T) {
+		root, manifest, manifestBytes := newRepo(t, "printf steady\n")
+		outcome := Verify(root, manifest, manifestBytes, VerifyOptions{ProbeID: "steady"}).Outcome
+		if outcome.Exit != ExitOK {
+			t.Fatalf("the narrowed verify did not pass, so this proves nothing: %#v", outcome)
+		}
+		if len(outcome.Metrics) != 0 {
+			t.Errorf("a metric was evaluated on a verify that ran one probe: %#v", outcome.Metrics)
+		}
+	})
+}
