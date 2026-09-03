@@ -322,17 +322,24 @@ func TestDoctorIsNotSatisfiedByAppearances(t *testing.T) {
 		}
 	})
 
-	t.Run("a blank fingerprint command records nothing", func(t *testing.T) {
+	// A blank fingerprint command used to reach doctor as an env-fingerprint
+	// finding. The manifest refuses it outright now — it runs through the same
+	// shell a probe does, and a probe's `run` has always been refused when
+	// blank — so doctor reports it under `manifest`, which replaces every other
+	// check when vise.toml will not load. Earlier and harder, with the index
+	// named. The point of the test is unchanged: a blank command must not pass
+	// as a declared one.
+	t.Run("a blank fingerprint command is refused, not recorded", func(t *testing.T) {
 		root := testGitRepo(t)
 		writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"\"]\n[[probe]]\nid = \"p\"\nrun = \"printf p\"\n")
 
 		var detail string
 		for _, finding := range Doctor(root).Findings {
-			if finding.Check == "env-fingerprint" {
+			if finding.Check == "manifest" {
 				detail = finding.Detail
 			}
 		}
-		if !strings.Contains(detail, "blank") {
+		if !strings.Contains(detail, "fingerprint[0]") || !strings.Contains(detail, "empty") {
 			t.Fatalf("a blank fingerprint command passed as a declared one: %q", detail)
 		}
 	})

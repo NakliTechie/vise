@@ -66,10 +66,10 @@ func TestManifestValidationEnforcesEveryRule(t *testing.T) {
 		}, "Git metadata"},
 		{"an empty environment key", func(m *Manifest) {
 			m.Probes[0].Env = map[string]string{"": "x"}
-		}, "invalid key"},
+		}, "not a usable variable name"},
 		{"an environment key with an equals sign", func(m *Manifest) {
 			m.Probes[0].Env = map[string]string{"A=B": "x"}
-		}, "invalid key"},
+		}, "not a usable variable name"},
 		{"an environment key vise reserves", func(m *Manifest) {
 			m.Probes[0].Env = map[string]string{"TMPDIR": "/tmp"}
 		}, "reserved variable"},
@@ -356,5 +356,90 @@ func TestAnUnknownProbeNamesTheOnesThatExist(t *testing.T) {
 	// And an empty manifest says so rather than trailing off.
 	if got := DeclaredProbeList(Manifest{}); !strings.Contains(got, "no probes") {
 		t.Fatalf("empty manifest rendered %q", got)
+	}
+}
+
+// Four gaps in the manifest validator, found by a coding agent reading it
+// under the gate. Each is a thing vise accepted and should not have.
+func TestTheManifestRefusesWhatItCannotHonour(t *testing.T) {
+	root := testGitRepo(t)
+	base := func() Manifest {
+		return Manifest{
+			Vise:  ViseSettings{Version: 1},
+			Stubs: StubSettings{TZ: "UTC", Lang: "C", Seed: "1729", Network: "declared-off"},
+			Probes: []Probe{{ID: "p", Run: "printf ok", Timeout: 30}},
+		}
+	}
+	for _, c := range []struct {
+		name   string
+		change func(*Manifest)
+		wantIn string
+	}{
+		{
+			// It runs through the same shell a probe does, and a probe's run
+			// has always been refused when blank.
+			"a blank fingerprint command",
+			func(m *Manifest) { m.Environment.Fingerprint = []string{"go version", "  "} },
+			"fingerprint[1] must not be empty",
+		},
+		{
+			// The recorded fingerprint is keyed by the command text, so a
+			// repeat records one entry: the manifest claims two things are
+			// pinned and the lockfile holds one, silently.
+			"a repeated fingerprint command",
+			func(m *Manifest) { m.Environment.Fingerprint = []string{"go version", "go version"} },
+			"repeats env.fingerprint[0]",
+		},
+		{
+			// The shell has no way to set a variable whose name holds a space,
+			// and no way to say so.
+			"an env key with a space",
+			func(m *Manifest) { m.Probes[0].Env = map[string]string{"A B": "1"} },
+			"not a usable variable name",
+		},
+		{
+			"an env key with a newline",
+			func(m *Manifest) { m.Probes[0].Env = map[string]string{"A\nB": "1"} },
+			"not a usable variable name",
+		},
+		{
+			// gettext reads LANGUAGE ahead of LC_ALL, so a probe declaring it
+			// defeats the lang stub the moment an operator sets a real locale.
+			"an env key that overrides LANGUAGE",
+			func(m *Manifest) { m.Probes[0].Env = map[string]string{"LANGUAGE": "fr"} },
+			"reserved variable LANGUAGE",
+		},
+		{
+			"an env key that redirects the zone database",
+			func(m *Manifest) { m.Probes[0].Env = map[string]string{"TZDIR": "/tmp/zones"} },
+			"reserved variable TZDIR",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			manifest := base()
+			c.change(&manifest)
+			err := manifest.Validate(root)
+			if err == nil {
+				t.Fatal("accepted")
+			}
+			if !strings.Contains(err.Error(), c.wantIn) {
+				t.Errorf("error %q does not say %q", err, c.wantIn)
+			}
+		})
+	}
+}
+
+// And the message a first-time user is likeliest to see. A manifest with no
+// [vise] table decodes to version 0 and used to produce "vise.version must be
+// 1" — telling someone to change a field they never wrote.
+func TestAMissingViseTableSaysTheTableIsMissing(t *testing.T) {
+	root := testGitRepo(t)
+	manifest := Manifest{Stubs: StubSettings{Network: "declared-off"}, Probes: []Probe{{ID: "p", Run: "printf ok", Timeout: 30}}}
+	err := manifest.Validate(root)
+	if err == nil {
+		t.Fatal("a manifest with no version was accepted")
+	}
+	if !strings.Contains(err.Error(), "[vise] table") {
+		t.Errorf("error %q does not mention the missing table", err)
 	}
 }

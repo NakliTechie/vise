@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/BurntSushi/toml"
 )
@@ -73,6 +74,13 @@ var reservedIDs = map[string]bool{
 
 var reservedEnv = map[string]bool{
 	"PATH": true, "HOME": true, "TZ": true, "LANG": true, "LC_ALL": true,
+	// LANGUAGE and TZDIR sit beside the two stubs above and were not
+	// reserved. GNU gettext consults LANGUAGE ahead of LC_ALL for message
+	// translation, so a probe could declare it and defeat the lang stub — inert
+	// at the default `lang = "C"`, which gettext ignores LANGUAGE under, and
+	// live the moment an operator sets a real locale, which is exactly when
+	// the stub is doing work. TZDIR redirects the zone database TZ names.
+	"LANGUAGE": true, "TZDIR": true,
 	"VISE_SEED": true, "SOURCE_DATE_EPOCH": true, "VISE": true,
 	"PYTHONHASHSEED": true, "NO_COLOR": true, "TERM": true, "COLUMNS": true,
 	"CI": true, "VISE_TMP": true, "TMPDIR": true,
@@ -153,10 +161,37 @@ func (m *Manifest) applyDefaults() {
 
 func (m Manifest) Validate(root string) error {
 	if m.Vise.Version != LockVersion {
-		return fmt.Errorf("vise.version must be %d", LockVersion)
+		// Saying only "must be 1" cannot help the likeliest reader of it. A
+		// manifest with no [vise] table at all decodes to 0 and produced this
+		// same sentence, so a first-time user whose real problem is a missing
+		// table was told to change a field they never wrote.
+		if m.Vise.Version == 0 {
+			return fmt.Errorf("vise.version is missing; vise.toml needs a [vise] table with version = %d", LockVersion)
+		}
+		return fmt.Errorf("vise.version is %d and this vise understands %d", m.Vise.Version, LockVersion)
 	}
 	if m.Stubs.Network != "declared-off" {
 		return fmt.Errorf("stubs.network must be declared-off in v0")
+	}
+	// Fingerprint commands run through the same shell a probe does, and
+	// nothing checked them. A probe's `run` is refused when blank; a
+	// fingerprint's was not, so `fingerprint = ["", "  "]` was accepted, each
+	// entry ran `/bin/sh -c ""`, exited 0, and was recorded as an environment
+	// fact keyed by the empty string.
+	//
+	// The duplicate check matters more. The recorded fingerprint is a map keyed
+	// by the command text, so two identical entries silently collapse into one:
+	// the manifest says two things are pinned and the lockfile records one,
+	// with no diagnostic anywhere.
+	seenFingerprint := make(map[string]int, len(m.Environment.Fingerprint))
+	for i, command := range m.Environment.Fingerprint {
+		if strings.TrimSpace(command) == "" {
+			return fmt.Errorf("env.fingerprint[%d] must not be empty", i)
+		}
+		if first, ok := seenFingerprint[command]; ok {
+			return fmt.Errorf("env.fingerprint[%d] repeats env.fingerprint[%d] (%q); the recorded fingerprint is keyed by the command, so a repeat records one entry and pins nothing extra", i, first, command)
+		}
+		seenFingerprint[command] = i
 	}
 	seen := make(map[string]string)
 	for i, probe := range m.Probes {
@@ -258,8 +293,13 @@ func validateID(id, where string) error {
 
 func validateEnv(values map[string]string, where string) error {
 	for key := range values {
-		if key == "" || strings.ContainsAny(key, "=\x00") {
-			return fmt.Errorf("%s.env contains invalid key %q", where, key)
+		// It used to refuse only "", "=" and NUL, while the message said
+		// "invalid key", which reads as a well-formedness check and was not
+		// one. A key with a space, a tab or a newline passed validation and was
+		// assembled verbatim into the child environment. The shell has no way
+		// to set such a variable and no way to say so.
+		if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsFunc(key, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+			return fmt.Errorf("%s.env key %q is not a usable variable name: no spaces, control characters, %q or NUL", where, key, "=")
 		}
 		if reservedEnv[key] {
 			return fmt.Errorf("%s.env cannot override reserved variable %s", where, key)
