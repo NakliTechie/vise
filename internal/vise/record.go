@@ -224,7 +224,20 @@ func (r *recordRun) computeCandidate() bool {
 	}
 	r.result.Candidate = HashBytes(candidateBytes)
 	if r.hasOld {
-		r.result.ReviewDiff = LockfileDiff(r.root, r.oldLock, r.lock, r.blobs)
+		diff, incomplete := LockfileDiff(r.root, r.oldLock, r.lock, r.blobs)
+		r.result.ReviewDiff = diff
+		// A review the reader could not actually perform is not a review, and
+		// accepting a candidate on the strength of one is the failure this
+		// whole flow exists to prevent. The blobs are committed, so the usual
+		// remedy is to restore them; if the old baseline is genuinely gone,
+		// the honest path is to delete vise.lock and record afresh, which says
+		// out loud that nothing was compared.
+		if len(incomplete) > 0 {
+			r.result.Outcome = harnessWithNext("record", "operator-review",
+				"the behavior diff is incomplete, so accepting it would not be a review: "+strings.Join(incomplete, "; "),
+				Next{Action: NextHuman, Detail: "restore the recorded blobs (they are committed) and rerun, or delete vise.lock and record a fresh baseline"})
+			return false
+		}
 	}
 	return true
 }
@@ -388,18 +401,36 @@ func harnessWithNext(cmd, id, detail string, next Next) Outcome {
 
 // LockfileDiff explains old versus new. newBlobs carries the new side's bytes
 // when they are not on disk yet (a preview); the old side reads the store.
-func LockfileDiff(root string, oldLock, newLock Lockfile, newBlobs map[string][]byte) string {
+// LockfileDiff renders the behavior diff an operator reads before accepting a
+// new baseline, and reports the reasons — if any — that the review cannot be
+// complete. An unreadable old blob means the reader is shown two hashes and an
+// error where the old behavior should be: that is not a review, and record
+// refuses to accept a candidate reviewed that way.
+func LockfileDiff(root string, oldLock, newLock Lockfile, newBlobs map[string][]byte) (string, []string) {
+	rendered, incomplete := lockfileDiffWithGaps(root, oldLock, newLock, newBlobs)
+	sort.Strings(incomplete)
+	return rendered, incomplete
+}
+
+func lockfileDiffWithGaps(root string, oldLock, newLock Lockfile, newBlobs map[string][]byte) (string, []string) {
 	var b strings.Builder
-	appendProbeDiffs(&b, root, oldLock.Probes, newLock.Probes, newBlobs)
+	gaps := &reviewGaps{}
+	appendProbeDiffs(&b, root, oldLock.Probes, newLock.Probes, newBlobs, gaps)
 	appendFingerprintDiff(&b, oldLock.Fingerprint, newLock.Fingerprint)
 	appendMetricDiffs(&b, oldLock.Metrics, newLock.Metrics)
 	if b.Len() == 0 {
-		return "No recorded behavior changed."
+		return "No recorded behavior changed.", gaps.reasons
 	}
-	return strings.TrimSuffix(b.String(), "\n")
+	return strings.TrimSuffix(b.String(), "\n"), gaps.reasons
 }
 
-func appendProbeDiffs(b *strings.Builder, root string, oldProbes, newProbes map[string]ProbeLock, newBlobs map[string][]byte) {
+// reviewGaps collects the places where the diff could not show the reader what
+// changed.
+type reviewGaps struct{ reasons []string }
+
+func (g *reviewGaps) add(reason string) { g.reasons = append(g.reasons, reason) }
+
+func appendProbeDiffs(b *strings.Builder, root string, oldProbes, newProbes map[string]ProbeLock, newBlobs map[string][]byte, gaps *reviewGaps) {
 	ids := make(map[string]bool)
 	for id := range oldProbes {
 		ids[id] = true
@@ -421,7 +452,7 @@ func appendProbeDiffs(b *strings.Builder, root string, oldProbes, newProbes map[
 		case !newOK:
 			appendRemovedProbeDiff(b, id, oldProbe)
 		default:
-			appendChangedProbeDiff(b, root, newBlobs, id, oldProbe, newProbe)
+			appendChangedProbeDiff(b, root, newBlobs, id, oldProbe, newProbe, gaps)
 		}
 	}
 }
@@ -448,7 +479,7 @@ func appendRemovedProbeDiff(b *strings.Builder, id string, probe ProbeLock) {
 	fmt.Fprintf(b, "- probe %s (exit %d, stdout %s, stderr %s, %d file(s), recorded at %s)\n", id, probe.Exit, probe.Stdout, probe.Stderr, len(probe.Files), probe.RecordedCommit)
 }
 
-func appendChangedProbeDiff(b *strings.Builder, root string, newBlobs map[string][]byte, id string, oldProbe, newProbe ProbeLock) {
+func appendChangedProbeDiff(b *strings.Builder, root string, newBlobs map[string][]byte, id string, oldProbe, newProbe ProbeLock, gaps *reviewGaps) {
 	if oldProbe.RunHash != newProbe.RunHash {
 		fmt.Fprintf(b, "%s definition changed since the recorded baseline (run_hash %s -> %s); see git diff vise.toml\n", id, oldProbe.RunHash, newProbe.RunHash)
 	}
@@ -467,8 +498,8 @@ func appendChangedProbeDiff(b *strings.Builder, root string, newBlobs map[string
 			fmt.Fprintf(b, "%s dep %s: %s -> %s\n", id, path, hashOrNone(oldProbe.Deps[path]), hashOrNone(newProbe.Deps[path]))
 		}
 	}
-	appendBlobDiff(b, root, newBlobs, id+"/stdout", oldProbe.Stdout, oldProbe.StdoutLarge, newProbe.Stdout, newProbe.StdoutLarge)
-	appendBlobDiff(b, root, newBlobs, id+"/stderr", oldProbe.Stderr, oldProbe.StderrLarge, newProbe.Stderr, newProbe.StderrLarge)
+	appendBlobDiff(b, root, newBlobs, id+"/stdout", oldProbe.Stdout, oldProbe.StdoutLarge, newProbe.Stdout, newProbe.StdoutLarge, gaps)
+	appendBlobDiff(b, root, newBlobs, id+"/stderr", oldProbe.Stderr, oldProbe.StderrLarge, newProbe.Stderr, newProbe.StderrLarge, gaps)
 	paths := make(map[string]bool)
 	for path := range oldProbe.Files {
 		paths[path] = true
@@ -477,7 +508,7 @@ func appendChangedProbeDiff(b *strings.Builder, root string, newBlobs map[string
 		paths[path] = true
 	}
 	for _, path := range sortedKeys(paths) {
-		appendBlobDiff(b, root, newBlobs, id+"/"+path, oldProbe.Files[path], oldProbe.FilesLarge[path], newProbe.Files[path], newProbe.FilesLarge[path])
+		appendBlobDiff(b, root, newBlobs, id+"/"+path, oldProbe.Files[path], oldProbe.FilesLarge[path], newProbe.Files[path], newProbe.FilesLarge[path], gaps)
 	}
 }
 
@@ -511,7 +542,7 @@ func appendMetricDiffs(b *strings.Builder, oldMetrics, newMetrics map[string]Met
 	}
 }
 
-func appendBlobDiff(b *strings.Builder, root string, newBlobs map[string][]byte, label, oldHash string, oldLarge bool, newHash string, newLarge bool) {
+func appendBlobDiff(b *strings.Builder, root string, newBlobs map[string][]byte, label, oldHash string, oldLarge bool, newHash string, newLarge bool, gaps *reviewGaps) {
 	if oldHash == newHash && oldLarge == newLarge {
 		return
 	}
@@ -542,9 +573,17 @@ func appendBlobDiff(b *strings.Builder, root string, newBlobs map[string][]byte,
 	// operator could not tell "too large to show you" from "the evidence is
 	// gone". The second is a reason to stop reviewing and repair the baseline.
 	fmt.Fprintf(b, "%s hash: %s -> %s\n", label, oldHash, newHash)
+	if oldLarge || newLarge {
+		// Deliberately not stored: over the capture bound. Say so, because two
+		// hashes with no explanation look the same as evidence that is missing,
+		// and a one-byte change looks the same as a rewrite.
+		fmt.Fprintf(b, "%s is larger than the %d-byte capture bound, so this change cannot be reviewed byte by byte\n", label, CaptureLimit)
+		gaps.add(fmt.Sprintf("%s exceeds the capture bound and can only be compared by hash", label))
+	}
 	for _, err := range []error{oldErr, newErr} {
 		if err != nil {
 			fmt.Fprintf(b, "%s blob unreadable: %s\n", label, err)
+			gaps.add(fmt.Sprintf("%s: the recorded observation could not be read (%s)", label, err))
 		}
 	}
 }

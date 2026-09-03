@@ -52,7 +52,7 @@ func TestLockfileDiffCoversFingerprintMetricsAndDeps(t *testing.T) {
 		Probes:      map[string]ProbeLock{"p": {Exit: 0, Stdout: stdout, Stderr: stdout, Deps: map[string]string{"fixture.txt": "sha256:bbbb"}}},
 		Metrics:     map[string]MetricLock{"complexity": {Value: 12, ToolVersion: "v2"}, "added": {Value: 3}},
 	}
-	diff := LockfileDiff(root, old, updated, nil)
+	diff, _ := LockfileDiff(root, old, updated, nil)
 	for _, want := range []string{
 		"p dep fixture.txt: sha256:aaaa -> sha256:bbbb",
 		"fingerprint: manifest [stubs] differ from the recorded baseline",
@@ -65,7 +65,7 @@ func TestLockfileDiffCoversFingerprintMetricsAndDeps(t *testing.T) {
 			t.Fatalf("diff %q lacks %q", diff, want)
 		}
 	}
-	if diff := LockfileDiff(root, old, old, nil); diff != "No recorded behavior changed." {
+	if diff, _ := LockfileDiff(root, old, old, nil); diff != "No recorded behavior changed." {
 		t.Fatalf("unchanged diff = %q", diff)
 	}
 }
@@ -81,7 +81,7 @@ func TestLockfileDiffShowsDefinitionChangesAndDescribesAdditions(t *testing.T) {
 		Probes:  map[string]ProbeLock{"p": {RunHash: "sha256:bbbb", Exit: 0, Stdout: stdout, Stderr: stdout}, "q": {Exit: 3, Stdout: stdout, Stderr: stdout, RecordedCommit: "abc"}},
 		Metrics: map[string]MetricLock{"m": {RunHash: "sha256:dddd", Value: 10}, "n": {Value: 4, ToolVersion: "v2"}},
 	}
-	diff := LockfileDiff(root, old, updated, nil)
+	diff, _ := LockfileDiff(root, old, updated, nil)
 	for _, want := range []string{
 		"p definition changed since the recorded baseline (run_hash sha256:aaaa -> sha256:bbbb)",
 		"+ probe q (exit 3, stdout sha256:",
@@ -201,7 +201,7 @@ func TestTheReviewDiffDescribesARemovedProbeAsFullyAsAnAddedOne(t *testing.T) {
 	old := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{"gone": probe}}
 	fresh := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{"added": probe}}
 
-	diff := LockfileDiff(t.TempDir(), old, fresh, nil)
+	diff, _ := LockfileDiff(t.TempDir(), old, fresh, nil)
 	var removed, added string
 	for _, line := range strings.Split(diff, "\n") {
 		if strings.HasPrefix(line, "- probe gone") {
@@ -240,7 +240,7 @@ func TestTheReviewDiffReportsEveryEnvironmentChange(t *testing.T) {
 		Env: map[string]string{"go version": "go1.25.8", "jq --version": "jq-1.7"},
 	}}
 
-	diff := LockfileDiff(t.TempDir(), oldLock, newLock, nil)
+	diff, _ := LockfileDiff(t.TempDir(), oldLock, newLock, nil)
 	for _, expected := range []string{"platform", "go version", "jq --version"} {
 		if !strings.Contains(diff, expected) {
 			t.Errorf("the review diff never mentions %q:\n%s", expected, diff)
@@ -261,7 +261,7 @@ func TestTheReviewDiffSaysWhenABlobCannotBeRead(t *testing.T) {
 	oldLock := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{"p": {Stdout: missing, Stderr: hash}}}
 	newLock := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{"p": {Stdout: hash, Stderr: hash}}}
 
-	diff := LockfileDiff(root, oldLock, newLock, map[string][]byte{hash: present})
+	diff, _ := LockfileDiff(root, oldLock, newLock, map[string][]byte{hash: present})
 	if !strings.Contains(diff, "blob unreadable") {
 		t.Fatalf("a missing blob rendered as an ordinary withheld one:\n%s", diff)
 	}
@@ -269,7 +269,7 @@ func TestTheReviewDiffSaysWhenABlobCannotBeRead(t *testing.T) {
 	// A large blob is withheld on purpose and must not be reported as broken.
 	largeOld := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{"p": {Stdout: hash, StdoutLarge: true}}}
 	largeNew := Lockfile{V: LockVersion, Probes: map[string]ProbeLock{"p": {Stdout: hash, StdoutLarge: false}}}
-	if diff := LockfileDiff(root, largeOld, largeNew, map[string][]byte{hash: present}); strings.Contains(diff, "unreadable") {
+	if diff, _ := LockfileDiff(root, largeOld, largeNew, map[string][]byte{hash: present}); strings.Contains(diff, "unreadable") {
 		t.Fatalf("a deliberately withheld blob was reported as broken:\n%s", diff)
 	}
 }
@@ -292,7 +292,7 @@ func TestAnAddedOrRemovedArtifactIsNotReportedAsACorruptBlob(t *testing.T) {
 		"p": {Stdout: hash, Stderr: hash, Files: map[string]string{"out/new.txt": hash}},
 	}}
 
-	diff := LockfileDiff(root, oldLock, newLock, map[string][]byte{hash: content})
+	diff, _ := LockfileDiff(root, oldLock, newLock, map[string][]byte{hash: content})
 	if strings.Contains(diff, "unreadable") {
 		t.Fatalf("an added artifact was reported as a corrupt blob:\n%s", diff)
 	}
@@ -308,7 +308,7 @@ func TestAnAddedOrRemovedArtifactIsNotReportedAsACorruptBlob(t *testing.T) {
 	// not only the absence of "unreadable" — silently printing nothing at all
 	// also avoids that word, and leaves the reviewer unaware the artifact is
 	// gone.
-	reverse := LockfileDiff(root, newLock, oldLock, map[string][]byte{hash: content})
+	reverse, _ := LockfileDiff(root, newLock, oldLock, map[string][]byte{hash: content})
 	if strings.Contains(reverse, "unreadable") {
 		t.Fatalf("a removed artifact was reported as a corrupt blob:\n%s", reverse)
 	}
@@ -350,4 +350,89 @@ func TestRecordReportsAJournalAppendFailure(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "vise.lock")); err != nil {
 		t.Fatalf("the lockfile is absent although record reported it written: %v", err)
 	}
+}
+
+// Accepting a baseline whose diff the reader could not see is not a review.
+// Both cases were verified against the built binary by an adversarial audit
+// before this refused them: a missing old blob, which is ordinary blob loss
+// and needs no intent, and an observation over the capture bound, where a
+// one-byte change and a rewrite render identically.
+func TestRecordRefusesToAcceptAReviewNobodyCouldPerform(t *testing.T) {
+	setup := func(t *testing.T) (string, Manifest, []byte) {
+		t.Helper()
+		root := testGitRepo(t)
+		writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n")
+		writeTestFile(t, root, "tool.sh", "#!/bin/sh\nprintf original\n")
+		writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"sh tool.sh\"\n")
+		testGit(t, root, "add", ".")
+		testGit(t, root, "commit", "-qm", "manifest")
+		manifest, manifestBytes, err := LoadManifest(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+			t.Fatalf("record: %#v", result.Outcome)
+		}
+		return root, manifest, manifestBytes
+	}
+
+	t.Run("the old observation is gone", func(t *testing.T) {
+		root, manifest, manifestBytes := setup(t)
+
+		// Ordinary blob loss: an incomplete checkout, a pruned directory.
+		var lock Lockfile
+		data, err := os.ReadFile(filepath.Join(root, "vise.lock"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(data, &lock); err != nil {
+			t.Fatal(err)
+		}
+		name, err := HashName(lock.Probes["p"].Stdout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(filepath.Join(root, ".vise", "blobs", name)); err != nil {
+			t.Fatal(err)
+		}
+		writeTestFile(t, root, "tool.sh", "#!/bin/sh\nprintf changed\n")
+
+		result := Record(root, manifest, manifestBytes, RecordOptions{Preview: true, AllowDirty: true})
+		if result.Outcome.Exit == ExitOK {
+			t.Fatalf("a preview whose old observation is unreadable was accepted: %#v", result.Outcome)
+		}
+		failure := result.Outcome.Failures["operator-review"]
+		if !strings.Contains(failure.Detail, "incomplete") {
+			t.Fatalf("the refusal does not say why: %#v", result.Outcome.Failures)
+		}
+		if result.Outcome.Next.Action != NextHuman {
+			t.Fatalf("next.action = %q, want human", result.Outcome.Next.Action)
+		}
+	})
+
+	t.Run("the observation is larger than the capture bound", func(t *testing.T) {
+		root := testGitRepo(t)
+		writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n")
+		writeTestFile(t, root, "tool.sh", "#!/bin/sh\nawk 'BEGIN{for(i=0;i<300000;i++)printf \"A\"}'\n")
+		writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"big\"\nrun = \"sh tool.sh\"\ntimeout = 120\n")
+		testGit(t, root, "add", ".")
+		testGit(t, root, "commit", "-qm", "manifest")
+		manifest, manifestBytes, err := LoadManifest(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+			t.Fatalf("record: %#v", result.Outcome)
+		}
+
+		writeTestFile(t, root, "tool.sh", "#!/bin/sh\nawk 'BEGIN{for(i=0;i<300000;i++)printf \"B\"}'\n")
+		result := Record(root, manifest, manifestBytes, RecordOptions{Preview: true, AllowDirty: true})
+		if result.Outcome.Exit == ExitOK {
+			t.Fatalf("an unreviewable over-bound change was accepted: %#v", result.Outcome)
+		}
+		failure := result.Outcome.Failures["operator-review"]
+		if !strings.Contains(failure.Detail, "capture bound") {
+			t.Fatalf("the refusal does not name the reason: %q", failure.Detail)
+		}
+	})
 }
