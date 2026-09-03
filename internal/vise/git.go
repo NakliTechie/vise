@@ -355,6 +355,21 @@ func gitOwnState(root string) (string, error) {
 		return "", err
 	}
 	writeHashPart(digest, "head", []byte(head))
+	// The commit HEAD resolves to is not the whole of HEAD. A probe that runs
+	// `git checkout --detach` at the same commit leaves the resolved value
+	// identical and the repository on no branch, so the gate said green and
+	// the operator's next commit went somewhere they did not expect. The file
+	// carries exactly that distinction — `ref: refs/heads/main` against a bare
+	// sha — and reading it costs no process, unlike a second rev-parse.
+	//
+	// This is the sixth thing the judged party could change that the snapshot
+	// trusted, after HEAD's value, info/exclude, info/attributes, the resolved
+	// config, and the resolved excludes file.
+	headFile, err := os.ReadFile(filepath.Join(gitDir, "HEAD"))
+	if err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("read git HEAD: %w", err)
+	}
+	writeHashPart(digest, "head-ref", headFile)
 	// The repository's own rule files, which live in the git directory rather
 	// than the work tree and so appear in neither half of the snapshot.
 	// attributes is here beside exclude because `git diff` consults it: an

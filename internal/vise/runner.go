@@ -393,11 +393,14 @@ func launchFailureDetail(command string, stderr Capture) string {
 	// one — lost the sentence telling the reader what to do about it. The
 	// README's claim that a missing tool is "exit 2 with the remedy in the
 	// message" was true of the rarer half.
-	remedy := fmt.Sprintf("install %s, or name it by an absolute path", word)
+	// When the shell named the missing thing, do not name it again from the
+	// run command: the first word of `sh helper.sh` is `sh`, which is present,
+	// and the missing tool is something helper.sh reached for. Saying "install
+	// sh" there is worse than saying nothing, because it is confidently wrong.
 	if line := firstShellDiagnostic(stderr); line != "" {
-		return fmt.Sprintf("probe command could not be launched (exit 127): %s; %s", line, remedy)
+		return fmt.Sprintf("probe command could not be launched (exit 127): %s; install what the shell named, or give it an absolute path", line)
 	}
-	return fmt.Sprintf("probe command could not be launched (exit 127): %q is not on the probe's PATH; %s", word, remedy)
+	return fmt.Sprintf("probe command could not be launched (exit 127): %q is not on the probe's PATH; install %s, or name it by an absolute path", word, word)
 }
 
 // firstShellDiagnostic returns the shell's own not-found line, bounded, or "".

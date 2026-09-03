@@ -667,3 +667,26 @@ func TestAMetricThatWillNotRunSaysWhatWentWrong(t *testing.T) {
 		})
 	}
 }
+
+// A probe that runs a wrapper is the normal case, not the exception: the
+// agent-ready example ships one. So the first word of `run` is usually the
+// shell or the wrapper, and it is present — the thing that is missing is
+// whatever the wrapper reached for, several lines in.
+//
+// I added a remedy to this message and derived the tool name from `run`, which
+// produced "install sh" for a probe whose sh is fine. Confidently wrong is
+// worse than silent: an agent that follows it goes and looks for a shell.
+func TestALaunchFailureDoesNotNameTheWrongTool(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "helper.sh", "no-such-tool --run\n")
+	result := Runner{Root: root}.RunProbe(Probe{ID: "p", Run: "sh helper.sh", Timeout: 10}, false)
+	if result.HarnessError == "" {
+		t.Fatal("no harness error")
+	}
+	if !strings.Contains(result.HarnessError, "no-such-tool") {
+		t.Errorf("the message does not name what is missing:\n\t%s", result.HarnessError)
+	}
+	if strings.Contains(result.HarnessError, "install sh") {
+		t.Errorf("the message tells the reader to install the shell that ran fine:\n\t%s", result.HarnessError)
+	}
+}
