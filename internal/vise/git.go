@@ -145,7 +145,7 @@ func GitWorkspaceSnapshot(root string, exclude []string) (WorkspaceSnapshot, err
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
-	hidden, err := gitIgnoredIgnoreFiles(root)
+	hidden, err := gitIgnoredRuleFiles(root)
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
@@ -182,25 +182,29 @@ func isViseLocalState(rel string) bool {
 		rel == ".vise/tmp" || strings.HasPrefix(rel, ".vise/tmp/")
 }
 
-// gitIgnoredIgnoreFiles lists .gitignore files that Git is ignoring.
+// gitIgnoredRuleFiles lists .gitignore and .gitattributes files that Git is
+// ignoring.
 //
 // Ignored paths are outside the snapshot on purpose — a build cache is what a
-// probe is expected to write. A .gitignore is not that: it decides what
-// "ignored" means, so a probe can write one that names both its stray and
-// itself and leave nothing for the untracked scan to see. Demonstrated with an
-// ordinary shell probe before this existed.
+// probe is expected to write. These two are not that: they decide what the
+// comparison reads. A .gitignore decides what "ignored" means, so a probe can
+// write one naming both its stray and itself and leave nothing for the
+// untracked scan to see; that was demonstrated with an ordinary shell probe
+// before this existed. A .gitattributes decides whether a path is diffed at
+// all and through what, and git reads it from the work tree whatever its
+// ignore status.
 //
 // The pathspec keeps this from walking an ignored dependency tree: Git filters
 // to these two names rather than listing everything it ignores.
-func gitIgnoredIgnoreFiles(root string) ([]string, error) {
+func gitIgnoredRuleFiles(root string) ([]string, error) {
 	cmd := exec.Command("git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard",
-		"--", ".gitignore", "*/.gitignore")
+		"--", ".gitignore", "*/.gitignore", ".gitattributes", "*/.gitattributes")
 	cmd.Dir = root
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("list ignored ignore files: %s", strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("list ignored rule files: %s", strings.TrimSpace(stderr.String()))
 	}
 	var paths []string
 	for _, entry := range bytes.Split(stdout.Bytes(), []byte{0}) {

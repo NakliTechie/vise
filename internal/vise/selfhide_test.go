@@ -26,3 +26,25 @@ func TestProbeHidingBehindASelfIgnoringGitignore(t *testing.T) {
 		t.Fatalf("reported, but not naming what it saw: %q", result.HarnessError)
 	}
 }
+
+// .gitattributes is the same shape as .gitignore: git diff reads it from the
+// work tree whatever its ignore status, and it decides whether a path is
+// diffed at all. An ignored one could therefore change what the comparison
+// sees while staying outside the snapshot itself.
+func TestProbeHidingBehindAnIgnoredGitattributes(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n.gitattributes\n")
+	writeTestFile(t, root, "source.txt", "original\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "source")
+
+	// The attributes file is ignored, so it is invisible to the untracked
+	// scan; it still changes how the tracked file is diffed.
+	run := "printf 'source.txt -diff\\n' > .gitattributes && printf tampered > source.txt && printf done"
+	result := Runner{Root: root}.RunProbe(Probe{ID: "attrhide", Run: run, Timeout: 30}, true)
+
+	t.Logf("harness error: %q", result.HarnessError)
+	if result.HarnessError == "" {
+		t.Fatal("a probe changed a tracked file behind an ignored .gitattributes and nothing noticed")
+	}
+}
