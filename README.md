@@ -14,7 +14,7 @@ vise gate            # 0 → next step · 1 → revert, the diff says what chang
 
 ## Why
 
-Raw AI refactoring is correct 26–33% of the time; with a verification layer in front of it, the shipped-to-production rate is 98% ([sources](RESEARCH.md)). The value is in the verification layer, and nothing ships it on its own: what exists nearby is a transform *engine* (OpenRewrite, codemods), a per-language golden-master *library* written for humans (ApprovalTests), a harness that baselines *the agent* rather than the app, or — closest of all, and the reason to be careful — an agent pipeline whose equivalence check is another model judging whether behavior was preserved. vise is the net itself — language-agnostic, CLI-first, built to sit inside an agent's loop and be read by a machine.
+Raw GPT-3.5 produces correct refactorings 26–33% of the time, GPT-4 only slightly better; with a verification layer in front of it, the shipped-to-production rate is 98% ([sources](RESEARCH.md)). The value is in the verification layer, and nothing ships it on its own: what exists nearby is a transform *engine* (OpenRewrite, codemods), a per-language golden-master *library* written for humans (ApprovalTests), a harness that baselines *the agent* rather than the app, or — closest of all, and the reason to be careful — an agent pipeline whose equivalence check is another model judging whether behavior was preserved. vise is the net itself — language-agnostic, CLI-first, built to sit inside an agent's loop and be read by a machine.
 
 ### What it catches that a test suite does not
 
@@ -55,8 +55,8 @@ whatever you already build.
 
 ```sh
 mkdir -p bin fixtures
-printf 'col\n1\n' > fixtures/in.csv
-printf '#!/bin/sh\nprintf "usage: mytool [--help]\\n"\n' > bin/mytool
+printf 'col\n1\n2\n' > fixtures/in.csv
+printf '#!/bin/sh\nprintf "rows: %%s\\n" "$(tail -n +2 "$1" | wc -l | tr -d " ")"\n' > bin/mytool
 chmod +x bin/mytool
 ```
 
@@ -74,11 +74,18 @@ seed = "1729"             # exported as VISE_SEED; your app wires it to its RNG
 network = "declared-off"  # a promise probes make; vise does not enforce it
 
 [[probe]]
-id = "cli-help"
-run = "./bin/mytool --help"
+id = "count-rows"
+run = "./bin/mytool fixtures/in.csv"
 timeout = 30
-deps = ["fixtures/in.csv"]  # fixtures and wrappers, never the code under test
+deps = ["fixtures/in.csv"]  # files this probe reads: fixtures and wrappers,
+                            # never the code under test
 ```
+
+`deps` is what the probe *consumes*. vise freezes their hashes, so editing one
+after recording is reported as harness drift rather than as a behavior change —
+which is right, because the probe's inputs moved and not the program. Declare
+only what the probe actually reads; a `deps` entry a probe never opens turns an
+unrelated edit into a failure on a probe it cannot affect.
 
 Commit everything the probe touches, freeze the baseline, commit that too.
 `record` needs a clean tree, so anything the probe reads has to be committed
@@ -107,7 +114,7 @@ vise gate --quiet
 
 ```text
 GATE GREEN — 7/7
-GATE RED [behavior] — 6/7: cli-help
+GATE RED [behavior] — 6/7: count-rows
 GATE INDETERMINATE [flake] — 6/7: convert-fixture
 ```
 
@@ -145,8 +152,8 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 | `vise record --preview` | Show the candidate diff and its digest. Writes no baseline state. |
 | `vise record --accept <digest>` | Freeze exactly the candidate that was previewed. |
 | `vise verify [--probe ID]` | Replay and diagnose the suite, or one probe. |
-| `vise gate [--quiet]` | The refactor-loop verdict, journaled. |
-| `vise run <probe-id>` | Run one probe without comparing it to the baseline, streaming its output to your terminal. `--json` reports what it observed: hashes, sizes, artifacts. The lifecycle still applies — artifacts are deleted first, the work-tree and evaluator-state checks still run. Exit mirrors the probe. |
+| `vise gate [--probe ID] [--quiet]` | The refactor-loop verdict, journaled. |
+| `vise run <probe-id>` | Run one probe without comparing it to the baseline, streaming its output to your terminal. `--json` reports what it observed: hashes, sizes, artifacts. The lifecycle still applies — artifacts are deleted first, the work-tree and evaluator-state checks still run. Exit mirrors the probe, except a timeout, a refused artifact or a lingering pipe holder, which have no probe exit to mirror and are exit 2. |
 | `vise status` | The whole situation in one bounded read. Exit 0 for any call it understands. |
 | `vise doctor` | Check the repository is fit to hand to an agent. Read-only; exit 0 whatever it finds. |
 | `vise version` | The version, and with `--json` the build revision. |
@@ -186,7 +193,7 @@ substitutes for each other; defects live where they fail to overlap.
 
 **The judge lives outside the loop.** `vise.toml`, `vise.lock`, `.vise/blobs/`, and the local `.vise/journal.jsonl` are operator territory: the gated agent reads them and never writes them. vise cannot authenticate its caller and says so — your harness policy must deny the agent writes to those paths and deny `vise record` mid-campaign.
 
-**Containment ends at the session boundary.** Probes run in their own process group; vise kills that group on timeout and again when the shell exits, bounds the wait on output pipes, refuses any run that touched evaluator state, and compares the tracked tree around every judged run. A child that starts a *new session* escapes all of it. That limit is stated in [SPEC §2.2](SPEC.md#22-probe-execution-contract) rather than papered over.
+**Containment ends at the session boundary.** Probes run in their own process group; vise kills that group on timeout and again when the shell exits, bounds the wait on output pipes, refuses any run that touched evaluator state, and compares the work tree, tracked and untracked alike, around every judged run. A child that starts a *new session* escapes all of it. That limit is stated in [SPEC §2.2](SPEC.md#22-probe-execution-contract) rather than papered over.
 
 **Observations are bounded.** vise hashes and counts every byte a probe produces but holds only the first 256 KiB, so a probe that prints a gigabyte cannot exhaust its own judge. Judgment is the hash; the retained prefix is for rendering.
 
@@ -203,7 +210,7 @@ enforce = "no-regress"       # worse → exit 5, after behavior held
 version_cmd = "oxlint --version"
 ```
 
-vise ships no analyzer and provisions nothing. A missing tool is exit 2, naming the tool and what to do about it. The metric's definition is frozen with its baseline, so swapping the analyzer is harness drift, never a free improvement.
+vise ships no analyzer and provisions nothing. A missing tool is exit 2, naming the tool and what to do about it. The metric's definition is frozen with its baseline, and an enforcing metric must declare a `version_cmd` — so swapping the analyzer is harness drift, never a free improvement. Without that declaration the swap is invisible and the guarantee does not hold, which is why vise refuses to enforce a metric that does not name its analyzer.
 
 ## Not a refactorer
 

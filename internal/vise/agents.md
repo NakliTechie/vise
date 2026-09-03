@@ -97,17 +97,21 @@ report at all*. Do not read a usage error as a situation.
 | 0 | green | every declared observation matched | commit, next step |
 | 1 | red, `behavior` | you changed what the code does | revert your change |
 | 2 | indeterminate, `harness` | the judge is broken or its inputs moved | see below — never touch the code under test |
-| 3 | indeterminate, `flake` | an observation was unstable | stop and report |
+| 3 | indeterminate, `flake` | an observation was unstable | `quarantine_ack` — stop and report |
 | 4 | indeterminate | no baseline exists | stop and report |
 | 5 | red, `metric` | behavior held, a tracked metric got worse | revert what worsened it |
 
-The JSON carries `exit`, `counts`, one `next.action` from a closed
-vocabulary, and — when something failed — `verdict`, `classes` and `failures`.
-A green outcome carries no classes and no failures, because there are none, so
-branch on the exit code and read the rest if it is there. Failures are keyed by
-the name of the thing that failed: usually a probe id, but `manifest`,
-`journal`, `vise.lock`, `fingerprint` and `rerun-limit` name themselves. Read
-those fields. Never parse the human text.
+The JSON always carries `exit`, `verdict`, `counts` and one `next.action`.
+`classes` and `failures` appear only when something failed — a green outcome has
+neither, because there are none. Failures are keyed by the name of the thing
+that failed: usually a probe id, but `manifest`, `journal`, `vise.lock`,
+`fingerprint` and `rerun-limit` name themselves. Read those fields. Never parse
+the human text.
+
+The closed vocabulary, in full, so you can write the switch: `proceed` ·
+`revert` · `fix_probe` · `human` · `record_first` · `quarantine_ack`. Six values
+and no seventh. If you ever receive one that is not on this list, that is a
+defect in vise — stop and report it rather than guessing what it meant.
 
 ## Exit 1 — you changed behavior
 

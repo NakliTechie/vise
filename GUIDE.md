@@ -83,7 +83,7 @@ next: record_first — commit the harness, then run vise record
 
 ## 2. Record the baseline
 
-`record` runs every probe twice (a probe that differs between the passes fails the freeze) and refuses a dirty tree, because the frozen truth must correspond to a commit you can return to:
+`record` runs the whole suite twice — two full passes, not two adjacent runs of each probe, because only full passes catch order-dependence (a probe that differs between the passes fails the freeze) and refuses a dirty tree, because the frozen truth must correspond to a commit you can return to:
 
 ```
 $ vise record
@@ -376,7 +376,7 @@ The agent may draft a probe into `.vise/proposals.toml` (same schema as `[[probe
 | 4 | not initialized | `record_first` | an operator records a baseline |
 | 5 | metric regression under `no-regress` | `revert` | the change held behavior but worsened quality |
 
-`status` exits 0 whatever it finds and reports instead of failing; only a call it cannot understand is exit 2. `run` mirrors the probe's own exit (a launch failure is 127).
+`status` exits 0 whatever it finds and reports instead of failing; only a call it cannot understand is exit 2. `run` mirrors the probe's own exit, with three exceptions that have no probe exit to mirror and are exit 2: a timeout, a refused artifact, and a process left holding the pipe. A launch failure is the probe's own 127 and passes through.
 
 ## 11. Operator territory
 
@@ -631,10 +631,14 @@ vise record [--allow-dirty] [--i-reviewed-the-diff] [--preview | --accept DIGEST
                                    two full passes, atomic write of vise.lock and blobs, journal event;
                                    --preview shows the candidate diff and digest without writing baseline
                                    state, --accept writes only that candidate. --preview and --accept
-                                   are the exclusive pair; --i-reviewed-the-diff combines with either
+                                   are the exclusive pair; --i-reviewed-the-diff is accepted alongside
+                                   either and does nothing there — preview writes no state, and
+                                   accept carries its own authorization
 vise verify [--probe ID]           replay all probes or one; bounded diagnosis; journals the event
 vise gate [--probe ID] [--quiet]   verify plus the one-line verdict; journals the event
-vise run <probe-id>                one probe, streamed and not judged; exit mirrors the probe
+vise run <probe-id>                one probe, streamed and not judged; exit mirrors the probe,
+                                   except a timeout, a refused artifact or a lingering pipe holder,
+                                   which have no probe exit to mirror and are exit 2
 vise doctor                        what an operator should fix before an agent works here;
                                    runs no probe, writes nothing, exit 0
 vise status                        the whole situation in one bounded read; exit 0

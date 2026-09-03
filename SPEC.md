@@ -23,7 +23,7 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 - **Probe** — one deterministic observation: a command run under declared stubs, its outputs hashed and diffed.
 - **Manifest** (`vise.toml`) — the declared probe set. Committed; operator-territory.
 - **Lockfile** (`vise.lock`) — the frozen truth, written only by `vise record`. Committed; operator-territory. Its content is a function of the observed behavior plus the environment it was observed in and the commit it was first frozen at — provenance the reader needs and the probes' behavior — no wall-clock timestamps inside (record events with times live in the journal).
-- **Verdict** — three-valued, fail-closed: **green** (every declared behavior probe judged *pass*), **red** (≥1 probe judged *behavior diff*, or — behavior having held — ≥1 enforced metric regressed, all others judged), **indeterminate** (≥1 probe unjudgable: flaky, harness-broken, or environment-drifted). Green requires *every* declared probe; nothing is excluded from the denominator, ever.
+- **Verdict** — three-valued, fail-closed: **green** (every declared behavior probe judged *pass*), **red** (≥1 probe judged *behavior diff*, or — behavior having held — ≥1 enforced metric regressed, all others judged), **indeterminate** (≥1 probe unjudgable: flaky, harness-broken, or environment-drifted — and the degenerate case of exit 4, where no baseline exists so nothing was judged at all). Green requires *every* declared probe; nothing is excluded from the denominator, ever.
 
 ## 2. Manifest — `vise.toml`
 
