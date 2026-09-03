@@ -110,3 +110,65 @@ func TestStatusReportsGitInspectionFailureAsDrift(t *testing.T) {
 		t.Fatalf("report = %#v", report)
 	}
 }
+
+// The contract tells an agent to read status first and then gate. For the most
+// ordinary drift there is — a declared input the agent itself edited — status
+// said human and the gate said fix_probe seconds later. Two correct-sounding
+// instructions pointing opposite ways is the worst thing this tool can do, and
+// the operator flag exists precisely so the two commands answer alike.
+//
+// Reported by a coding agent that had been blocked by a red repository and
+// read the two answers side by side.
+func TestStatusAndGateAgreeAboutWhoRepairsTheDrift(t *testing.T) {
+	newRepo := func(t *testing.T) string {
+		t.Helper()
+		root := testGitRepo(t)
+		writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n")
+		writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n\n[[probe]]\nid = \"p\"\nrun = \"cat dep.txt\"\ntimeout = 30\ndeps = [\"dep.txt\"]\n")
+		writeTestFile(t, root, "dep.txt", "original\n")
+		testGit(t, root, "add", ".")
+		testGit(t, root, "commit", "-qm", "harness")
+		manifest, manifestBytes, err := LoadManifest(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+			t.Fatalf("record: %#v", result.Outcome)
+		}
+		return root
+	}
+
+	both := func(t *testing.T, root string) (string, string) {
+		t.Helper()
+		manifest, manifestBytes, err := LoadManifest(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gate := Verify(root, manifest, manifestBytes, VerifyOptions{}).Outcome.Next.Action
+		return BuildStatus(root).Next.Action, gate
+	}
+
+	t.Run("the agent edited a declared input, so the agent restores it", func(t *testing.T) {
+		root := newRepo(t)
+		writeTestFile(t, root, "dep.txt", "changed\n")
+		status, gate := both(t, root)
+		if status != gate {
+			t.Errorf("status says %q and gate says %q for the same drift", status, gate)
+		}
+		if gate != NextFixProbe {
+			t.Errorf("action %q, want %q — the agent changed a file it may change", gate, NextFixProbe)
+		}
+	})
+
+	t.Run("the probe definition moved, so an operator owns it", func(t *testing.T) {
+		root := newRepo(t)
+		writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n\n[[probe]]\nid = \"p\"\nrun = \"cat dep.txt\"\ntimeout = 45\ndeps = [\"dep.txt\"]\n")
+		status, gate := both(t, root)
+		if status != gate {
+			t.Errorf("status says %q and gate says %q for the same drift", status, gate)
+		}
+		if gate != NextHuman {
+			t.Errorf("action %q, want %q — the repair is in vise.toml", gate, NextHuman)
+		}
+	})
+}

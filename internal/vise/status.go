@@ -208,11 +208,35 @@ func buildTamperHash(root string, manifestBytes, lockBytes []byte, report *Statu
 }
 
 func buildStaticDrift(root string, manifest Manifest, lock Lockfile, report *StatusReport) {
-	report.Lock.Drift = baselineDrift(root, manifest, lock)
-	if len(report.Lock.Drift) > 0 && report.State == "ready" {
-		report.State = "baseline-drift"
-		report.Next = Next{Action: NextHuman, Detail: "vise.toml and vise.lock disagree (" + report.Lock.Drift[0] + "); restore the manifest or ask an operator to re-record"}
+	drift, operatorOwned := baselineDrift(root, manifest, lock)
+	report.Lock.Drift = drift
+	if len(drift) == 0 || report.State != "ready" {
+		return
 	}
+	report.State = "baseline-drift"
+	// The same ownership question the gate answers, answered the same way.
+	//
+	// status said human for every kind of drift, and the gate said fix_probe
+	// for the kinds an agent caused and can undo — a declared input it edited,
+	// most often. The contract tells an agent to read status first, so it was
+	// told to stop and then, seconds later, told to fix its own change. Two
+	// correct-sounding instructions pointing opposite ways is the worst thing
+	// this tool can do, and it was doing it about the most ordinary drift
+	// there is.
+	//
+	// baselineDrift already runs the same validators as verify, so the flag is
+	// computed and was being discarded on the way to a string.
+	if operatorOwned {
+		report.Next = Next{Action: NextHuman, Detail: "vise.toml and vise.lock disagree (" + drift[0] + "); restore the manifest or ask an operator to re-record"}
+		return
+	}
+	// Deliberately not naming the manifest and the lockfile here, though they
+	// are what disagree. This branch means the agent moved something it may
+	// repair, and a fix_probe message that names a file the agent may not
+	// write is the exact contradiction the guard in operator_test.go exists to
+	// catch — it caught this line when it did. The drift entry already says
+	// which probe and what moved.
+	report.Next = Next{Action: NextFixProbe, Detail: "the baseline no longer matches what a probe reads (" + drift[0] + "); restore what your change moved, then rerun"}
 }
 
 func buildRerunRefusal(root string, manifest Manifest, report *StatusReport) {
@@ -258,7 +282,9 @@ func buildManifestStatus(root string, report *StatusReport) (Manifest, []byte, e
 
 // baselineDrift runs verify's static manifest-versus-lock checks (no probe
 // executes) and returns one "id: detail" line per disagreement, sorted by id.
-func baselineDrift(root string, manifest Manifest, lock Lockfile) []string {
+// baselineDrift reports the manifest-versus-lock differences a gate would find
+// without running a probe, and whether any of them is an operator's to repair.
+func baselineDrift(root string, manifest Manifest, lock Lockfile) ([]string, bool) {
 	outcome := NewOutcome("status")
 	validateProbeSet(&outcome, manifest, lock)
 	validateMetricSet(&outcome, manifest, lock)
@@ -278,13 +304,13 @@ func baselineDrift(root string, manifest Manifest, lock Lockfile) []string {
 		}
 	}
 	if len(outcome.Failures) == 0 {
-		return nil
+		return nil, false
 	}
 	drift := make([]string, 0, len(outcome.Failures))
 	for _, id := range sortedKeys(outcome.Failures) {
 		drift = append(drift, id+": "+outcome.Failures[id].Detail)
 	}
-	return drift
+	return drift, outcome.hasOperatorFailure()
 }
 
 // nextGateRefused asks the rerun limit whether a full gate at HEAD would be
