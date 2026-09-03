@@ -70,7 +70,7 @@ files = ["out/result.json"]     # artifacts to hash; must be untracked
 Commit the harness, freeze the baseline, commit that too:
 
 ```sh
-git add vise.toml .gitignore && git commit -m "Add vise probes"
+git add vise.toml AGENTS.md .gitignore && git commit -m "Add vise probes"
 vise record
 git add vise.lock .vise/blobs && git commit -m "Record behavior baseline"
 ```
@@ -94,8 +94,8 @@ GATE INDETERMINATE [flake] — 6/7: convert-fixture
 vise's primary user is a coding agent mid-loop: context-poor, liable to be killed mid-turn, prone to rationalizing its own failures. Every interface decision follows from that.
 
 - **One perception act.** `vise status` renders the entire situation — manifest, lockfile, environment drift, baseline drift, rerun state, journal tail — in one bounded read. It always exits 0.
-- **Machine-decidable, not merely machine-readable.** `--json` on every command; every outcome carries a typed class and one `next.action` from a closed vocabulary. The agent branches on the exit code and the class, never on prose.
-- **One exit code per distinct next action.** Conflating two would force the agent to investigate what the tool already knows.
+- **Machine-decidable, not merely machine-readable.** `--json` on every command; every failing outcome carries a typed class, and every outcome carries one `next.action` from a closed vocabulary. A green outcome carries no classes and no failures, because there are none. The agent branches on the exit code and the class, never on prose.
+- **The exit code is the branch; `next.action` is the instruction.** They are not one-to-one and the difference matters: exit 2 asks the agent to repair a probe it broke, or to stop because the repair is in a file it may not write, and only `next.action` separates those. Exits 1 and 5 both say revert, and what to revert differs. Branch on the code, then read the action.
 - **Bounded output, always.** Green is one line. Red shows the first divergence and counts, never a dump. Output grows with divergence, never with repository size — and a long line is clipped around the differing column, so a probe that prints one 8,000-character line still renders a diff you can read.
 - **Every failure names its remedy.** The error message is the documentation, delivered when it is needed.
 - **Fail closed.** A flaky probe makes the verdict *indeterminate*, never green, and never leaves the denominator. An agent cannot eject a judge by making it flaky, and after two reruns at one commit the third is refused.
@@ -104,7 +104,7 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 |---|---|---|---|
 | 0 | green | `proceed` | next step |
 | 1 | behavior differs | `revert` | revert, or ask an operator to accept a new baseline |
-| 2 | harness broken | `fix_probe` / `human` | repair the harness — never the code under test |
+| 2 | harness broken | `fix_probe` / `human` | `fix_probe`: repair the probe your change broke. `human`: stop — the repair is in a file you may not write |
 | 3 | flaky, indeterminate | `quarantine_ack` | stop unless your policy tolerates indeterminate |
 | 4 | no baseline | `record_first` | an operator records one |
 | 5 | metric regressed | `revert` | behavior held, quality did not |

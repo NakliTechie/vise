@@ -140,9 +140,9 @@ func checkVerifyRerunLimit(root string, state verifyState, checkSet []string) (*
 func validateVerifyInputs(root string, outcome *Outcome, manifest Manifest, lock Lockfile, probes []Probe, validateSets bool) bool {
 	fingerprint, err := CaptureFingerprint(root, manifest)
 	if err != nil {
-		outcome.AddFailure("fingerprint", Failure{Class: "harness", Detail: err.Error()})
+		outcome.AddFailure("fingerprint", Failure{Class: "harness", Detail: err.Error(), Operator: true})
 	} else if mismatch := FingerprintMismatch(fingerprint, lock.Fingerprint); mismatch != "" {
-		outcome.AddFailure("fingerprint", Failure{Class: "harness", Detail: "environment differs from recording: " + mismatch})
+		outcome.AddFailure("fingerprint", Failure{Class: "harness", Detail: "environment differs from recording: " + mismatch, Operator: true})
 	}
 
 	if validateSets {
@@ -234,7 +234,7 @@ func evaluateMetrics(outcome *Outcome, runner Runner, metrics []Metric, expected
 			continue
 		}
 		if first.ToolVersion != expected.ToolVersion {
-			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: "metric tool version differs from recording"})
+			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: "metric tool version differs from recording", Operator: true})
 			continue
 		}
 		if first.Value != expected.Value {
@@ -277,12 +277,12 @@ func validateProbeSet(outcome *Outcome, manifest Manifest, lock Lockfile) {
 	}
 	for id := range declared {
 		if _, ok := lock.Probes[id]; !ok {
-			outcome.AddFailure(id, Failure{Class: "harness", Detail: "probe is declared but absent from vise.lock; record a new baseline"})
+			outcome.AddFailure(id, Failure{Class: "harness", Detail: "probe is declared but absent from vise.lock; record a new baseline", Operator: true})
 		}
 	}
 	for id := range lock.Probes {
 		if !declared[id] {
-			outcome.AddFailure(id, Failure{Class: "harness", Detail: "probe exists in vise.lock but not vise.toml; restore the manifest or record a new baseline"})
+			outcome.AddFailure(id, Failure{Class: "harness", Detail: "probe exists in vise.lock but not vise.toml; restore the manifest or record a new baseline", Operator: true})
 		}
 	}
 }
@@ -294,7 +294,7 @@ func validateMetricSet(outcome *Outcome, manifest Manifest, lock Lockfile) {
 	}
 	for id := range declared {
 		if _, ok := lock.Metrics[id]; !ok {
-			outcome.AddFailure(id, Failure{Class: "harness", Detail: "metric is declared but absent from vise.lock"})
+			outcome.AddFailure(id, Failure{Class: "harness", Detail: "metric is declared but absent from vise.lock", Operator: true})
 		}
 	}
 	for _, metric := range manifest.Metrics {
@@ -309,14 +309,14 @@ func validateMetricSet(outcome *Outcome, manifest Manifest, lock Lockfile) {
 		}
 		switch {
 		case expected.RunHash == "":
-			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: "metric definition was not frozen by this baseline; re-record"})
+			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: "metric definition was not frozen by this baseline; re-record", Operator: true})
 		case expected.RunHash != runHash:
-			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: "metric definition changed after recording"})
+			outcome.AddFailure(metric.ID, Failure{Class: "harness", Detail: "metric definition changed after recording", Operator: true})
 		}
 	}
 	for id := range lock.Metrics {
 		if !declared[id] {
-			outcome.AddFailure(id, Failure{Class: "harness", Detail: "metric exists in vise.lock but not vise.toml"})
+			outcome.AddFailure(id, Failure{Class: "harness", Detail: "metric exists in vise.lock but not vise.toml", Operator: true})
 		}
 	}
 }
@@ -325,7 +325,7 @@ func validateProbeEntry(root string, outcome *Outcome, probe Probe, lock Lockfil
 	expected, ok := lock.Probes[probe.ID]
 	if !ok {
 		if _, exists := outcome.Failures[probe.ID]; !exists {
-			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: "probe is absent from vise.lock"})
+			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: "probe is absent from vise.lock", Operator: true})
 		}
 		return
 	}
@@ -335,7 +335,7 @@ func validateProbeEntry(root string, outcome *Outcome, probe Probe, lock Lockfil
 		return
 	}
 	if expected.RunHash != runHash {
-		outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: "probe definition changed after recording"})
+		outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: "probe definition changed after recording", Operator: true})
 		return
 	}
 	deps, err := HashDependencies(root, probe.Deps)
@@ -367,7 +367,7 @@ func validateProbeEntry(root string, outcome *Outcome, probe Probe, lock Lockfil
 			continue
 		}
 		if _, _, err := BlobData(root, check.hash, false); err != nil {
-			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: fmt.Sprintf("expected %s blob is unavailable: %v", check.label, err)})
+			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: fmt.Sprintf("expected %s blob is unavailable: %v", check.label, err), Operator: true})
 			return
 		}
 	}

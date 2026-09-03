@@ -8,7 +8,8 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 
 1. **One perception act.** `vise status` renders the entire situation in one bounded read. An agent's first move in any session is `status`; it never reconstructs state by exploring.
 2. **Machine-decidable, not merely machine-readable.** Every command supports `--json`; every outcome carries a typed **class** and a `next` field naming the remedy. The agent branches on exit code and class — never on prose.
-3. **Typed verdicts = typed next actions.** One exit code per *distinct next action* (§4). Conflating any two forces the agent to investigate what the tool already knows.
+3. **Typed verdicts, and a typed next action beside them.** The exit code is what an agent branches on; `next.action` is the instruction. They are deliberately not one-to-one, and both are needed: exit 2 covers a probe the agent broke and can repair, and a harness failure whose repair is in a file the agent may not write, and only the action separates those. Exits 1 and 5 both say `revert`, and what to revert differs. Conflating two *codes* would force the agent to investigate what the tool already knows; collapsing the action into the code would force it to guess.
+3a. **`classes` and `failures` are present only when there are some.** A green outcome carries neither: an empty array and an empty object are noise in the one line an agent reads most often, and their absence is the same information. A consumer treats absent as empty.
 4. **Bounded output, always — in both directions.** Green is one line. Red shows first divergence + counts, never dumps. JSON reports failures and counts — never an entry per passing probe. No output grows with repo or probe count — only with divergence. Bounded means line *count* and line *length*: a rendered line is clipped to 160 runes with the omitted count on each side, and the clip on the diverging line is centred on the differing column, because clipping from the line start would hide the one thing the diff exists to show. Without that, a probe whose output is a single long line — a minified bundle, a JSON document, a base64 blob — put the whole 256 KiB capture bound into one unreadable line.
 5. **Every failure names its remedy.** The error message is the documentation, delivered at the moment of need.
 6. **Crash-safe by contract.** Every multi-artifact write follows the ordering protocol (§3.1); an interrupted command leaves the old state or the new state, never a hybrid. Idempotency means no state hybrid — an event log appending one event per run is correct, not a violation.
@@ -195,10 +196,12 @@ A probe's judgment depends on more than the manifest entry: fixtures, normalizer
 **Local, gitignored, append-only** JSONL — operator-side state like blobs' scratch, NOT committed (v0.2 had it committed; that dirtied the tree after every gate, broke one-transform-per-commit, and made merge conflicts by design — both reviews' finding). Cross-machine trajectory is out of scope for v0; the committed artifacts (lockfile, blobs) carry everything judgment needs.
 
 ```jsonl
-{"e":"record","commit":"06aee75","dirty":false,"counts":{"declared":7,"pass":7},"lock":"sha256:…"}
-{"e":"gate","commit":"1652409","dirty":true,"verdict":"green","counts":{"pass":7},"metrics":{"complexity":131},"probe_set":["cli-help","convert-fixture","complexity"],"lock":"sha256:…"}
-{"e":"flake","commit":"1652409","dirty":true,"verdict":"indeterminate","flaky":["convert-fixture"],"probe_set":["cli-help","convert-fixture","complexity"],"lock":"sha256:…"}
+{"e":"record","at":"2026-09-03T02:14:07.918Z","commit":"06aee75…","counts":{"declared":7,"pass":7,"behavior":0,"flaky":0,"harness":0},"lock":"sha256:…"}
+{"e":"gate","at":"2026-09-03T02:15:41.220Z","commit":"1652409…","dirty":true,"verdict":"green","counts":{"declared":7,"pass":7,"behavior":0,"flaky":0,"harness":0},"metrics":{"complexity":131},"probe_set":["cli-help","convert-fixture","complexity"],"lock":"sha256:…"}
+{"e":"flake","at":"2026-09-03T02:16:02.551Z","commit":"1652409…","dirty":true,"verdict":"indeterminate","counts":{"declared":7,"pass":6,"behavior":0,"flaky":1,"harness":0},"flaky":["convert-fixture"],"probe_set":["cli-help","convert-fixture","complexity"],"lock":"sha256:…"}
 ```
+
+Every event carries `e`, `at` (RFC 3339, UTC, nanosecond precision), `commit` and `lock`. `dirty` is present only when true. `counts` carries every class, including the zero-valued ones, because a consumer summing them should not have to know which names it might be missing.
 
 - Keyed to HEAD SHA + `dirty` flag ("judged the working tree at this base", never "judged this commit").
 - `status` derives flake history, trajectory, and rerun-refusal state from the journal tail; it never replays unbounded history (bounded scan from the end).

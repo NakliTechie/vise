@@ -68,6 +68,14 @@ type Failure struct {
 	Expect *ExpectedActual `json:"expect,omitempty"`
 	Got    *ExpectedActual `json:"got,omitempty"`
 	Diff   string          `json:"diff,omitempty"`
+	// Operator marks a failure whose repair is in a file the agent contract
+	// forbids an agent from writing: the manifest, the lockfile, the blobs,
+	// the journal, or the recorded environment. Without it every harness
+	// failure produced next.action fix_probe — "repair the harness" — and an
+	// agent handed that about a drifted vise.toml has no legal move, because
+	// rule 1 forbids it from touching the file. Two correct instructions
+	// pointing opposite ways is the worst thing a contract can do.
+	Operator bool `json:"operator,omitempty"`
 }
 
 type MetricDelta struct {
@@ -159,7 +167,15 @@ func (o *Outcome) Finalize() {
 	case o.Counts.Harness > 0:
 		o.Exit = ExitHarness
 		o.Verdict = "indeterminate"
-		o.Next = Next{Action: NextFixProbe, Detail: "repair the harness or restore its declared inputs, then rerun"}
+		// human wins whenever any harness failure needs an operator, including
+		// when others do not: the agent cannot finish while one of them stands,
+		// so telling it to repair the rest would send it round a loop it cannot
+		// leave.
+		if o.hasOperatorFailure() {
+			o.Next = Next{Action: NextHuman, Detail: "an operator must restore the harness; the repair is in a file an agent may not write"}
+		} else {
+			o.Next = Next{Action: NextFixProbe, Detail: "repair the harness or restore its declared inputs, then rerun"}
+		}
 	case o.Counts.Flaky > 0:
 		o.Exit = ExitIndeterminate
 		o.Verdict = "indeterminate"
@@ -210,3 +226,12 @@ func CanonicalJSON(v any) ([]byte, error) {
 }
 
 func IntPtr(v int) *int { return &v }
+
+func (o Outcome) hasOperatorFailure() bool {
+	for _, failure := range o.Failures {
+		if failure.Operator {
+			return true
+		}
+	}
+	return false
+}

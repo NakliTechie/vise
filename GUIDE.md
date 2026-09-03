@@ -96,7 +96,7 @@ next: human — commit or stash the current tree, or rerun record with --allow-d
 Commit the manifest, record, commit the lock and blobs:
 
 ```
-$ git add vise.toml .gitignore && git commit -m "Add vise probes"
+$ git add vise.toml AGENTS.md .gitignore && git commit -m "Add vise probes"
 $ vise record
 RECORDED — 2 probe(s) · 0 metric(s)
 lock: sha256:47ea7c6effd12670111f29a7749c8f2e6bbda753985fafb7ba6c704830cda568
@@ -182,17 +182,17 @@ CANDIDATE BASELINE — no baseline state written (probes ran; declared artifacts
 @@ first divergence line 1 @@
 -hello, vise
 +hi, vise
-candidate: sha256:57da…
-next: human — review the diff, then freeze it with record --accept sha256:57da…
+candidate: sha256:57da39ee5c0e1e0dc16b0b7a3d0f6f7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e
+next: human — review the diff, then freeze it with record --accept sha256:57da39ee5c0e1e0dc16b0b7a3d0f6f7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e
 [exit 0]
 
-$ vise record --accept sha256:57da…
+$ vise record --accept sha256:57da39ee5c0e1e0dc16b0b7a3d0f6f7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e
 RECORDED — 2 probe(s) · 0 metric(s)
 lock: sha256:…
 [exit 0]
 ```
 
-If the tree changed between preview and accept, the digest no longer matches and `accept` refuses (exit 2). The one-step form prints the diff and writes in one go:
+The digest is written out in full above because `--accept` compares it exactly: an abbreviated one, however readable, is refused. If the tree changed between preview and accept, the digest no longer matches and `accept` refuses (exit 2). The one-step form prints the diff and writes in one go:
 
 ```
 $ vise record
@@ -214,7 +214,17 @@ lock: sha256:57da…
 $ git add vise.lock .vise/blobs && git commit -m "Accept new greeting baseline"
 ```
 
-The review also lists probe and metric definition changes (by run_hash), dependency hash changes, fingerprint drift, and metric baseline changes; an added or removed entry shows its exit, output hashes, or value.
+The review also lists probe and metric definition changes (by run_hash),
+dependency hash changes, fingerprint drift, and metric baseline changes. An
+added or a removed probe is described the same way — its exit, its stdout and
+stderr hashes, how many artifacts it declared, and the commit it was recorded
+at — because a removal means an observation is going away, and that is the
+entry most worth reading closely. An artifact that appears or disappears
+between baselines is rendered as `<probe>/<path> added` or `removed` rather
+than as a diff against a blob that was never there. Every environment
+difference is listed, not only the first: a baseline accepted because one of
+three changes looked reasonable is a baseline accepted for a third of a
+reason.
 
 ## 6. Flakes: indeterminate, never green
 
@@ -287,7 +297,7 @@ next: revert — revert the unintended behavior change or ask an operator to acc
 [exit 1]
 ```
 
-`vise run` is the exception, as it is for exit codes: it streams the probe's complete output to your terminal however large. Its `--json` form reports the bounded prefix plus `stdout_truncated`, `stdout_size`, and `stdout_hash`. If you want a readable diff on a noisy probe, narrow what the probe prints — that is the probe's job, not vise's.
+`vise run` is the exception, as it is for exit codes: it streams the probe's complete output to your terminal however large. Its `--json` form reports the whole observation as one object: `probe`, `exit`, the bounded prefix of `stdout` and `stderr` (or `stdout_base64` when the bytes are not valid UTF-8), a `_truncated`, `_size` and `_hash` for each of those streams, a `files` map of declared artifacts to their hashes, and the usual `v`, `cmd` and `next`. The hash, size and truncation flag are always present, not only when the bound was reached, so nothing reading this object has to branch on what happens to be in it. If you want a readable diff on a noisy probe, narrow what the probe prints — that is the probe's job, not vise's.
 
 ## 8. Metrics: hold behavior, prove improvement
 

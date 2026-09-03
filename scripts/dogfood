@@ -31,6 +31,15 @@ step "cloning into $TARGET"
 git clone -q -- "$VISE_ROOT" "$TARGET" || die "clone failed"
 cd -- "$TARGET" || die "cannot enter $TARGET"
 
+# Drop any baseline the checkout carries. This script records its own, and an
+# inherited vise.lock makes record refuse with operator-review — so the script
+# stopped working the moment it was run from inside a target it had built,
+# which is the most obvious thing to try.
+rm -rf .vise vise.lock
+git rm -r -q --cached --ignore-unmatch .vise vise.lock >/dev/null 2>&1 || true
+git -c user.email=dogfood@vise.invalid -c user.name=dogfood \
+    commit -qm "Drop the inherited baseline" >/dev/null 2>&1 || true
+
 step "vendoring dependencies (an agent sandbox has no network)"
 GOTOOLCHAIN=$TOOLCHAIN GOFLAGS='' go mod vendor >/dev/null 2>&1 \
   || die "go mod vendor failed"
