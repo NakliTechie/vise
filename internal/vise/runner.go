@@ -176,22 +176,15 @@ func (r Runner) runShell(id, command string, timeoutSeconds int, extra map[strin
 }
 
 func (r Runner) runShellUnguarded(id, command string, timeoutSeconds int, extra map[string]string) RunResult {
-	// VISE_TMP lives under .vise/tmp inside the repository: init ignores it,
-	// the dirty-tree check skips it, and it is wiped after every run, so a
-	// crash leaves residue where the operator expects state, not in /tmp.
-	scratchRoot, err := stateScratchDir(r.Root)
+	tmp, err := prepareProbeScratch(r.Root, id)
 	if err != nil {
-		return RunResult{HarnessError: fmt.Sprintf("create VISE_TMP: %v", err)}
-	}
-	tmp, err := os.MkdirTemp(scratchRoot, sanitizeTempName(id)+"-")
-	if err != nil {
-		return RunResult{HarnessError: fmt.Sprintf("create VISE_TMP: %v", err)}
+		return RunResult{HarnessError: err.Error()}
 	}
 	defer os.RemoveAll(tmp)
 
 	cmd := exec.Command("/bin/sh", "-c", command)
 	cmd.Dir = r.Root
-	cmd.Env = r.sanitizedEnv(tmp, extra)
+	cmd.Env = r.assembleProbeEnv(tmp, extra)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// Wait blocks until every holder of the stdout/stderr pipes exits. A probe
 	// that leaves a detached process (setsid, a daemon, a preloader) holding
@@ -207,24 +200,35 @@ func (r Runner) runShellUnguarded(id, command string, timeoutSeconds int, extra 
 	stderr := newCaptureWriter(r.MirrorStderr)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	if err := startProbe(cmd); err != nil {
+		return RunResult{HarnessError: err.Error()}
+	}
+	defer setActiveProbeGroup(0)
+
+	waitErr, timedOut := awaitProbe(cmd, time.Duration(timeoutSeconds)*time.Second)
+
+	return classifyProbe(command, timeoutSeconds, cmd, stdout, stderr, waitErr, timedOut)
+}
+
+func startProbe(cmd *exec.Cmd) error {
 	probeLifecycle.Lock()
 	if interrupted.Load() {
 		probeLifecycle.Unlock()
-		return RunResult{HarnessError: "vise was interrupted before the probe started"}
+		return errors.New("vise was interrupted before the probe started")
 	}
 	if probeAboutToStart != nil {
 		probeAboutToStart()
 	}
 	if err := cmd.Start(); err != nil {
 		probeLifecycle.Unlock()
-		return RunResult{HarnessError: fmt.Sprintf("launch probe: %v", err)}
+		return fmt.Errorf("launch probe: %v", err)
 	}
 	setActiveProbeGroup(cmd.Process.Pid)
 	probeLifecycle.Unlock()
-	defer setActiveProbeGroup(0)
+	return nil
+}
 
-	waitErr, timedOut := awaitProbe(cmd, time.Duration(timeoutSeconds)*time.Second)
-
+func classifyProbe(command string, timeoutSeconds int, cmd *exec.Cmd, stdout, stderr *captureWriter, waitErr error, timedOut bool) RunResult {
 	result := RunResult{Stdout: stdout.Capture(), Stderr: stderr.Capture(), TimedOut: timedOut}
 	if timedOut {
 		result.HarnessError = fmt.Sprintf("probe timed out after %ds", timeoutSeconds)
@@ -255,6 +259,21 @@ func (r Runner) runShellUnguarded(id, command string, timeoutSeconds int, extra 
 	return result
 }
 
+func prepareProbeScratch(root, id string) (string, error) {
+	// VISE_TMP lives under .vise/tmp inside the repository: init ignores it,
+	// the dirty-tree check skips it, and it is wiped after every run, so a
+	// crash leaves residue where the operator expects state, not in /tmp.
+	scratchRoot, err := stateScratchDir(root)
+	if err != nil {
+		return "", fmt.Errorf("create VISE_TMP: %v", err)
+	}
+	tmp, err := os.MkdirTemp(scratchRoot, sanitizeTempName(id)+"-")
+	if err != nil {
+		return "", fmt.Errorf("create VISE_TMP: %v", err)
+	}
+	return tmp, nil
+}
+
 // awaitProbe waits for a started probe, kills its process group when the
 // timeout lands, and sweeps the group again once the shell is gone.
 func awaitProbe(cmd *exec.Cmd, timeout time.Duration) (waitErr error, timedOut bool) {
@@ -278,7 +297,7 @@ func awaitProbe(cmd *exec.Cmd, timeout time.Duration) (waitErr error, timedOut b
 	return waitErr, timedOut
 }
 
-func (r Runner) sanitizedEnv(tmp string, extra map[string]string) []string {
+func (r Runner) assembleProbeEnv(tmp string, extra map[string]string) []string {
 	values := map[string]string{
 		"PATH":              os.Getenv("PATH"),
 		"HOME":              os.Getenv("HOME"),
