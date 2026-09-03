@@ -562,3 +562,107 @@ func TestAnUnreadableLockfileVersionSaysWhichWayToGo(t *testing.T) {
 		})
 	}
 }
+
+// truncateTornTail repairs a journal whose last append was interrupted, and it
+// reads a one-megabyte window to find where the last complete record ended. If
+// that window holds no newline the record is longer than the window, and the
+// offset it was about to cut at is an arbitrary byte inside some earlier
+// record. Truncating there leaves a stump — precisely the malformed interior
+// line the function's own comment promises never to create, and one that makes
+// every later read of the journal fail.
+//
+// It must refuse instead. An unreadable journal is an operator's problem; an
+// unreadable journal vise created while claiming to repair it is worse.
+func TestARecordLongerThanTheRepairWindowIsRefusedNotCut(t *testing.T) {
+	root := testGitRepo(t)
+	path := filepath.Join(root, ".vise", "journal.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// One good record, then a torn one larger than the window.
+	good := `{"e":"gate","at":"2026-09-03T00:00:00Z","commit":"abc","verdict":"green"}` + "\n"
+	torn := "{" + strings.Repeat("x", 2*1024*1024)
+	if err := os.WriteFile(path, []byte(good+torn), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The repair runs on append, which is when vise would otherwise write past
+	// the stump it had just created.
+	err = AppendJournal(root, JournalEvent{Event: "gate", Commit: "def", Verdict: "green"})
+	if err == nil {
+		t.Fatal("a journal whose torn record exceeds the repair window was appended to anyway")
+	}
+	if !strings.Contains(err.Error(), "repair window") {
+		t.Errorf("the error does not say what happened: %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Errorf("the journal was cut anyway: %d bytes became %d", len(before), len(after))
+	}
+}
+
+// And the ordinary torn tail is still repaired, so the refusal above is not
+// simply a refusal to do the job.
+func TestAnOrdinaryTornTailIsStillTrimmed(t *testing.T) {
+	root := testGitRepo(t)
+	path := filepath.Join(root, ".vise", "journal.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	good := `{"e":"gate","at":"2026-09-03T00:00:00Z","commit":"abc","verdict":"green"}` + "\n"
+	if err := os.WriteFile(path, []byte(good+`{"e":"ga`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendJournal(root, JournalEvent{Event: "gate", Commit: "def", Verdict: "green"}); err != nil {
+		t.Fatalf("an ordinary torn tail was not repaired: %v", err)
+	}
+	events, _, err := readJournalTail(root)
+	if err != nil {
+		t.Fatalf("the repaired journal does not read: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("read %d events, want the complete record plus the new one", len(events))
+	}
+}
+
+// endsWithNewline answers whether the journal's last byte terminates a record,
+// and it used to swallow a read error and answer false. The caller reads false
+// as "the last line was expected to be incomplete", so an I/O failure became a
+// torn tail: the final event was dropped rather than reported, and the rerun
+// budget counted one flake fewer than had happened.
+//
+// A budget that fails open buys a rerun that should have been refused, which is
+// the one direction this file's own comment says it must never fail in.
+func TestAJournalReadErrorIsNotMistakenForATornTail(t *testing.T) {
+	root := testGitRepo(t)
+	path := filepath.Join(root, ".vise", "journal.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A closed handle is the cheapest reliable read failure there is.
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	terminated, err := endsWithNewline(file, 3)
+	if err == nil {
+		t.Fatal("a failed read was answered rather than reported")
+	}
+	if terminated {
+		t.Error("a failed read claimed the journal was terminated")
+	}
+}

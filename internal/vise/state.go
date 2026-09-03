@@ -590,7 +590,14 @@ func readJournalTail(root string) (events []JournalEvent, truncated bool, err er
 	if err := scanner.Err(); err != nil {
 		return nil, false, err
 	}
-	tornTail := info.Size() > 0 && !endsWithNewline(file, info.Size())
+	tornTail := false
+	if info.Size() > 0 {
+		terminated, err := endsWithNewline(file, info.Size())
+		if err != nil {
+			return nil, false, err
+		}
+		tornTail = !terminated
+	}
 	for i, line := range lines {
 		var event JournalEvent
 		if err := json.Unmarshal(line, &event); err != nil {
@@ -696,6 +703,15 @@ func truncateTornTail(file *os.File) error {
 		_, err := file.Write([]byte{'\n'})
 		return err
 	}
+	if cut < 0 && start > 0 {
+		// No newline anywhere in the window, and the window did not reach the
+		// start of the file — so the torn record is longer than a megabyte and
+		// `start` is an arbitrary offset inside some earlier record. Truncating
+		// there would leave a stump: exactly the malformed interior line this
+		// function exists to prevent, and one that makes every later read of
+		// the journal fail. Refuse instead, and say what it would take to fix.
+		return fmt.Errorf("the journal's final record is longer than the %d-byte repair window, so its torn tail cannot be trimmed without cutting an earlier record; an operator should inspect or delete .vise/journal.jsonl", window)
+	}
 	keep := start
 	if cut >= 0 {
 		keep = start + int64(cut) + 1
@@ -703,12 +719,20 @@ func truncateTornTail(file *os.File) error {
 	return file.Truncate(keep)
 }
 
-func endsWithNewline(file *os.File, size int64) bool {
+// endsWithNewline reports whether the journal's last byte terminates a record.
+//
+// It used to swallow a read error and answer false, which the caller reads as
+// "the last line was expected to be incomplete" — so an I/O failure silently
+// became a torn tail, the final event was dropped rather than reported, and the
+// rerun budget counted one flake fewer than had happened. A budget that fails
+// open buys a rerun that should have been refused, which is the one direction
+// this file's own comment says it must never fail in.
+func endsWithNewline(file *os.File, size int64) (bool, error) {
 	last := make([]byte, 1)
 	if _, err := file.ReadAt(last, size-1); err != nil {
-		return false
+		return false, fmt.Errorf("read the end of the journal: %w", err)
 	}
-	return last[0] == '\n'
+	return last[0] == '\n', nil
 }
 
 // flakeTouches reports whether a journalled flake involved any probe that is
