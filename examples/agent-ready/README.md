@@ -26,6 +26,16 @@ Both must say green. If they disagree, the gate means something different for
 the agent than for you, and every task you assign will fail for reasons that
 have nothing to do with the task.
 
+## Verified, not assumed
+
+These files were instantiated into a real Go project — a small CLI with a
+`--help`, a `version`, and a `render` subcommand that writes a declared
+artifact — and driven end to end: `vise doctor` came back ready, the cold gate
+came back green on three probes, and the gate then caught two deliberate
+breaks. Changing the version string turned `cli-version` red with a diff of the
+line. Reading the wrong JSON key turned `render` red on the *artifact*, not on
+stdout, which is the case a test suite is least likely to be watching.
+
 ## What each guard is for
 
 | guard | the failure it prevents |
