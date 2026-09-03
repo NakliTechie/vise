@@ -6,13 +6,15 @@ import (
 	"io"
 	"math"
 	"os"
-	"regexp"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NakliTechie/vise/internal/vise"
 
 	core "github.com/NakliTechie/vise/internal/vise"
 )
@@ -1291,5 +1293,70 @@ func TestTheReadmeTableNamesNoCommandThatDoesNotExist(t *testing.T) {
 		if !isKnownCommand(match[1]) {
 			t.Errorf("the README table offers `vise %s` and the CLI has no such command", match[1])
 		}
+	}
+}
+
+// Two calls used to answer the wrong question outside a repository, because
+// the repository was resolved before the command line was judged.
+//
+// `vise status bogus` returned a status report and exit 0. status promises
+// exit 0 for any call it understands, and that promise had quietly grown to
+// cover a call it does not understand. `vise no-such-command` complained about
+// the repository rather than the typo, which sends someone looking in the
+// wrong place. A usage error is a complaint about the command line and does
+// not depend on where the caller is standing.
+func TestAUsageErrorIsAUsageErrorOutsideARepositoryToo(t *testing.T) {
+	outside := t.TempDir() // deliberately not a git work tree
+	for _, call := range []struct {
+		name string
+		args []string
+		says string
+	}{
+		{"status with a positional argument", []string{"status", "bogus"}, "positional"},
+		{"doctor with a positional argument", []string{"doctor", "bogus"}, "positional"},
+		// The exit code was already 2 here, so asserting it alone proved
+		// nothing: what was wrong was the message. Outside a repository a typo
+		// rendered as NO-SUCH-COMMAND INDETERMINATE [harness] 0/1, framing the
+		// typo as a probe that had failed, and complained about the missing
+		// repository rather than the word the caller had just mistyped.
+		{"an unknown command", []string{"no-such-command"}, "unknown command"},
+	} {
+		t.Run(call.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			exit := Run(call.args, outside, &stdout, &stderr)
+			if exit != vise.ExitHarness {
+				t.Errorf("exit %d, want %d\nstdout: %s\nstderr: %s", exit, vise.ExitHarness, stdout.String(), stderr.String())
+			}
+			said := stdout.String() + stderr.String()
+			if !strings.Contains(said, call.says) {
+				t.Errorf("the complaint never mentions %q, so it is about the wrong thing:\n%s", call.says, said)
+			}
+		})
+	}
+}
+
+// And the report it does understand there names the one action a human can
+// act on. It used to say fix_probe: repair the probe your change broke. There
+// is no probe, no manifest, and nothing an agent can repair by standing in a
+// directory that is not a repository.
+func TestStatusOutsideARepositoryDoesNotAskAnAgentToFixAProbe(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if exit := Run([]string{"--json", "status"}, t.TempDir(), &stdout, &stderr); exit != vise.ExitOK {
+		t.Fatalf("exit %d, want 0: %s", exit, stderr.String())
+	}
+	var report struct {
+		State string `json:"state"`
+		Next  struct {
+			Action string `json:"action"`
+		} `json:"next"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.State != "no-git" {
+		t.Fatalf("state %q, want no-git", report.State)
+	}
+	if report.Next.Action != vise.NextHuman {
+		t.Errorf("next.action %q outside a repository, want %q", report.Next.Action, vise.NextHuman)
 	}
 }

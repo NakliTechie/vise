@@ -53,16 +53,30 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 	}
 	command := args[0]
 
+	// A complaint about the command line does not depend on where you are
+	// standing, so the whole invocation is judged before the repository is
+	// resolved. It used to be the other way round, and two calls answered the
+	// wrong question because of it: `vise status bogus` outside a repository
+	// returned a status report and exit 0, because resolveGitRoot
+	// short-circuits status and doctor to keep their always-exit-0 promise and
+	// the argument check sat behind it in the dispatch; and `vise no-such-cmd`
+	// outside a repository complained about the repository rather than the
+	// typo. That promise is about reports on a repository. A usage error is
+	// exit 2 everywhere, which SPEC states for exactly this reason.
+	//
+	// An unknown command must also be refused before anything blocks on it.
+	// The state lock is held for the length of a record or a gate, so reaching
+	// for it first turned a typo into a wait as long as the probe suite —
+	// found by a probe that ran `vise no-such-command` inside a `vise record`.
+	if !isKnownCommand(command) {
+		return refuseUnknownCommand(command, jsonMode, stdout, stderr)
+	}
+	if takesNoPositionalArguments[command] && len(args) != 1 {
+		return renderSimpleError(command, command+" accepts no positional arguments", jsonMode, stdout, stderr)
+	}
 	root, exit, resolved := resolveGitRoot(command, cwd, jsonMode, stdout, stderr)
 	if !resolved {
 		return exit
-	}
-	// An unknown command must be refused before anything blocks on it. The
-	// state lock is held for the length of a record or a gate, so reaching for
-	// it first turned a typo into a wait as long as the probe suite — found by
-	// a probe that ran `vise no-such-command` inside a `vise record`.
-	if !isKnownCommand(command) {
-		return refuseUnknownCommand(command, jsonMode, stdout, stderr)
 	}
 	// status and doctor read the situation and write nothing, so they take no
 	// lock and create no state directory: a repository that has never run vise
@@ -85,6 +99,10 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 func refuseUnknownCommand(command string, jsonMode bool, stdout, stderr io.Writer) int {
 	return renderSimpleError("vise", fmt.Sprintf("unknown command %q; run 'vise --help'", command), jsonMode, stdout, stderr)
 }
+
+// The commands resolveGitRoot answers without a repository. Their arity is
+// checked before it runs, because after it runs they have already replied.
+var takesNoPositionalArguments = map[string]bool{"status": true, "doctor": true}
 
 func acquireStateLockForCommand(command, root string) (*vise.StateLock, error) {
 	if readOnlyCommands[command] {
@@ -139,7 +157,11 @@ func resolveGitRoot(command, cwd string, jsonMode bool, stdout, stderr io.Writer
 		return root, vise.ExitOK, true
 	}
 	if command == "status" {
-		report := vise.StatusReport{V: 1, Cmd: "status", Exit: 0, State: "no-git", Next: vise.Next{Action: vise.NextFixProbe, Detail: err.Error()}}
+		// Not fix_probe. There is no probe, no manifest, and nothing an agent
+		// could repair here: it is standing in the wrong directory, which is
+		// the one thing in the vocabulary only a human can put right. doctor
+		// four lines down already answered this case with human.
+		report := vise.StatusReport{V: 1, Cmd: "status", Exit: 0, State: "no-git", Next: vise.Next{Action: vise.NextHuman, Detail: err.Error() + "; run vise inside the repository you intend to gate"}}
 		if jsonMode {
 			report.Tool = toolIdentity()
 			return "", writeJSON(stdout, report), false
