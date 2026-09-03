@@ -72,9 +72,22 @@ type StateLock struct {
 	file *os.File
 }
 
-func AcquireStateLock(root string, notice io.Writer) (*StateLock, error) {
+// ensureStateDir returns root/.vise, creating it as a real directory when it
+// does not exist. Every writer of state — the run lock, the blob store, the
+// journal — needs the same directory to exist first, and each carried its own
+// copy of the join and the ensure. The error is returned unwrapped so each
+// caller keeps the wording it reports the failure with.
+func ensureStateDir(root string) (string, error) {
 	dir := filepath.Join(root, ".vise")
 	if err := ensureDirectory(dir, 0o755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func AcquireStateLock(root string, notice io.Writer) (*StateLock, error) {
+	dir, err := ensureStateDir(root)
+	if err != nil {
 		return nil, fmt.Errorf("create .vise state directory: %w", err)
 	}
 	lockPath := filepath.Join(dir, "run.lock")
@@ -230,14 +243,13 @@ func environmentDifferences(current, recorded Fingerprint) []string {
 }
 
 func FingerprintMismatch(current, recorded Fingerprint) string {
-	if current.OS != recorded.OS || current.Arch != recorded.Arch {
-		return fmt.Sprintf("platform %s/%s differs from the recorded %s/%s", current.OS, current.Arch, recorded.OS, recorded.Arch)
-	}
-	if current.Stubs != recorded.Stubs {
-		return "manifest [stubs] differ from the recorded baseline"
-	}
-	if differences := environmentDifferences(current, recorded); len(differences) > 0 {
-		return differences[0]
+	// The one-line form is the first of the full list, so it is derived from it
+	// rather than restated. The platform and [stubs] comparisons used to be
+	// written out twice, message strings included: two copies that had to agree
+	// about both what counts as drift and what to call it, with nothing to
+	// notice when only one of them was edited.
+	if all := FingerprintMismatches(current, recorded); len(all) > 0 {
+		return all[0]
 	}
 	return ""
 }
@@ -336,8 +348,8 @@ func WriteGeneration(root string, lock Lockfile, blobs map[string][]byte) ([]byt
 }
 
 func WriteBlobs(root string, blobs map[string][]byte) error {
-	stateDir := filepath.Join(root, ".vise")
-	if err := ensureDirectory(stateDir, 0o755); err != nil {
+	stateDir, err := ensureStateDir(root)
+	if err != nil {
 		return fmt.Errorf("create state directory: %w", err)
 	}
 	blobDir := filepath.Join(stateDir, "blobs")
@@ -493,23 +505,11 @@ func AddObservationBlobs(blobs map[string][]byte, result RunResult) ProbeLock {
 		Files:      make(map[string]string, len(result.Files)),
 		FilesLarge: make(map[string]bool),
 	}
-	// An observation larger than the capture bound was never held whole, so
-	// it is hash-only in the lockfile and its diff degrades to hashes.
-	if data, complete := result.Stdout.Complete(); complete {
-		blobs[probe.Stdout] = append([]byte(nil), data...)
-	} else {
-		probe.StdoutLarge = true
-	}
-	if data, complete := result.Stderr.Complete(); complete {
-		blobs[probe.Stderr] = append([]byte(nil), data...)
-	} else {
-		probe.StderrLarge = true
-	}
+	probe.StdoutLarge = storeCaptureBlob(blobs, result.Stdout)
+	probe.StderrLarge = storeCaptureBlob(blobs, result.Stderr)
 	for path, capture := range result.Files {
 		probe.Files[path] = capture.Hash
-		if data, complete := capture.Complete(); complete {
-			blobs[capture.Hash] = append([]byte(nil), data...)
-		} else {
+		if storeCaptureBlob(blobs, capture) {
 			probe.FilesLarge[path] = true
 		}
 	}
@@ -522,6 +522,19 @@ func AddObservationBlobs(blobs map[string][]byte, result RunResult) ProbeLock {
 	return probe
 }
 
+// storeCaptureBlob keeps a capture's bytes under its own hash and reports
+// whether the capture was too large to have been held whole. An observation
+// larger than the capture bound was never held whole, so it is hash-only in
+// the lockfile and its diff degrades to hashes.
+func storeCaptureBlob(blobs map[string][]byte, capture Capture) (large bool) {
+	data, complete := capture.Complete()
+	if !complete {
+		return true
+	}
+	blobs[capture.Hash] = append([]byte(nil), data...)
+	return false
+}
+
 // appendJournal is the seam record writes through, so a test can make the last
 // of the three writes fail. The first two go through the persistence seam
 // already; without this one, the branch that reports "the baseline was written
@@ -531,8 +544,8 @@ func AddObservationBlobs(blobs map[string][]byte, result RunResult) ProbeLock {
 var appendJournal = AppendJournal
 
 func AppendJournal(root string, event JournalEvent) error {
-	dir := filepath.Join(root, ".vise")
-	if err := ensureDirectory(dir, 0o755); err != nil {
+	dir, err := ensureStateDir(root)
+	if err != nil {
 		return err
 	}
 	journalPath := filepath.Join(dir, "journal.jsonl")
