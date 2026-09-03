@@ -124,6 +124,13 @@ new behavior is better. If you are confident the change is right, that is a
 conversation, not a decision you make: stop, say so in your final message, and
 leave the baseline alone.
 
+**Hand back the change, not the intention.** An operator who agrees with you
+should not have to reconstruct what you did. Give the exact edit — the lines,
+old and new — say which probes moved and which did not, and name the operator's
+path: `vise record --preview` to see the candidate diff and its digest, then
+`vise record --accept <digest>`. Your reverted work then costs them a paste
+instead of a rewrite.
+
 ## Exit 2 — the harness broke
 
 The message names the cause. The response is always to restore the harness,
@@ -258,6 +265,10 @@ both of which cost me a wrong conclusion while writing this paragraph:
   Print the changed line before you gate.
 
 Restore before you continue, and gate again to prove you did.
+
+**It needs a green gate to start from.** If the gate is red or indeterminate
+for any reason, this experiment tells you nothing — you cannot read a verdict
+that was already failing. Say you did not run it and why.
 
 ## Say what looks wrong, without fixing it
 
