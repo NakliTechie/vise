@@ -195,7 +195,11 @@ func hashWorkspaceEntry(path string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("read link %s: %w", path, err)
 		}
-		return "symlink:" + target, nil
+		// Modification time as well as the target, for the same reason a
+		// regular file carries it: a link removed and recreated pointing at
+		// the same place is still a probe changing the checkout, and comparing
+		// the target alone cannot see it.
+		return fmt.Sprintf("symlink:%s:%d", target, info.ModTime().UnixNano()), nil
 	}
 	if !info.Mode().IsRegular() {
 		return "mode:" + info.Mode().Type().String(), nil

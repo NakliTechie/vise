@@ -541,3 +541,54 @@ func TestAnInterruptInTheStartWindowStillKillsTheProbe(t *testing.T) {
 		t.Fatal("a probe interrupted in the start window kept running and wrote its artifact")
 	}
 }
+
+// Three conformance gaps between what SPEC promises and what the runner did.
+func TestTheRunnerKeepsThePromisesTheSpecMakes(t *testing.T) {
+	t.Run("a probe that fails is still checked for mutations", func(t *testing.T) {
+		// A probe that writes a stray and then fails. The failure used to be
+		// reported and the stray never looked for, so every probe after this
+		// one ran against a checkout this one had changed.
+		root := testGitRepo(t)
+		probe := Probe{ID: "messy", Run: "printf stray > leftover.txt; exit 127", Timeout: 30}
+		result := Runner{Root: root}.RunProbe(probe, true)
+
+		if !strings.Contains(result.HarnessError, "leftover.txt") {
+			t.Fatalf("a failing probe's stray write went unreported: %q", result.HarnessError)
+		}
+		// The original failure is kept: it is the cause, and the mutation is a
+		// consequence worth naming beside it, not instead of it.
+		if !strings.Contains(result.HarnessError, "127") {
+			t.Fatalf("the original failure was lost: %q", result.HarnessError)
+		}
+	})
+
+	t.Run("a symlink recreated at the same target is a change", func(t *testing.T) {
+		root := testGitRepo(t)
+		writeTestFile(t, root, "one.txt", "one")
+		if err := os.Symlink("one.txt", filepath.Join(root, "link")); err != nil {
+			t.Fatal(err)
+		}
+		// Long enough that the recreated link gets a different timestamp on a
+		// filesystem with coarse resolution.
+		time.Sleep(1100 * time.Millisecond)
+
+		probe := Probe{ID: "relink", Run: "rm link && ln -s one.txt link", Timeout: 30}
+		result := Runner{Root: root}.RunProbe(probe, true)
+		if !strings.Contains(result.HarnessError, "link") {
+			t.Fatalf("a symlink removed and recreated went unreported: %q", result.HarnessError)
+		}
+	})
+
+	t.Run("a missing tool is named, not just reported", func(t *testing.T) {
+		root := testGitRepo(t)
+		probe := Probe{ID: "absent", Run: "definitely-not-a-real-tool --version", Timeout: 30}
+		result := Runner{Root: root}.RunProbe(probe, false)
+
+		if !strings.Contains(result.HarnessError, "127") {
+			t.Fatalf("a missing tool was not reported as a launch failure: %q", result.HarnessError)
+		}
+		if !strings.Contains(result.HarnessError, "definitely-not-a-real-tool") {
+			t.Fatalf("the message does not name the tool that is missing: %q", result.HarnessError)
+		}
+	})
+}

@@ -60,25 +60,41 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 	}
 
 	result := r.runShell(probe.ID, probe.Run, probe.Timeout, probe.Env)
-	if result.HarnessError != "" {
-		return result
-	}
-	files, err := artifacts.capture()
-	if err != nil {
-		result.HarnessError = err.Error()
-		return result
-	}
-	result.Files = files
-	if checkTracked {
-		after, err := GitWorkspaceSnapshot(r.Root, probe.Files)
+
+	// The work-tree check runs even when the probe already failed. A probe
+	// that times out, or cannot be launched, or writes to evaluator state can
+	// still have changed the checkout on its way down — and the probes after
+	// it would then run against a tree this one left behind, which is the
+	// order-dependence the snapshot exists to prevent. The earlier failure is
+	// kept when there is one: it is the cause, and the mutation is a
+	// consequence worth naming beside it.
+	if result.HarnessError == "" {
+		files, err := artifacts.capture()
 		if err != nil {
 			result.HarnessError = err.Error()
-			return result
+		} else {
+			result.Files = files
 		}
-		if before.Tracked != after.Tracked {
-			result.HarnessError = "probe modified tracked files"
-		} else if stray := before.ChangedUntracked(after); len(stray) > 0 {
-			result.HarnessError = strayFilesError("probe", stray)
+	}
+	if checkTracked {
+		mutation := ""
+		after, err := GitWorkspaceSnapshot(r.Root, probe.Files)
+		switch {
+		case err != nil:
+			mutation = err.Error()
+		case before.Tracked != after.Tracked:
+			mutation = "probe modified tracked files"
+		default:
+			if stray := before.ChangedUntracked(after); len(stray) > 0 {
+				mutation = strayFilesError("probe", stray)
+			}
+		}
+		if mutation != "" {
+			if result.HarnessError == "" {
+				result.HarnessError = mutation
+			} else {
+				result.HarnessError = result.HarnessError + "; and " + mutation
+			}
 		}
 	}
 	return result
@@ -227,7 +243,11 @@ func (r Runner) runShellUnguarded(id, command string, timeoutSeconds int, extra 
 	if errors.As(waitErr, &exitErr) {
 		result.Exit = exitErr.ExitCode()
 		if result.Exit == 127 {
-			result.HarnessError = "probe command could not be launched (exit 127)"
+			// Name the word the shell could not resolve. "could not be
+			// launched" tells the reader something failed; the missing tool
+			// tells them what to install, and the whole point of these
+			// messages is that the remedy arrives with the failure.
+			result.HarnessError = launchFailureDetail(command, result.Stderr)
 		}
 		return result
 	}
@@ -322,4 +342,37 @@ func strayFilesError(kind string, paths []string) string {
 	}
 	return fmt.Sprintf("%s wrote files git neither tracks nor ignores: %s%s; a %s may write only its declared files and $VISE_TMP, or the operator must ignore these paths",
 		kind, strings.Join(named, ", "), suffix, kind)
+}
+
+// launchFailureDetail explains an exit 127. The shell already says which word
+// it could not find, so that line is quoted when it is there; the first word of
+// the command is the fallback, since it is what the reader will go and look
+// for either way.
+func launchFailureDetail(command string, stderr Capture) string {
+	if line := firstShellDiagnostic(stderr); line != "" {
+		return fmt.Sprintf("probe command could not be launched (exit 127): %s", line)
+	}
+	word := command
+	if fields := strings.Fields(command); len(fields) > 0 {
+		word = fields[0]
+	}
+	return fmt.Sprintf("probe command could not be launched (exit 127): %q is not on the probe's PATH; install it or name it by an absolute path", word)
+}
+
+// firstShellDiagnostic returns the shell's own not-found line, bounded, or "".
+func firstShellDiagnostic(stderr Capture) string {
+	for _, line := range strings.Split(string(stderr.Prefix), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !strings.Contains(line, "not found") && !strings.Contains(line, "No such file") {
+			continue
+		}
+		if len(line) > 200 {
+			line = line[:200] + "…"
+		}
+		return line
+	}
+	return ""
 }
