@@ -232,6 +232,29 @@ prints, a lookup nobody's probe exercises, a path taken only on an error
 nothing triggers. Those are exactly the changes a green gate says nothing
 about.
 
+**You can answer that question mechanically instead of guessing.** Break the
+code you just changed, on purpose, and gate:
+
+```sh
+# change the string, invert the condition, return the wrong value
+vise gate --quiet        # red, naming a probe → that probe covers your change
+                         # green                → nothing covers it; now you know
+git checkout -- <file>   # restore before doing anything else
+```
+
+It costs one gate run and turns a judgement call into a fact. Two ways it lies,
+both of which cost me a wrong conclusion while writing this paragraph:
+
+- **The mutation must still compile.** Deleting a line that leaves a variable
+  unused fails the build, so every probe goes red and you learn nothing about
+  coverage. Change a format string or a constant, not the shape of the code.
+- **Confirm the edit landed.** A search-and-replace that matched nothing, or
+  matched three places when you meant one, leaves the tree unchanged and the
+  gate green — and green is exactly the answer you were hoping not to see.
+  Print the changed line before you gate.
+
+Restore before you continue, and gate again to prove you did.
+
 ## Say what looks wrong, without fixing it
 
 A refactor makes you read code carefully that nobody has re-read in a while.
