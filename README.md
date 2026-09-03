@@ -63,7 +63,7 @@ network = "declared-off"  # a promise probes make; vise does not enforce it
 id = "cli-help"
 run = "./bin/mytool --help"
 timeout = 30
-deps  = ["fixtures/in.csv"]     # inputs this probe consumes, hashed with it
+deps  = ["fixtures/in.csv"]     # fixtures and wrappers, never the code under test
 files = ["out/result.json"]     # artifacts to hash; must be untracked
 ```
 

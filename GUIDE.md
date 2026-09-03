@@ -260,6 +260,21 @@ Recovery is operator-shaped: fix the nondeterminism (app or probe) and re-record
 
 Anything that stops judgment before behavior can be compared is harness class, exit 2, and names its remedy. Three you will meet:
 
+**`deps` is for fixtures and harness wrappers, never for the code under test.**
+This is the easiest way to make a gate useless, and it looks tidy while you do
+it. A file in `deps` has its hash frozen with the baseline, so editing it is
+*harness drift* — exit 2, "declared probe input changed after recording" —
+rather than a behaviour change. Put your application in there and every
+refactor of it becomes a harness error, and an agent is told to revert work
+that was fine.
+
+The test is what the file is, not where it sits: a fixture the probe reads, or
+a wrapper that builds and launches the subject, belongs in `deps`; the thing
+whose behaviour you are freezing does not. `vise doctor` will ask you to
+declare a wrapper it can recognise — one that uses `$VISE_TMP` — and it
+deliberately says nothing about anything else, because no static check can tell
+your application from your fixtures.
+
 **A declared input changed.** Probes list the files they consume in `deps`; their hashes are frozen with the baseline.
 
 ```
@@ -424,6 +439,16 @@ reviewing for something else. One round here returned a single finding, and it
 was real — the review diff described a removed probe with fewer fields than an
 added one, which is backwards, because a removal is the entry an operator most
 needs to look at.
+
+**Fingerprint the tool the probe actually resolves, and prove it from a
+stripped shell.** A Python project set up here recorded under the operator's
+`python3` and gated under the system one — 3.12 in the shell, 3.9 with a bare
+`PATH` — and every probe would have diverged for reasons that had nothing to do
+with the code. Because the manifest fingerprinted `python3 --version`, what came
+back instead was one line naming the cause and `next: human`. Without that
+fingerprint it would have been four behaviour diffs and an agent reverting
+correct work. This is what the cold check exists to surface, and it is not
+detectable from a clean `doctor`.
 
 **Never `git add -A` in a gated repository.** It commits the declared
 artifacts, which are build output, and a tracked artifact makes every gate a
