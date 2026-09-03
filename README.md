@@ -14,7 +14,7 @@ vise gate            # 0 → next step · 1 → revert, the diff says what chang
 
 ## Why
 
-Raw AI refactoring is correct 26–33% of the time; with a verification layer in front of it, the shipped-to-production rate is 98% ([sources](RESEARCH.md)). The value is in the verification layer, and nothing ships it on its own: what exists nearby is a transform *engine* (OpenRewrite, codemods), a per-language golden-master *library* written for humans (ApprovalTests), or a harness that baselines *the agent* rather than the app. vise is the net itself — language-agnostic, CLI-first, built to sit inside an agent's loop and be read by a machine.
+Raw AI refactoring is correct 26–33% of the time; with a verification layer in front of it, the shipped-to-production rate is 98% ([sources](RESEARCH.md)). The value is in the verification layer, and nothing ships it on its own: what exists nearby is a transform *engine* (OpenRewrite, codemods), a per-language golden-master *library* written for humans (ApprovalTests), a harness that baselines *the agent* rather than the app, or — closest of all, and the reason to be careful — an agent pipeline whose equivalence check is another model judging whether behavior was preserved. vise is the net itself — language-agnostic, CLI-first, built to sit inside an agent's loop and be read by a machine.
 
 ### What it catches that a test suite does not
 
