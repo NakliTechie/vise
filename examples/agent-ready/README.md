@@ -30,11 +30,18 @@ have nothing to do with the task.
 
 These files were instantiated into a real Go project — a small CLI with a
 `--help`, a `version`, and a `render` subcommand that writes a declared
-artifact — and driven end to end: `vise doctor` came back ready, the cold gate
-came back green on three probes, and the gate then caught two deliberate
-breaks. Changing the version string turned `cli-version` red with a diff of the
-line. Reading the wrong JSON key turned `render` red on the *artifact*, not on
-stdout, which is the case a test suite is least likely to be watching.
+artifact — and driven end to end, twice: once when they were written, and again
+after they were last edited, because a verification note about files that have
+since changed is worth nothing.
+
+Both times: `vise doctor` named exactly what was missing and its remedies
+worked, `vise record` froze three probes, the cold gate came back green, and
+the gate then caught two deliberate breaks. Changing the version string turned
+`cli-version` red with a diff of the line. Reading the wrong JSON key turned
+`render` red on the *artifact* — `out/rendered.txt`, `hello` against `<nil>` —
+while stdout still said `rendered` and the exit code was still 0. That is the
+case a test suite is least likely to be watching, and it is the reason to
+declare `files` at all.
 
 ## What each guard is for
 
