@@ -330,5 +330,48 @@ func gitOwnState(root string) (string, error) {
 		}
 		writeHashPart(digest, rel, data)
 	}
+
+	// The excludes file Git actually resolves, wherever it lives. Digesting
+	// .git/config catches a probe that *repoints* core.excludesFile; it does
+	// nothing about a probe that appends to the file already pointed at, which
+	// is usually outside the checkout entirely and is obeyed by
+	// `git ls-files --others --exclude-standard` exactly like info/exclude.
+	// Demonstrated with an ordinary shell probe before this line existed.
+	if path := globalExcludesPath(root); path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("read the excludes file at %s: %w", path, err)
+		}
+		writeHashPart(digest, "excludesfile", data)
+	}
 	return hex.EncodeToString(digest.Sum(nil)), nil
+}
+
+// globalExcludesPath returns the ignore file Git consults besides the
+// repository's own, or "" when there is none. Git takes core.excludesFile when
+// it is set, and otherwise $XDG_CONFIG_HOME/git/ignore, defaulting to
+// ~/.config/git/ignore.
+func globalExcludesPath(root string) string {
+	if configured, err := gitOutput(root, "config", "--get", "core.excludesFile"); err == nil && configured != "" {
+		return expandHome(configured)
+	}
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "git", "ignore")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "git", "ignore")
+}
+
+func expandHome(path string) string {
+	if !strings.HasPrefix(path, "~") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(path, "~"), string(filepath.Separator)))
 }
