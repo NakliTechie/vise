@@ -987,7 +987,7 @@ func TestEveryCommandAppearsInBothRenderingsOfHelp(t *testing.T) {
 // neither may queue behind a record or a gate that holds the state lock.
 func TestReadOnlyCommandsDoNotWaitForARunInProgress(t *testing.T) {
 	root := cliRepo(t, basicManifest(""), "printf hello")
-	held, err := core.AcquireStateLock(root)
+	held, err := core.AcquireStateLock(root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1015,7 +1015,7 @@ func TestReadOnlyCommandsDoNotWaitForARunInProgress(t *testing.T) {
 // probe that ran an unknown command inside a record.
 func TestAnUnknownCommandIsRefusedBeforeTheStateLock(t *testing.T) {
 	root := cliRepo(t, basicManifest(""), "printf hello")
-	held, err := core.AcquireStateLock(root)
+	held, err := core.AcquireStateLock(root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

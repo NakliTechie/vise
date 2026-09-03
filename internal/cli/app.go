@@ -85,7 +85,7 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 	// happening. Concurrency is safe without a lock because the lockfile is
 	// replaced by atomic rename, so a reader sees the old generation or the
 	// new one, and a torn journal tail is already tolerated.
-	stateLock, err := acquireStateLockForCommand(command, root)
+	stateLock, err := acquireStateLockForCommand(command, root, stderr)
 	if err != nil {
 		return renderSimpleError(command, err.Error(), jsonMode, stdout, stderr)
 	}
@@ -104,11 +104,11 @@ func refuseUnknownCommand(command string, jsonMode bool, stdout, stderr io.Write
 // checked before it runs, because after it runs they have already replied.
 var takesNoPositionalArguments = map[string]bool{"status": true, "doctor": true}
 
-func acquireStateLockForCommand(command, root string) (*vise.StateLock, error) {
+func acquireStateLockForCommand(command, root string, notice io.Writer) (*vise.StateLock, error) {
 	if readOnlyCommands[command] {
 		return nil, nil
 	}
-	return vise.AcquireStateLock(root)
+	return vise.AcquireStateLock(root, notice)
 }
 
 func dispatchCommand(args []string, root string, jsonMode bool, stdout, stderr io.Writer) int {

@@ -72,7 +72,7 @@ type StateLock struct {
 	file *os.File
 }
 
-func AcquireStateLock(root string) (*StateLock, error) {
+func AcquireStateLock(root string, notice io.Writer) (*StateLock, error) {
 	dir := filepath.Join(root, ".vise")
 	if err := ensureDirectory(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create .vise state directory: %w", err)
@@ -85,9 +85,20 @@ func AcquireStateLock(root string) (*StateLock, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open run lock: %w", err)
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
-		_ = file.Close()
-		return nil, fmt.Errorf("lock run state: %w", err)
+	// Try without blocking first, purely so the wait can be announced. A
+	// second gate used to print nothing at all while the first ran: no output,
+	// no explanation, for as long as the suite takes. An operator reads that
+	// as a hang, and an agent with a turn budget gets killed mid-wait with no
+	// idea what it was waiting for. The notice goes to stderr, so a --json
+	// consumer reading stdout is unaffected.
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if notice != nil {
+			fmt.Fprintf(notice, "vise: waiting for the run already in progress to finish (%s)\n", lockPath)
+		}
+		if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+			_ = file.Close()
+			return nil, fmt.Errorf("lock run state: %w", err)
+		}
 	}
 	return &StateLock{file: file}, nil
 }

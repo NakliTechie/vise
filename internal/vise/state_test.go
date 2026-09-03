@@ -246,7 +246,7 @@ func TestStatePathsRejectSymlinks(t *testing.T) {
 		if err := os.Symlink(outside, filepath.Join(root, ".vise")); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := AcquireStateLock(root); err == nil {
+		if _, err := AcquireStateLock(root, nil); err == nil {
 			t.Fatal("expected state-directory symlink rejection")
 		}
 		if _, err := os.Stat(filepath.Join(outside, "run.lock")); !os.IsNotExist(err) {
@@ -277,13 +277,13 @@ func TestStatePathsRejectSymlinks(t *testing.T) {
 
 func TestStateLockSerializesInvocations(t *testing.T) {
 	root := t.TempDir()
-	first, err := AcquireStateLock(root)
+	first, err := AcquireStateLock(root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	acquired := make(chan error, 1)
 	go func() {
-		second, err := AcquireStateLock(root)
+		second, err := AcquireStateLock(root, nil)
 		if err == nil {
 			err = second.Close()
 		}
