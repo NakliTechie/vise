@@ -169,3 +169,63 @@ func TestTheExplanationNamesAnArtifactOnEitherSide(t *testing.T) {
 		}
 	})
 }
+
+// A metric that will not run has to reach the operator as a harness failure
+// with its own id, its own message, and the right owner — and the conversion
+// that does that was the last function in either package with no coverage.
+//
+// Everything about metric failures was tested at the runner, where the message
+// is built, and nothing carried one through Verify, where it becomes a verdict.
+// That is the seam the eight dropped-ownership bugs lived in earlier tonight.
+func TestAMetricThatWillNotRunReachesTheVerdict(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n")
+	writeTestFile(t, root, "vise.toml", `[vise]
+version = 1
+
+[[probe]]
+id = "steady"
+run = "printf steady"
+timeout = 30
+
+[[metric]]
+id = "size"
+run = "cat size.txt"
+version_cmd = "printf analyzer-1"
+direction = "down"
+enforce = "no-regress"
+timeout = 30
+`)
+	writeTestFile(t, root, "size.txt", "10\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "harness")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+
+	// The analyzer's input goes away, the way a refactor moves a file.
+	testGit(t, root, "rm", "-q", "size.txt")
+	testGit(t, root, "commit", "-qm", "the analyzer's input moved")
+
+	outcome := Verify(root, manifest, manifestBytes, VerifyOptions{}).Outcome
+	failure, ok := outcome.Failures["size"]
+	if !ok {
+		t.Fatalf("no failure keyed by the metric: %#v", outcome.Failures)
+	}
+	if failure.Class != "harness" {
+		t.Errorf("class %q, want harness", failure.Class)
+	}
+	if !strings.Contains(failure.Detail, "size.txt") {
+		t.Errorf("the message does not name what went missing:\n\t%s", failure.Detail)
+	}
+	if outcome.Exit != ExitHarness {
+		t.Errorf("exit %d, want %d", outcome.Exit, ExitHarness)
+	}
+	if outcome.Counts.Harness != 1 {
+		t.Errorf("counts = %#v, want one harness failure", outcome.Counts)
+	}
+}
