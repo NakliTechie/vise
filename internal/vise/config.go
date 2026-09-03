@@ -97,13 +97,8 @@ func LoadManifest(root string) (Manifest, []byte, error) {
 	if err != nil {
 		return Manifest{}, nil, fmt.Errorf("parse vise.toml: %w", err)
 	}
-	if undecoded := metadata.Undecoded(); len(undecoded) > 0 {
-		parts := make([]string, 0, len(undecoded))
-		for _, key := range undecoded {
-			parts = append(parts, key.String())
-		}
-		sort.Strings(parts)
-		return Manifest{}, nil, fmt.Errorf("unknown vise.toml keys: %s", strings.Join(parts, ", "))
+	if err := undecodedKeysError(metadata, "unknown vise.toml keys"); err != nil {
+		return Manifest{}, nil, err
 	}
 	manifest.applyDefaults()
 	if err := manifest.Validate(root); err != nil {
@@ -199,10 +194,9 @@ func (m Manifest) Validate(root string) error {
 		if err := validateID(probe.ID, where); err != nil {
 			return err
 		}
-		if prior, ok := seen[probe.ID]; ok {
-			return fmt.Errorf("duplicate id %q in %s and %s", probe.ID, prior, where)
+		if err := claimID(seen, probe.ID, where); err != nil {
+			return err
 		}
-		seen[probe.ID] = where
 		if err := validateProbeShape(root, probe, where); err != nil {
 			return err
 		}
@@ -212,12 +206,11 @@ func (m Manifest) Validate(root string) error {
 		if err := validateID(metric.ID, where); err != nil {
 			return err
 		}
-		if prior, ok := seen[metric.ID]; ok {
-			return fmt.Errorf("duplicate id %q in %s and %s", metric.ID, prior, where)
+		if err := claimID(seen, metric.ID, where); err != nil {
+			return err
 		}
-		seen[metric.ID] = where
-		if strings.TrimSpace(metric.Run) == "" {
-			return fmt.Errorf("%s.run must not be empty", where)
+		if err := validateRun(metric.Run, where); err != nil {
+			return err
 		}
 		if metric.Direction != "down" && metric.Direction != "up" {
 			return fmt.Errorf("%s.direction must be down or up", where)
@@ -235,8 +228,8 @@ func (m Manifest) Validate(root string) error {
 		if metric.Enforce != "none" && metric.Enforce != "no-regress" {
 			return fmt.Errorf("%s.enforce must be none or no-regress", where)
 		}
-		if metric.Timeout < 1 || metric.Timeout > 86400 {
-			return fmt.Errorf("%s.timeout must be between 1 and 86400 seconds", where)
+		if err := validateTimeout(metric.Timeout, where); err != nil {
+			return err
 		}
 		if err := validateEnv(metric.Env, where); err != nil {
 			return err
@@ -251,34 +244,88 @@ func (m Manifest) Validate(root string) error {
 // exactly this — a proposal an operator could not promote is a proposal that
 // should have been refused when it was drafted.
 func validateProbeShape(root string, probe Probe, where string) error {
-	if strings.TrimSpace(probe.Run) == "" {
-		return fmt.Errorf("%s.run must not be empty", where)
+	if err := validateRun(probe.Run, where); err != nil {
+		return err
 	}
-	if probe.Timeout < 1 || probe.Timeout > 86400 {
-		return fmt.Errorf("%s.timeout must be between 1 and 86400 seconds", where)
+	if err := validateTimeout(probe.Timeout, where); err != nil {
+		return err
 	}
 	seenPaths := make(map[string]string)
-	for _, path := range probe.Deps {
-		if err := ValidateRelativePath(root, path, false); err != nil {
-			return fmt.Errorf("%s path %q: %w", where, path, err)
-		}
-		clean := filepath.ToSlash(filepath.Clean(path))
-		if prior, ok := seenPaths[clean]; ok {
-			return fmt.Errorf("%s path %q duplicates %s", where, path, prior)
-		}
-		seenPaths[clean] = "deps"
+	deps := func(path string) error { return ValidateRelativePath(root, path, false) }
+	if err := claimPaths(seenPaths, probe.Deps, where, "path", "deps", deps); err != nil {
+		return err
 	}
-	for _, path := range probe.Files {
-		if err := ValidateArtifactPath(root, path); err != nil {
-			return fmt.Errorf("%s artifact %q: %w", where, path, err)
-		}
-		clean := filepath.ToSlash(filepath.Clean(path))
-		if prior, ok := seenPaths[clean]; ok {
-			return fmt.Errorf("%s artifact %q duplicates %s", where, path, prior)
-		}
-		seenPaths[clean] = "files"
+	files := func(path string) error { return ValidateArtifactPath(root, path) }
+	if err := claimPaths(seenPaths, probe.Files, where, "artifact", "files", files); err != nil {
+		return err
 	}
 	return validateEnv(probe.Env, where)
+}
+
+// undecodedKeysError names the keys a TOML decode did not consume, sorted so
+// the message is the same on every run. It returns nil when every key landed in
+// a field, which is the only shape vise accepts: an unread key is a typo or a
+// setting from a newer manifest version, and silently ignoring either would
+// make the manifest say something other than what it does.
+func undecodedKeysError(metadata toml.MetaData, what string) error {
+	undecoded := metadata.Undecoded()
+	if len(undecoded) == 0 {
+		return nil
+	}
+	parts := make([]string, 0, len(undecoded))
+	for _, key := range undecoded {
+		parts = append(parts, key.String())
+	}
+	sort.Strings(parts)
+	return fmt.Errorf("%s: %s", what, strings.Join(parts, ", "))
+}
+
+// claimID records an id as taken by where, refusing it if some earlier entry
+// already claimed it. Probes and metrics share one namespace because they share
+// one failures map, so a metric may not reuse a probe's id.
+func claimID(seen map[string]string, id, where string) error {
+	if prior, ok := seen[id]; ok {
+		return fmt.Errorf("duplicate id %q in %s and %s", id, prior, where)
+	}
+	seen[id] = where
+	return nil
+}
+
+// claimPaths validates one of a probe's declared path lists and records each
+// path in seenPaths, which spans every list on that probe: a path may not be
+// declared twice, even across deps and files. noun names the entry in the error
+// text, list names the field it was found in.
+func claimPaths(seenPaths map[string]string, paths []string, where, noun, list string, check func(string) error) error {
+	for _, path := range paths {
+		if err := check(path); err != nil {
+			return fmt.Errorf("%s %s %q: %w", where, noun, path, err)
+		}
+		clean := filepath.ToSlash(filepath.Clean(path))
+		if prior, ok := seenPaths[clean]; ok {
+			return fmt.Errorf("%s %s %q duplicates %s", where, noun, path, prior)
+		}
+		seenPaths[clean] = list
+	}
+	return nil
+}
+
+// validateRun refuses a command that is empty or nothing but whitespace, for
+// probes and metrics alike: both are executed the same way.
+func validateRun(run, where string) error {
+	if strings.TrimSpace(run) == "" {
+		return fmt.Errorf("%s.run must not be empty", where)
+	}
+	return nil
+}
+
+// validateTimeout bounds a probe's or metric's timeout at one day. Zero never
+// reaches here from a manifest — applyDefaults turns it into 30 first — so a
+// zero seen here means a caller skipped defaulting.
+func validateTimeout(seconds int, where string) error {
+	if seconds < 1 || seconds > 86400 {
+		return fmt.Errorf("%s.timeout must be between 1 and 86400 seconds", where)
+	}
+	return nil
 }
 
 func validateID(id, where string) error {
@@ -344,13 +391,8 @@ func LoadProposals(root string, manifest Manifest) (Proposals, error) {
 	if err != nil {
 		return Proposals{}, fmt.Errorf("parse .vise/proposals.toml: %w", err)
 	}
-	if undecoded := metadata.Undecoded(); len(undecoded) > 0 {
-		parts := make([]string, 0, len(undecoded))
-		for _, key := range undecoded {
-			parts = append(parts, key.String())
-		}
-		sort.Strings(parts)
-		return Proposals{}, fmt.Errorf("unknown proposal keys: %s", strings.Join(parts, ", "))
+	if err := undecodedKeysError(metadata, "unknown proposal keys"); err != nil {
+		return Proposals{}, err
 	}
 	seen := make(map[string]int)
 	taken := make(map[string]string, len(manifest.Probes)+len(manifest.Metrics))
