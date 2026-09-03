@@ -323,13 +323,31 @@ func gitOwnState(root string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locate the git directory: %w", err)
 	}
-	for _, rel := range []string{filepath.Join("info", "exclude"), "config"} {
+	// The repository's own rule files, which live in the git directory rather
+	// than the work tree and so appear in neither half of the snapshot.
+	// attributes is here beside exclude because `git diff` consults it: an
+	// attribute decides whether a path is diffed at all and through what.
+	for _, rel := range []string{filepath.Join("info", "exclude"), filepath.Join("info", "attributes")} {
 		data, err := os.ReadFile(filepath.Join(gitDir, rel))
 		if err != nil && !os.IsNotExist(err) {
 			return "", fmt.Errorf("read git %s: %w", rel, err)
 		}
 		writeHashPart(digest, rel, data)
 	}
+
+	// The configuration Git resolves, not the repository's file. Hashing
+	// .git/config alone left every setting inherited from the global or system
+	// level outside the snapshot, and those decide things the comparison
+	// depends on — where the ignore rules live, which attributes apply, what a
+	// textconv filter renders a file as. `git config --list` is what Git
+	// itself would answer.
+	config, err := gitOutput(root, "config", "--list")
+	if err != nil {
+		// A repository with no readable configuration is a situation the rest
+		// of the run will report better than this line can.
+		config = ""
+	}
+	writeHashPart(digest, "config", []byte(config))
 
 	// The excludes file Git actually resolves, wherever it lives. Digesting
 	// .git/config catches a probe that *repoints* core.excludesFile; it does
