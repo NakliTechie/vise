@@ -152,19 +152,14 @@ run = "printf steady"
 			t.Fatalf("attempt %d: refusal must persist, got exit=%d value=%#v", attempt, exit, value)
 		}
 	}
-	// A single-probe verify is a different probe set: it gets its own two
-	// reruns, and its flakes neither reset nor extend the full-set chain.
-	for attempt := 1; attempt <= 2; attempt++ {
-		exit, stdout, _ := cliRun(t, root, "verify", "--probe", "behavior", "--json")
-		value := parseCLIJSON(t, stdout)
-		if exit != 3 || value["verdict"] != "indeterminate" {
-			t.Fatalf("single-probe attempt %d: exit=%d value=%#v", attempt, exit, value)
-		}
-	}
+	// Running the unstable probe on its own does not renew the budget. It used
+	// to: the chain was keyed to the exact probe set, so every subset had its
+	// own two reruns and an agent diagnosing with --probe walked into a fresh
+	// one without meaning to. The budget follows the probe that flaked.
 	exit, stdout, _ := cliRun(t, root, "verify", "--probe", "behavior", "--json")
 	value := parseCLIJSON(t, stdout)
 	if exit != 2 || value["next"].(map[string]any)["action"] != "human" {
-		t.Fatalf("single-probe third: exit=%d value=%#v", exit, value)
+		t.Fatalf("running the flaky probe alone renewed the budget: exit=%d value=%#v", exit, value)
 	}
 	exit, stdout, _ = cliRun(t, root, "gate", "--json")
 	value = parseCLIJSON(t, stdout)

@@ -202,9 +202,18 @@ func TestVerifyRefusesWhenTruncatedJournalHasNoBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The budget follows the probe: these are flakes of "q", and the run about
+	// to happen includes "q", so they count. What makes the refusal here is
+	// that nothing in the surviving tail bounds the chain — the count is
+	// incidental, and used to be zero only because the old keying compared
+	// probe sets exactly.
 	count, bounded := ConsecutiveFlakes(events, "c", "l", []string{"p", "q"})
-	if !truncated || bounded || count != 0 {
+	if !truncated || bounded || count == 0 {
 		t.Fatalf("truncated=%t bounded=%t count=%d", truncated, bounded, count)
+	}
+	// A run that does not include the flaky probe is not charged for it.
+	if other, _ := ConsecutiveFlakes(events, "c", "l", []string{"p"}); other != 0 {
+		t.Fatalf("flakes of q were charged to a run of p alone: %d", other)
 	}
 }
 
@@ -486,5 +495,41 @@ func TestWriteGenerationSurvivesPruneFailure(t *testing.T) {
 	got, _, err := LoadLockfile(root)
 	if err != nil || got.Probes["p"].RunHash != HashBytes([]byte("r2")) {
 		t.Fatalf("lock not written: %#v %v", got, err)
+	}
+}
+
+// The rerun budget follows the probe that flaked, not the set it flaked in.
+// Keying on the exact set gave every subset its own two reruns: a flake seen
+// in the full suite did not count against `verify --probe p`, and with N
+// probes there were as many independent budgets as there are subsets. An agent
+// diagnosing with --probe walked into a fresh one without meaning to.
+func TestTheRerunBudgetFollowsTheProbeNotTheSet(t *testing.T) {
+	flake := func(flaky ...string) JournalEvent {
+		return JournalEvent{Event: "flake", At: "2026-01-01T00:00:00Z", Commit: "c", Lock: "l",
+			Verdict: "indeterminate", Flaky: flaky, Probes: []string{"a", "b", "c"}}
+	}
+	boundary := JournalEvent{Event: "gate", At: "2026-01-01T00:00:00Z", Commit: "c", Lock: "l",
+		Verdict: "green", Probes: []string{"a", "b", "c"}}
+	events := []JournalEvent{boundary, flake("b"), flake("b")}
+
+	tests := []struct {
+		name string
+		run  []string
+		want int
+	}{
+		{"the full suite that flaked", []string{"a", "b", "c"}, 2},
+		{"the flaky probe alone", []string{"b"}, 2},
+		{"a pair containing it", []string{"a", "b"}, 2},
+		{"a probe that did not flake", []string{"a"}, 0},
+		{"a pair without it", []string{"a", "c"}, 0},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, _ := ConsecutiveFlakes(events, "c", "l", test.run)
+			if got != test.want {
+				t.Fatalf("count = %d, want %d for %v", got, test.want, test.run)
+			}
+		})
 	}
 }

@@ -568,7 +568,6 @@ func readJournalTail(root string) (events []JournalEvent, truncated bool, err er
 func ConsecutiveFlakes(events []JournalEvent, commit, lock string, probes []string) (count int, bounded bool) {
 	want := append([]string(nil), probes...)
 	sort.Strings(want)
-	wantKey := strings.Join(want, "\x00")
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
 		if event.Lock == "" {
@@ -580,9 +579,13 @@ func ConsecutiveFlakes(events []JournalEvent, commit, lock string, probes []stri
 			return count, true
 		}
 		if event.Event == "flake" {
-			got := append([]string(nil), event.Probes...)
-			sort.Strings(got)
-			if strings.Join(got, "\x00") == wantKey {
+			// The budget follows the unstable probe, not the exact set it was
+			// running in. Keying on the set gave every subset its own two
+			// reruns: a flake seen in the full suite did not count against
+			// `verify --probe p`, and an agent diagnosing with --probe walked
+			// into a fresh budget without meaning to. "Two reruns, then a
+			// human" has to mean two for the probe.
+			if flakeTouches(event, want) {
 				count++
 			}
 			continue
@@ -657,4 +660,30 @@ func endsWithNewline(file *os.File, size int64) bool {
 		return false
 	}
 	return last[0] == '\n'
+}
+
+// flakeTouches reports whether a journalled flake involved any probe that is
+// about to run. It reads the flaky ids when the event has them; an event
+// written before those were recorded falls back to its probe set, which is the
+// most that can be said about it.
+func flakeTouches(event JournalEvent, want []string) bool {
+	flaky := event.Flaky
+	if len(flaky) == 0 {
+		flaky = event.Probes
+	}
+	if len(flaky) == 0 {
+		// Nothing recorded about which probes were involved: count it, because
+		// the budget must fail closed.
+		return true
+	}
+	wanted := make(map[string]bool, len(want))
+	for _, id := range want {
+		wanted[id] = true
+	}
+	for _, id := range flaky {
+		if wanted[id] {
+			return true
+		}
+	}
+	return false
 }
