@@ -41,19 +41,32 @@ func GitDirty(root string) (bool, error) {
 	if err := cmd.Run(); err != nil {
 		return false, fmt.Errorf("git status: %s", strings.TrimSpace(stderr.String()))
 	}
+	// Under -z a record is `XY PATH`, except that a rename or a copy emits a
+	// second record holding the original path with no status prefix. Slicing
+	// three characters off every record therefore took them off a real path.
+	// It could not change the answer, because the new-path record returns true
+	// one iteration earlier — but a loop that mangles a path is a trap for
+	// whoever extends it to report which path is dirty.
 	entries := bytes.Split(stdout.Bytes(), []byte{0})
-	for _, entry := range entries {
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
 		if len(entry) < 4 {
 			continue
 		}
-		path := filepath.ToSlash(string(entry[3:]))
+		status := entry[:2]
 		// The same predicate the snapshot uses, not a second copy of it. The
 		// copy had drifted narrower — it was missing the bare `.vise/tmp` —
 		// which is the failure mode of writing a concept down twice.
-		if isViseLocalState(path) {
-			continue
+		if !isViseLocalState(filepath.ToSlash(string(entry[3:]))) {
+			return true, nil
 		}
-		return true, nil
+		if bytes.ContainsAny(status, "RC") && i+1 < len(entries) {
+			// The record that follows is this one's source path, whole.
+			i++
+			if len(entries[i]) > 0 && !isViseLocalState(filepath.ToSlash(string(entries[i]))) {
+				return true, nil
+			}
+		}
 	}
 	return false, nil
 }

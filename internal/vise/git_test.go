@@ -149,3 +149,33 @@ func TestOneDefinitionOfViseLocalState(t *testing.T) {
 		t.Error("git.go carries a second, inline copy of the local-state list")
 	}
 }
+
+// A staged rename is the case the -z parse got wrong: git emits two NUL
+// records, and the second holds the source path with no status prefix. Slicing
+// three characters off every record took them off a real path.
+//
+// It could not change the answer, because the new-path record returns true one
+// iteration earlier. This pins the parse anyway — a loop that mangles a path is
+// a trap for whoever extends it to report which path is dirty — and asserts the
+// answer both before and after the rename, which is the part that must not move.
+func TestTheDirtyCheckReadsARenameAsTwoPaths(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	root := testGitRepo(t)
+	writeTestFile(t, root, "before.txt", "content\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "a file to rename")
+
+	if dirty, err := GitDirty(root); err != nil || dirty {
+		t.Fatalf("clean tree reported dirty=%v err=%v", dirty, err)
+	}
+	testGit(t, root, "mv", "before.txt", "after.txt")
+	dirty, err := GitDirty(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dirty {
+		t.Error("a staged rename left the tree reported clean")
+	}
+}
