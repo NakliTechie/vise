@@ -456,7 +456,12 @@ func TestDoctorAsksAboutTheBlobsTheLockfileReferences(t *testing.T) {
 func TestDoctorNoticesADeclaredArtifactSomebodyCommitted(t *testing.T) {
 	root := testGitRepo(t)
 	writeTestFile(t, root, "AGENTS.md", AgentContract)
-	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"git --version\"]\n[[probe]]\nid = \"p\"\nrun = \"mkdir -p out && printf produced > out/result.txt\"\nfiles = [\"out/result.txt\"]\n")
+	// Two probes, two artifacts each, and only the last one committed: a check
+	// that inspects the first probe, or the first artifact of each, passes on
+	// a single-artifact fixture while seeing nothing.
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[env]\nfingerprint = [\"git --version\"]\n"+
+		"[[probe]]\nid = \"p\"\nrun = \"mkdir -p out && printf a > out/a.txt && printf b > out/b.txt\"\nfiles = [\"out/a.txt\", \"out/b.txt\"]\n"+
+		"[[probe]]\nid = \"q\"\nrun = \"mkdir -p out && printf c > out/c.txt && printf d > out/d.txt\"\nfiles = [\"out/c.txt\", \"out/d.txt\"]\n")
 	writeTestFile(t, root, "vise.lock", "{\"v\":1}")
 	testGit(t, root, "add", ".")
 	testGit(t, root, "commit", "-qm", "harness")
@@ -468,10 +473,10 @@ func TestDoctorNoticesADeclaredArtifactSomebodyCommitted(t *testing.T) {
 		}
 	}
 
-	// The probe runs, produces its artifact, and somebody commits everything.
-	writeTestFile(t, root, filepath.Join("out", "result.txt"), "produced")
-	testGit(t, root, "add", "-A")
-	testGit(t, root, "commit", "-qm", "add everything")
+	// Only the very last declared artifact is committed.
+	writeTestFile(t, root, filepath.Join("out", "d.txt"), "d")
+	testGit(t, root, "add", "out/d.txt")
+	testGit(t, root, "commit", "-qm", "commit one artifact")
 
 	var detail, remedy string
 	for _, finding := range Doctor(root).Findings {
@@ -479,7 +484,7 @@ func TestDoctorNoticesADeclaredArtifactSomebodyCommitted(t *testing.T) {
 			detail, remedy = finding.Detail, finding.Remedy
 		}
 	}
-	if !strings.Contains(detail, "out/result.txt") {
+	if !strings.Contains(detail, "out/d.txt") {
 		t.Fatalf("a committed declared artifact went unreported: %q", detail)
 	}
 	if !strings.Contains(remedy, "git rm --cached") {

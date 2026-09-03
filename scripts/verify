@@ -39,6 +39,7 @@ Features:
   failure-modes     Behavior diff, dependency drift, flake, and rerun refusal
   metrics           Metric baseline and no-regress enforcement
   review            Preview and accept an overwrite; frozen metric definitions
+  example           The shipped agent-ready template, instantiated and gated
   dogfood           Use vise to gate a source change in a clone of vise
   internal-checks   Go unit/integration tests and vet
 EOF
@@ -464,6 +465,32 @@ APP
   git -C "$repo" add vise.lock .vise/blobs >/dev/null
   git -C "$repo" commit -qm "Record behavior baseline" >/dev/null
   expect_exit 0 sh -c "cd '$repo' && '$VERIFY_BIN' doctor --json | grep -q '\"ready\":true'"
+  expect_vise_json_exit example 0 '"verdict":"green"' "$repo" gate
+
+  # The template's guards are asserted, not inferred from a green gate. Nine
+  # mutations of the example passed this feature when it only checked that the
+  # documented path worked: inert probes, a dropped fixture dependency,
+  # -mod=mod, GOTOOLCHAIN=auto, an unpinned fingerprint, and swallowed compiler
+  # diagnostics all leave a project that gates green today and rots quietly.
+  grep -q 'mod=vendor' "$repo/probe-cli.sh" || fail example "the wrapper does not pin -mod=vendor; the sandbox has no network"
+  grep -q 'GOTOOLCHAIN=go' "$repo/probe-cli.sh" || fail example "the wrapper does not name a toolchain; go.mod will trigger a download"
+  # shellcheck disable=SC2016  # the literal $PWD is the thing being searched for
+  grep -q 'GOCACHE="[$]PWD' "$repo/probe-cli.sh" || fail example "the wrapper does not keep its build cache in the checkout"
+  grep -q 'GOTOOLCHAIN=go[0-9.]* go version' "$repo/vise.toml" || fail example "the fingerprint does not pin the toolchain it reports"
+  grep -q 'deps = \[' "$repo/vise.toml" || fail example "no probe declares the wrapper as an input"
+  test "$(grep -c '^\[\[probe\]\]' "$repo/vise.toml")" -ge 3 || fail example "the example declares fewer probes than it documents"
+
+  # A build failure must be loud, and must carry the compiler's own line. A
+  # wrapper that swallows diagnostics turns a compile error into a mystery.
+  cp "$repo/cmd/app/main.go" "$VERIFY_RUN/example-main.go"
+  # A reference to nothing: an unused package-level variable is legal Go and
+  # would have tested nothing.
+  printf 'func brokenByTheExampleFeature() { undefinedByTheExampleFeature() }\n' >> "$repo/cmd/app/main.go"
+  set +e
+  build_output=$(cd "$repo" && "$VERIFY_BIN" run cli-version 2>&1)
+  set -e
+  printf '%s' "$build_output" | grep -q 'main.go' || fail example "a compile error did not name the file: $build_output"
+  cp "$VERIFY_RUN/example-main.go" "$repo/cmd/app/main.go"
   expect_vise_json_exit example 0 '"verdict":"green"' "$repo" gate
 
   # And the gate has to notice a change only the declared artifact shows: the

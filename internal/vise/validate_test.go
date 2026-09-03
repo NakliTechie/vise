@@ -240,11 +240,19 @@ func TestAMetricWithNoFrozenDefinitionIsAHarnessFailureNotAPass(t *testing.T) {
 // to consider when there is only something to rename.
 func TestAProposalCannotCollideWithTheManifest(t *testing.T) {
 	root := testGitRepo(t)
+	// The colliding ids are second in each list: a check that inspects only the
+	// first entry passes on a one-entry fixture while seeing nothing.
 	manifest := Manifest{
-		Vise:    ViseSettings{Version: LockVersion},
-		Stubs:   StubSettings{Network: "declared-off"},
-		Probes:  []Probe{{ID: "taken", Run: "printf p", Timeout: 30}},
-		Metrics: []Metric{{ID: "counted", Run: "printf 1", Direction: "down", Enforce: "none", Timeout: 30}},
+		Vise:  ViseSettings{Version: LockVersion},
+		Stubs: StubSettings{Network: "declared-off"},
+		Probes: []Probe{
+			{ID: "first", Run: "printf p", Timeout: 30},
+			{ID: "taken", Run: "printf p", Timeout: 30},
+		},
+		Metrics: []Metric{
+			{ID: "leading", Run: "printf 1", Direction: "down", Enforce: "none", Timeout: 30},
+			{ID: "counted", Run: "printf 1", Direction: "down", Enforce: "none", Timeout: 30},
+		},
 	}
 
 	for _, id := range []string{"taken", "counted"} {

@@ -140,3 +140,66 @@ func TestAProbeIsAllowedTheTimeoutItDeclares(t *testing.T) {
 		t.Fatalf("the probe did not run to completion: %q", got)
 	}
 }
+
+// firstShellDiagnostic picks the shell's own not-found line out of stderr, so
+// exit 127 can name the missing tool instead of merely reporting that
+// something failed. Bypassing it, or taking the first line of stderr whatever
+// it says, left the suite green — because the only test went through a probe
+// whose stderr had one line in it.
+func TestTheLaunchFailureNamesTheToolAndNotTheNoise(t *testing.T) {
+	tests := []struct {
+		name    string
+		stderr  string
+		command string
+		wantIn  string
+		wantOut string
+	}{
+		{
+			name:    "a warning before the diagnostic",
+			stderr:  "warning: something unrelated\nsh: mytool: command not found\n",
+			command: "mytool --version",
+			wantIn:  "mytool: command not found",
+			wantOut: "warning: something unrelated",
+		},
+		{
+			name:    "the other phrasing",
+			stderr:  "sh: 1: othertool: No such file or directory\n",
+			command: "othertool run",
+			wantIn:  "othertool",
+		},
+		{
+			name:    "no diagnostic at all falls back to the command",
+			stderr:  "some unrelated noise\n",
+			command: "thirdtool --flag",
+			wantIn:  `"thirdtool" is not on the probe's PATH`,
+			wantOut: "some unrelated noise",
+		},
+		{
+			name:    "a compound command names its first word",
+			stderr:  "",
+			command: "fourthtool | grep x",
+			wantIn:  `"fourthtool"`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := launchFailureDetail(test.command, CaptureBytes([]byte(test.stderr)))
+			if !strings.Contains(got, "127") {
+				t.Fatalf("the message does not say it was a launch failure: %q", got)
+			}
+			if !strings.Contains(got, test.wantIn) {
+				t.Fatalf("message %q does not contain %q", got, test.wantIn)
+			}
+			if test.wantOut != "" && strings.Contains(got, test.wantOut) {
+				t.Fatalf("message %q carried noise %q", got, test.wantOut)
+			}
+		})
+	}
+
+	// And it is bounded, because a probe's stderr is not.
+	long := "sh: " + strings.Repeat("x", 4000) + ": command not found\n"
+	if got := launchFailureDetail("x", CaptureBytes([]byte(long))); len(got) > 400 {
+		t.Fatalf("a 4000-character diagnostic rendered %d characters", len(got))
+	}
+}
