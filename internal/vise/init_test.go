@@ -16,7 +16,7 @@ func TestInitRefusesSymlinkedGitignoreBeforeWritingAnything(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(root, ".gitignore")); err != nil {
 		t.Fatal(err)
 	}
-	err := InitRepository(root)
+	_, err := InitRepository(root)
 	if err == nil || !strings.Contains(err.Error(), "regular file") {
 		t.Fatalf("err = %v", err)
 	}
@@ -35,14 +35,15 @@ func TestInitRefusesSymlinkedGitignoreBeforeWritingAnything(t *testing.T) {
 
 func TestInitInstallsTheAgentContractWithoutOverwriting(t *testing.T) {
 	root := t.TempDir()
-	if err := InitRepository(root); err != nil {
+	created, err := InitRepository(root)
+	if err != nil {
 		t.Fatal(err)
 	}
 	contract, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
 	if err != nil || string(contract) != AgentContract {
 		t.Fatalf("AGENTS.md = %d bytes, %v", len(contract), err)
 	}
-	if created := InitCreated(root); len(created) != 2 || created[1] != "AGENTS.md" {
+	if len(created) != 2 || created[1] != "AGENTS.md" {
 		t.Fatalf("created = %v", created)
 	}
 
@@ -52,8 +53,14 @@ func TestInitInstallsTheAgentContractWithoutOverwriting(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(other, "AGENTS.md"), []byte(mine), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := InitRepository(other); err != nil {
+	created, err = InitRepository(other)
+	if err != nil {
 		t.Fatal(err)
+	}
+	for _, name := range created {
+		if name == "AGENTS.md" {
+			t.Error("init reported writing an AGENTS.md it left alone")
+		}
 	}
 	if data, _ := os.ReadFile(filepath.Join(other, "AGENTS.md")); string(data) != mine {
 		t.Fatalf("init overwrote an existing AGENTS.md: %q", data)

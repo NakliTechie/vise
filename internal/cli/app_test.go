@@ -486,12 +486,70 @@ func TestInitNeverOverwrites(t *testing.T) {
 	if strings.Index(string(before), "[[probe]]") > strings.Index(string(before), "[stubs]") {
 		t.Fatal("starter manifest does not lead with the first probe")
 	}
-	if exit, _, stderr := cliRun(t, root, "init"); exit != 2 || !strings.Contains(stderr, "never overwrites") {
+	// The invariant is that the manifest is untouched, not that the command
+	// fails. It used to refuse the whole run whenever vise.toml existed, which
+	// made two of doctor's own remedies unrunnable in the state doctor reports
+	// them in. A second init now writes what is missing, says so, and leaves
+	// the manifest alone — which is what this test was always about.
+	exit, stdout, stderr := cliRun(t, root, "init")
+	if exit != 0 {
 		t.Fatalf("second init: %d %q", exit, stderr)
+	}
+	if !strings.Contains(stdout, "nothing to write") {
+		t.Errorf("a second init wrote nothing and did not say so:\n%s", stdout)
 	}
 	after, err := os.ReadFile(filepath.Join(root, "vise.toml"))
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatalf("manifest changed: %v", err)
+	}
+}
+
+// The state doctor actually reports: a manifest somebody wrote by hand, no
+// AGENTS.md, and .gitignore missing vise's local state. Doctor's remedy for
+// both findings is "run vise init", and init refused because the manifest was
+// there — so the remedy was unrunnable in exactly the situation that produced
+// it. Following a tool's own instruction has to work.
+func TestInitCompletesARepositoryThatAlreadyHasAManifest(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf stable")
+	for _, name := range []string{"AGENTS.md", ".gitignore"} {
+		if err := os.Remove(filepath.Join(root, name)); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+	}
+	manifestBefore, err := os.ReadFile(filepath.Join(root, "vise.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	exit, stdout, stderr := cliRun(t, root, "init")
+	if exit != 0 {
+		t.Fatalf("init: %d %q", exit, stderr)
+	}
+	if !strings.Contains(stdout, "AGENTS.md") {
+		t.Errorf("init did not report writing the contract:\n%s", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Errorf("no AGENTS.md after init: %v", err)
+	}
+	ignore, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		t.Fatalf("no .gitignore after init: %v", err)
+	}
+	for _, line := range []string{".vise/journal.jsonl", ".vise/run.lock", ".vise/tmp/"} {
+		if !strings.Contains(string(ignore), line) {
+			t.Errorf(".gitignore is missing %q:\n%s", line, ignore)
+		}
+	}
+	after, err := os.ReadFile(filepath.Join(root, "vise.toml"))
+	if err != nil || !bytes.Equal(manifestBefore, after) {
+		t.Fatalf("init touched the manifest it was told never to touch: %v", err)
+	}
+
+	// And doctor, which sent us here, is satisfied by the result.
+	if exit, stdout, _ := cliRun(t, root, "doctor"); exit != 0 {
+		t.Errorf("doctor exit %d", exit)
+	} else if strings.Contains(stdout, "agent-contract") || strings.Contains(stdout, "local-state-ignored") {
+		t.Errorf("doctor still reports what its own remedy was supposed to fix:\n%s", stdout)
 	}
 }
 

@@ -58,49 +58,65 @@ var stateIgnoreLines = []string{
 	".vise/tmp/",
 }
 
-func InitRepository(root string) error {
-	manifestPath := filepath.Join(root, "vise.toml")
-	if _, err := os.Lstat(manifestPath); err == nil {
-		return fmt.Errorf("vise.toml already exists; init never overwrites it")
-	} else if !os.IsNotExist(err) {
-		return err
-	}
+// InitRepository writes what the repository is missing and leaves what it has,
+// returning the paths it actually created.
+//
+// It used to refuse the whole operation when vise.toml existed. That made two
+// of doctor's own remedies unrunnable in exactly the state doctor reports them
+// in: "run vise init, which appends the missing entries to .gitignore without
+// touching anything else" and "run vise init, which writes the agent contract
+// without overwriting an existing one". Both promise per-file behaviour the
+// all-or-nothing refusal did not have, and a repository with a manifest but no
+// AGENTS.md — the common case, since the manifest is the part people write by
+// hand — could not follow either.
+//
+// Never overwriting anything is the rule that matters and it is unchanged.
+func InitRepository(root string) ([]string, error) {
 	// Check the ignore file first so a refusal leaves nothing behind.
 	if err := rejectExistingSymlinkOrSpecial(filepath.Join(root, ".gitignore")); err != nil {
-		return fmt.Errorf("init refuses to rewrite .gitignore: %w", err)
+		return nil, fmt.Errorf("init refuses to rewrite .gitignore: %w", err)
 	}
-	if err := atomicWrite(root, manifestPath, []byte(StubManifest), 0o644); err != nil {
-		return err
-	}
-	if err := updateGitignore(root); err != nil {
-		return fmt.Errorf("vise.toml was written but .gitignore update failed: %w", err)
-	}
-	if err := writeAgentContract(root); err != nil {
-		return fmt.Errorf("vise.toml was written but AGENTS.md could not be created: %w", err)
-	}
-	return nil
-}
+	var created []string
 
-// InitCreated lists the files a fresh init wrote, so the caller can report them.
-func InitCreated(root string) []string {
-	created := []string{"vise.toml"}
-	if _, err := os.Lstat(filepath.Join(root, "AGENTS.md")); err == nil {
+	manifestPath := filepath.Join(root, "vise.toml")
+	switch _, err := os.Lstat(manifestPath); {
+	case err == nil: // already there; leave it
+	case !os.IsNotExist(err):
+		return nil, err
+	default:
+		if err := atomicWrite(root, manifestPath, []byte(StubManifest), 0o644); err != nil {
+			return nil, err
+		}
+		created = append(created, "vise.toml")
+	}
+
+	if err := updateGitignore(root); err != nil {
+		return created, fmt.Errorf(".gitignore update failed: %w", err)
+	}
+	wrote, err := writeAgentContract(root)
+	if err != nil {
+		return created, fmt.Errorf("AGENTS.md could not be created: %w", err)
+	}
+	if wrote {
 		created = append(created, "AGENTS.md")
 	}
-	return created
+	return created, nil
 }
 
 // writeAgentContract installs the agent rulebook, and never overwrites one the
 // project already has — a project with its own AGENTS.md has already thought
 // about this, and clobbering it would be the tool overruling the operator.
-func writeAgentContract(root string) error {
+func writeAgentContract(root string) (bool, error) {
 	path := filepath.Join(root, "AGENTS.md")
 	if _, err := os.Lstat(path); err == nil {
-		return nil
+		return false, nil
 	} else if !os.IsNotExist(err) {
-		return err
+		return false, err
 	}
-	return atomicWrite(root, path, []byte(AgentContract), 0o644)
+	if err := atomicWrite(root, path, []byte(AgentContract), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func updateGitignore(root string) error {

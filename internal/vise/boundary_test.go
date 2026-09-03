@@ -18,7 +18,7 @@ func TestInitWritesExactlyTheIgnoreEntriesItOwes(t *testing.T) {
 	t.Run("a repository with no ignore file", func(t *testing.T) {
 		root := t.TempDir()
 		testGit(t, root, "init", "-q")
-		if err := InitRepository(root); err != nil {
+		if _, err := InitRepository(root); err != nil {
 			t.Fatal(err)
 		}
 		content := readIgnore(t, root)
@@ -36,7 +36,7 @@ func TestInitWritesExactlyTheIgnoreEntriesItOwes(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(existing), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := InitRepository(root); err != nil {
+		if _, err := InitRepository(root); err != nil {
 			t.Fatal(err)
 		}
 		content := readIgnore(t, root)
@@ -57,14 +57,14 @@ func TestInitWritesExactlyTheIgnoreEntriesItOwes(t *testing.T) {
 	t.Run("run twice", func(t *testing.T) {
 		root := t.TempDir()
 		testGit(t, root, "init", "-q")
-		if err := InitRepository(root); err != nil {
+		if _, err := InitRepository(root); err != nil {
 			t.Fatal(err)
 		}
 		first := readIgnore(t, root)
 		if err := os.Remove(filepath.Join(root, "vise.toml")); err != nil {
 			t.Fatal(err)
 		}
-		if err := InitRepository(root); err != nil {
+		if _, err := InitRepository(root); err != nil {
 			t.Fatal(err)
 		}
 		// Byte-identical: a second init must not append what the first wrote.

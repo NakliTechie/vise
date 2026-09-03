@@ -256,10 +256,10 @@ func runInit(args []string, root string, jsonMode bool, stdout, stderr io.Writer
 	if len(args) != 0 {
 		return renderSimpleError("init", "init accepts no arguments", jsonMode, stdout, stderr)
 	}
-	if err := vise.InitRepository(root); err != nil {
+	created, err := vise.InitRepository(root)
+	if err != nil {
 		return renderSimpleError("init", err.Error(), jsonMode, stdout, stderr)
 	}
-	created := vise.InitCreated(root)
 	response := map[string]any{
 		"v":       1,
 		"cmd":     "init",
@@ -270,7 +270,11 @@ func runInit(args []string, root string, jsonMode bool, stdout, stderr io.Writer
 	if jsonMode {
 		return writeJSON(stdout, response)
 	}
-	fmt.Fprintln(stdout, "INITIALIZED — wrote "+strings.Join(created, ", ")+" and wired local state into .gitignore")
+	if len(created) == 0 {
+		fmt.Fprintln(stdout, "INITIALIZED — nothing to write; vise.toml, AGENTS.md and the .gitignore entries are all present")
+	} else {
+		fmt.Fprintln(stdout, "INITIALIZED — wrote "+strings.Join(created, ", ")+" and wired local state into .gitignore")
+	}
 	fmt.Fprintln(stdout, "NEXT — declare at least one probe, commit the harness, then run vise record")
 	return vise.ExitOK
 }
