@@ -178,11 +178,30 @@ func isVarNameByte(b byte) bool {
 }
 
 func checkPortablePaths(manifest Manifest) []DoctorFinding {
-	unportable := func(value string) bool {
-		if strings.HasPrefix(value, "/bin/") || strings.HasPrefix(value, "/usr/bin/") {
+	looksMachineLocal := func(part string) bool {
+		if strings.HasPrefix(part, "/bin/") || strings.HasPrefix(part, "/usr/bin/") {
 			return false
 		}
-		return strings.HasPrefix(value, "/") || strings.HasPrefix(value, "~") || namesHomeVariable(value)
+		return strings.HasPrefix(part, "/") || strings.HasPrefix(part, "~/") || part == "~" ||
+			strings.HasPrefix(part, "../") || namesHomeVariable(part)
+	}
+	unportable := func(value string) bool {
+		// A machine-local path hides after KEY= (GOMODCACHE=/home/op/cache) and
+		// after a compiler flag (-I/opt/include), not only at the token's
+		// start — the fingerprint loop already strips one such prefix, which is
+		// the author knowing these exist. Split on = only (splitting on : would
+		// turn http://x into //x and flag every URL), and strip a leading short
+		// flag like -I or -L.
+		for _, part := range strings.Split(value, "=") {
+			trimmed := part
+			if len(trimmed) >= 2 && trimmed[0] == '-' && (trimmed[1] == 'I' || trimmed[1] == 'L' || trimmed[1] == 'o') {
+				trimmed = trimmed[2:]
+			}
+			if looksMachineLocal(trimmed) {
+				return true
+			}
+		}
+		return false
 	}
 	sites := map[string][]string{}
 	note := func(value, where string) {
@@ -374,6 +393,18 @@ func checkBaselineCommitted(root string) []DoctorFinding {
 		source = committed
 	}
 	if len(source) == 0 || json.Unmarshal(source, &lock) != nil {
+		// A working-tree vise.lock that is present but empty or unparseable is
+		// a corrupt baseline the gate refuses (LoadLockfile), not a clean pass.
+		// Only report it when there is one to be corrupt: a missing lock is the
+		// finding above, and an unparseable committed side with no working-tree
+		// lock is not this check's concern.
+		if lockErr == nil && len(current) > 0 {
+			findings = append(findings, DoctorFinding{
+				Check:  "baseline-committed",
+				Detail: "vise.lock is present but not valid JSON, so the gate cannot load this baseline",
+				Remedy: "re-record the baseline; the vise.lock here is corrupt",
+			})
+		}
 		return findings
 	}
 	var missing, malformed int
@@ -388,7 +419,7 @@ func checkBaselineCommitted(root string) []DoctorFinding {
 			malformed++
 			continue
 		}
-		if _, err := gitFileAtHead(root, ".vise/blobs/"+name); err != nil {
+		if !gitBlobCommitted(root, ".vise/blobs/"+name) {
 			missing++
 		}
 	}
@@ -407,6 +438,16 @@ func checkBaselineCommitted(root string) []DoctorFinding {
 		})
 	}
 	return findings
+}
+
+// gitBlobCommitted reports whether a path exists in the commit HEAD points at,
+// without reading its contents. checkBaselineCommitted asked a yes/no question
+// with git show, which buffered the whole blob into memory; cat-file -e answers
+// it with an exit code.
+func gitBlobCommitted(root, rel string) bool {
+	cmd := exec.Command("git", "cat-file", "-e", "HEAD:"+rel)
+	cmd.Dir = root
+	return cmd.Run() == nil
 }
 
 // gitFileAtHead returns a file's contents from the commit HEAD points at.
@@ -462,6 +503,16 @@ func checkAgentContract(root string) []DoctorFinding {
 			Check:  "agent-contract",
 			Detail: "AGENTS.md exists but is empty or is not a regular file, so an agent working here has no written rules",
 			Remedy: "remove the empty AGENTS.md and run vise init, or copy the agent contract into it by hand; init will not overwrite a file that is already there",
+		}}
+	}
+	if !os.IsNotExist(err) {
+		// A permission error is not a missing file. Reporting "no AGENTS.md"
+		// and "run vise init" misstates what is on disk and cannot fix
+		// permissions.
+		return []DoctorFinding{{
+			Check:  "agent-contract",
+			Detail: "AGENTS.md could not be inspected: " + err.Error(),
+			Remedy: "make AGENTS.md readable, then run vise doctor again",
 		}}
 	}
 	return []DoctorFinding{{

@@ -712,3 +712,50 @@ func TestDoctorReportsAMalformedReferencedHash(t *testing.T) {
 		t.Error("a malformed referenced hash was not reported")
 	}
 }
+
+// A committed vise.lock that is present but not valid JSON is a corrupt
+// baseline the gate refuses (LoadLockfile), and doctor's baseline check
+// silently passed it — the early return on an unparseable lock reported ready.
+func TestDoctorFlagsACorruptLockfile(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "vise.lock", "this is not json\n")
+	var found bool
+	for _, f := range checkBaselineCommitted(root) {
+		if strings.Contains(f.Detail, "not valid JSON") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a corrupt vise.lock was reported clean")
+	}
+}
+
+// portable-paths must see a machine-local path embedded after KEY= or a -I flag,
+// and a parent-relative path, without false-flagging a URL.
+func TestPortablePathsSeesEmbeddedAndRelativePaths(t *testing.T) {
+	flags := func(run string) bool {
+		m := Manifest{
+			Vise: ViseSettings{Version: 1}, Stubs: StubSettings{Network: "declared-off"},
+			Probes: []Probe{{ID: "p", Run: run, Timeout: 30}},
+		}
+		return len(checkPortablePaths(m)) > 0
+	}
+	for _, local := range []string{
+		"env GOMODCACHE=/home/op/cache go test",
+		"cc -I/opt/include main.c",
+		"sh ../shared/tool.sh",
+	} {
+		if !flags(local) {
+			t.Errorf("%q names a machine-local path and doctor passed it", local)
+		}
+	}
+	for _, portable := range []string{
+		"curl https://example.com/data",
+		"./bin/tool --format=json",
+		"go build ./cmd/app",
+	} {
+		if flags(portable) {
+			t.Errorf("%q is portable and doctor flagged it", portable)
+		}
+	}
+}
