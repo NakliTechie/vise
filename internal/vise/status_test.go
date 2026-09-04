@@ -204,3 +204,40 @@ func TestStatusAndGateAgreeAboutWhoRepairsTheDrift(t *testing.T) {
 		}
 	})
 }
+
+// A valid baseline with the manifest deleted is a broken harness, and status
+// used to call it not-initialized — "run vise init, declare probes, and record
+// a baseline" — while a baseline was sitting right there and gate mapped the
+// same missing manifest to an operator harness error. record_first tells an
+// operator to create state that exists.
+func TestStatusDoesNotSayRecordFirstWhenABaselineExists(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n\n[[probe]]\nid = \"p\"\nrun = \"printf ok\"\ntimeout = 30\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "harness")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+
+	if err := os.Remove(filepath.Join(root, "vise.toml")); err != nil {
+		t.Fatal(err)
+	}
+	report := BuildStatus(root)
+	if report.Next.Action == NextRecordFirst {
+		t.Errorf("status says record_first with a baseline present: %q", report.Next.Detail)
+	}
+	if report.Next.Action != NextHuman {
+		t.Errorf("next %q, want human — the manifest that defines the baseline is gone", report.Next.Action)
+	}
+
+	// The genuinely uninitialized repo must still say record_first.
+	fresh := testGitRepo(t)
+	if action := BuildStatus(fresh).Next.Action; action != NextRecordFirst {
+		t.Errorf("a fresh repo says %q, want record_first", action)
+	}
+}

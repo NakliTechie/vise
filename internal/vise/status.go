@@ -119,6 +119,17 @@ func buildLockStatus(root string, manifest Manifest, manifestBytes []byte, manif
 		buildLockCounts(lock, report)
 		buildRecordedCommits(lock, report)
 		if manifestErr != nil {
+			// A valid baseline with no manifest to define it is a broken
+			// harness, not an uninitialized repo. The state left standing here
+			// was record_first — "run vise init, declare probes, and record a
+			// baseline" — which tells an operator to create a baseline that is
+			// sitting right there, while gate maps the same missing manifest to
+			// an operator harness error. Only an absent manifest reaches this
+			// line as record_first; a malformed one is already harness-error.
+			if os.IsNotExist(manifestErr) {
+				report.State = "harness-error"
+				report.Next = Next{Action: NextHuman, Detail: "vise.lock records a baseline but vise.toml is gone; restore the manifest that defines it — an agent may not write it"}
+			}
 			return
 		}
 		buildFingerprintComparison(root, manifest, lock, report)
