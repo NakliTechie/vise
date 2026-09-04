@@ -759,3 +759,26 @@ func TestPortablePathsSeesEmbeddedAndRelativePaths(t *testing.T) {
 		}
 	}
 }
+
+// The no-lockfile remedy said "run vise record", which record refuses on a
+// dirty tree — so with an uncommitted harness the operator follows it verbatim
+// and gets a working-tree refusal. It names the commit step when the tree is
+// dirty.
+func TestTheNoBaselineRemedyAccountsForADirtyTree(t *testing.T) {
+	root := testGitRepo(t) // has one commit, clean
+	// Add an uncommitted harness file: commits exist, tree is dirty, no lock.
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n")
+
+	var remedy string
+	for _, f := range checkBaselineCommitted(root) {
+		if f.Check == "baseline-committed" {
+			remedy = f.Remedy
+		}
+	}
+	if remedy == "" {
+		t.Fatal("no baseline finding")
+	}
+	if !strings.Contains(remedy, "commit or stash") {
+		t.Errorf("the remedy ignores the dirty tree record refuses: %q", remedy)
+	}
+}

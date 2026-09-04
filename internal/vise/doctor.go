@@ -337,8 +337,16 @@ func checkBaselineCommitted(root string) []DoctorFinding {
 		// On a fresh git init the bare remedy fails and the finding persists,
 		// so name the missing step.
 		remedy := "run vise record, then commit vise.lock and .vise/blobs/"
-		if !GitHasCommits(root) {
+		switch {
+		case !GitHasCommits(root):
 			remedy = "commit the harness first (a baseline freezes behavior at a commit), then run vise record and commit vise.lock and .vise/blobs/"
+		default:
+			// record refuses a dirty tree, so "run vise record" fails verbatim
+			// when the harness is uncommitted. Name the commit step, which also
+			// cleans the tree.
+			if dirty, err := GitDirty(root); err == nil && dirty {
+				remedy = "commit or stash the working tree first (record refuses a dirty one), then run vise record and commit vise.lock and .vise/blobs/"
+			}
 		}
 		return []DoctorFinding{{
 			Check:  "baseline-committed",
