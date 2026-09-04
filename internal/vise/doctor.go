@@ -134,12 +134,40 @@ func checkFingerprint(manifest Manifest) []DoctorFinding {
 // Findings are grouped by the offending value, not by the probe that carries
 // it: one module cache named in eight probes is one thing to fix, and eight
 // identical lines is a wall the operator learns to scroll past.
+// namesHomeVariable reports whether a value references the HOME variable, as
+// $HOME or ${HOME}. A plain substring test got both ends wrong: it missed
+// ${HOME}/x (the "$HOME" bytes are not contiguous) and flagged $HOMEBREW (the
+// bytes are contiguous but the variable is HOMEBREW, not HOME).
+func namesHomeVariable(value string) bool {
+	if strings.Contains(value, "${HOME}") {
+		return true
+	}
+	rest := value
+	for {
+		i := strings.Index(rest, "$HOME")
+		if i < 0 {
+			return false
+		}
+		after := rest[i+len("$HOME"):]
+		// $HOME ends the reference unless a letter, digit or underscore
+		// continues the variable name (which would make it $HOMEBREW, say).
+		if after == "" || !isVarNameByte(after[0]) {
+			return true
+		}
+		rest = after
+	}
+}
+
+func isVarNameByte(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
 func checkPortablePaths(manifest Manifest) []DoctorFinding {
 	unportable := func(value string) bool {
 		if strings.HasPrefix(value, "/bin/") || strings.HasPrefix(value, "/usr/bin/") {
 			return false
 		}
-		return strings.HasPrefix(value, "/") || strings.HasPrefix(value, "~") || strings.Contains(value, "$HOME")
+		return strings.HasPrefix(value, "/") || strings.HasPrefix(value, "~") || namesHomeVariable(value)
 	}
 	sites := map[string][]string{}
 	note := func(value, where string) {
@@ -159,6 +187,19 @@ func checkPortablePaths(manifest Manifest) []DoctorFinding {
 		}
 		for _, dep := range probe.Deps {
 			note(dep, "probe "+probe.ID+" deps")
+		}
+	}
+	// Metrics run the same shell a probe does (RunMetric), so a metric that
+	// names a machine-local path is the same trap and was invisible here.
+	for _, metric := range manifest.Metrics {
+		for _, token := range strings.Fields(metric.Run) {
+			note(strings.Trim(token, "\"'"), "metric "+metric.ID)
+		}
+		for _, token := range strings.Fields(metric.VersionCmd) {
+			note(strings.Trim(token, "\"'"), "metric "+metric.ID+" version_cmd")
+		}
+		for key, value := range metric.Env {
+			note(value, "metric "+metric.ID+" env "+key)
 		}
 	}
 	// The fingerprint command carries the same trap and is easier to miss:
@@ -270,7 +311,19 @@ func checkBaselineCommitted(root string) []DoctorFinding {
 	// baseline in the working tree is something else entirely. A fresh clone
 	// gets what HEAD holds, and that is the only thing this check is about.
 	var findings []DoctorFinding
-	current, lockErr := os.ReadFile(filepath.Join(root, "vise.lock"))
+	// readRegularFile, not os.ReadFile: a vise.lock that is a symlink or a fifo
+	// makes os.ReadFile follow it or block on it, so doctor could hang or read
+	// off the repository where the gate loads the same file through
+	// readRegularFile precisely to refuse both. A non-regular lock is itself a
+	// finding, not a clean pass.
+	current, lockErr := readRegularFile(filepath.Join(root, "vise.lock"))
+	if lockErr != nil && !os.IsNotExist(lockErr) {
+		return append(findings, DoctorFinding{
+			Check:  "baseline-committed",
+			Detail: "vise.lock is not a regular file (" + lockErr.Error() + "), so the gate cannot load it",
+			Remedy: "replace vise.lock with the recorded baseline file; a symlink or special file here is not one",
+		})
+	}
 	committed, headErr := gitFileAtHead(root, "vise.lock")
 	switch {
 	case headErr != nil:

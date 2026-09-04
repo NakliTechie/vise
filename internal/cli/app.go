@@ -717,7 +717,7 @@ var commands = []struct {
 	{"status", "status", "Render the complete bounded situation",
 		"Usage: vise status [--json]\nReports manifest, lock, fingerprint, proposals, and the last five journal events.\n"},
 	{"doctor", "doctor", "Check the repository is fit to hand to an agent",
-		"Usage: vise doctor [--json]\nReports what an operator should fix before an agent works here: an unfingerprinted toolchain, a probe that names a path outside the checkout, a script a probe runs without declaring, an uncommitted baseline, unignored local state, a missing agent contract.\nRuns no probe, writes nothing, and always exits 0.\n"},
+		"Usage: vise doctor [--json]\nReports what an operator should fix before an agent works here: an unfingerprinted toolchain, a probe or metric that names a path outside the checkout, a script a probe runs without declaring, an uncommitted baseline, unignored local state, a missing agent contract, a declared artifact committed to git, and an untracked tree large enough to slow every gate.\nRuns no probe, writes nothing, and always exits 0.\n"},
 	{"version", "version", "Print the vise version",
 		"Usage: vise version [--json]\nPrints the version, and with --json the build revision and whether the tree was modified.\n"},
 }

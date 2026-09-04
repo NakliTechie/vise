@@ -2,11 +2,13 @@ package vise
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func doctorChecks(report DoctorReport) []string {
@@ -496,5 +498,89 @@ func TestDoctorNoticesADeclaredArtifactSomebodyCommitted(t *testing.T) {
 	}
 	if !strings.Contains(remedy, "git rm --cached") {
 		t.Fatalf("the remedy does not say how to undo it: %q", remedy)
+	}
+}
+
+// doctor exists to predict what the gate will find. checkPortablePaths flagged
+// a machine-local path in a probe and skipped metrics entirely — but a metric
+// runs the same shell (RunMetric), so an absolute path in a metric passed
+// doctor and failed in the sandbox. The worst kind of doctor bug: a false clean.
+func TestDoctorFlagsAMachineLocalPathInAMetricToo(t *testing.T) {
+	manifest := Manifest{
+		Vise:   ViseSettings{Version: 1},
+		Stubs:  StubSettings{TZ: "UTC", Lang: "C", Seed: "1729", Network: "declared-off"},
+		Probes: []Probe{{ID: "p", Run: "printf ok", Timeout: 30}},
+		Metrics: []Metric{{
+			ID: "size", Run: "/opt/analyzer/count .", VersionCmd: "/opt/analyzer/count --version",
+			Direction: "down", Enforce: "no-regress", Timeout: 30,
+			Env: map[string]string{"CACHE": "/root/cache"},
+		}},
+	}
+	findings := checkPortablePaths(manifest)
+	var joined string
+	for _, f := range findings {
+		joined += f.Detail + "\n"
+	}
+	for _, want := range []string{"/opt/analyzer/count", "metric size", "/root/cache"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("doctor did not flag %q in a metric:\n%s", want, joined)
+		}
+	}
+}
+
+// The HOME check was a raw substring test, wrong at both ends: it missed
+// ${HOME}/x and it flagged $HOMEBREW.
+func TestDoctorNamesTheHomeVariableAndNotItsLookalikes(t *testing.T) {
+	flags := func(value string) bool {
+		m := Manifest{
+			Vise:   ViseSettings{Version: 1},
+			Stubs:  StubSettings{TZ: "UTC", Lang: "C", Seed: "1729", Network: "declared-off"},
+			Probes: []Probe{{ID: "p", Run: value, Timeout: 30}},
+		}
+		return len(checkPortablePaths(m)) > 0
+	}
+	for _, home := range []string{"$HOME/go", "${HOME}/go", "cat $HOME"} {
+		if !flags(home) {
+			t.Errorf("%q references HOME and doctor passed it", home)
+		}
+	}
+	for _, notHome := range []string{"$HOMEBREW/bin", "$HOMEPAGE", "tool --home=x"} {
+		if flags(notHome) {
+			t.Errorf("%q does not reference HOME and doctor flagged it", notHome)
+		}
+	}
+}
+
+// doctor must stay bounded and must not read outside the checkout. checkBaseline
+// Committed read vise.lock with os.ReadFile, which follows a symlink and blocks
+// on a fifo — so a vise.lock that was a fifo could hang doctor, and one that was
+// a symlink would have doctor read its target off the repository. The gate loads
+// the same file through readRegularFile precisely to refuse both. A non-regular
+// lock is a finding, not a clean pass or a hang.
+func TestDoctorRefusesANonRegularLockfileInsteadOfHanging(t *testing.T) {
+	if _, err := exec.LookPath("mkfifo"); err != nil {
+		t.Skip("mkfifo unavailable")
+	}
+	root := testGitRepo(t)
+	lock := filepath.Join(root, "vise.lock")
+	if out, err := exec.Command("mkfifo", lock).CombinedOutput(); err != nil {
+		t.Skipf("cannot create a fifo here: %v\n%s", err, out)
+	}
+
+	// A bounded call: if checkBaselineCommitted read the fifo it would block
+	// here forever, so reaching the assertion at all is half the test.
+	done := make(chan []DoctorFinding, 1)
+	go func() { done <- checkBaselineCommitted(root) }()
+	select {
+	case findings := <-done:
+		var joined string
+		for _, f := range findings {
+			joined += f.Detail + "\n"
+		}
+		if !strings.Contains(joined, "not a regular file") {
+			t.Errorf("a fifo vise.lock was not reported as non-regular:\n%s", joined)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("checkBaselineCommitted blocked on a fifo vise.lock")
 	}
 }
