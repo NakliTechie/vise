@@ -1603,3 +1603,46 @@ func TestTheGateLineIsBoundedWhenManyProbesFail(t *testing.T) {
 		t.Errorf("the gate line does not say how many it left out:\n%s", line)
 	}
 }
+
+// A usage error is a complaint about the command line, not the repository, and
+// it answers fix_invocation now — not fix_probe, which used to send an agent to
+// repair a harness it had never touched over a typo. A real harness error still
+// answers fix_probe.
+func TestAUsageErrorAnswersFixInvocationNotFixProbe(t *testing.T) {
+	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf stable")
+
+	nextAction := func(args ...string) string {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		Run(append([]string{"--json"}, args...), root, &stdout, &stderr)
+		out := stdout.String()
+		if out == "" {
+			out = stderr.String()
+		}
+		var parsed struct {
+			Exit int `json:"exit"`
+			Next struct {
+				Action string `json:"action"`
+			} `json:"next"`
+		}
+		if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+			t.Fatalf("not JSON for %v: %v\n%s", args, err, out)
+		}
+		if parsed.Exit != vise.ExitHarness {
+			t.Errorf("%v: exit %d, want %d", args, parsed.Exit, vise.ExitHarness)
+		}
+		return parsed.Next.Action
+	}
+
+	for _, call := range [][]string{
+		{"no-such-command"},
+		{"run", "no-such-probe"},
+		{"status", "unexpected-arg"},
+		{"verify", "--quiet"},
+		{"record", "--preview", "--accept", "sha256:x"},
+	} {
+		if action := nextAction(call...); action != vise.NextFixInvocation {
+			t.Errorf("%v answered %q, want fix_invocation", call, action)
+		}
+	}
+}

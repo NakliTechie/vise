@@ -372,6 +372,7 @@ The agent may draft a probe into `.vise/proposals.toml` (same schema as `[[probe
 | 0 | green / ok | `proceed` | next step |
 | 1 | behavior differs | `revert` | revert, or ask an operator to accept a new baseline |
 | 2 | harness: broken probe, changed input, environment drift, no git, dirty-tree record, rerun limit | `fix_probe` or `human` | repair the harness or hand over; never touch the code under test |
+| 2 | usage: unknown command, mistyped probe id, inapplicable flag | `fix_invocation` | correct the command line and rerun; nothing in the repository is wrong |
 | 3 | indeterminate: flake | `quarantine_ack` | stop unless the harness policy tolerates indeterminate |
 | 4 | not initialized | `record_first` | an operator records a baseline |
 | 5 | metric regression under `no-regress` | `revert` | the change held behavior but worsened quality |

@@ -72,7 +72,7 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 		return refuseUnknownCommand(command, jsonMode, stdout, stderr)
 	}
 	if takesNoPositionalArguments[command] && len(args) != 1 {
-		return renderSimpleError(command, command+" accepts no positional arguments", jsonMode, stdout, stderr)
+		return renderUsageError(command, command+" accepts no positional arguments", jsonMode, stdout, stderr)
 	}
 	root, exit, resolved := resolveGitRoot(command, cwd, jsonMode, stdout, stderr)
 	if !resolved {
@@ -97,7 +97,7 @@ func Run(args []string, cwd string, stdout, stderr io.Writer) int {
 }
 
 func refuseUnknownCommand(command string, jsonMode bool, stdout, stderr io.Writer) int {
-	return renderSimpleError("vise", fmt.Sprintf("unknown command %q; run 'vise --help'", command), jsonMode, stdout, stderr)
+	return renderUsageError("vise", fmt.Sprintf("unknown command %q; run 'vise --help'", command), jsonMode, stdout, stderr)
 }
 
 // The commands resolveGitRoot answers without a repository. Their arity is
@@ -126,7 +126,7 @@ func dispatchCommand(args []string, root string, jsonMode bool, stdout, stderr i
 		return runProbe(args[1:], root, jsonMode, stdout, stderr)
 	case "doctor":
 		if len(args) != 1 {
-			return renderSimpleError("doctor", "doctor accepts no positional arguments", jsonMode, stdout, stderr)
+			return renderUsageError("doctor", "doctor accepts no positional arguments", jsonMode, stdout, stderr)
 		}
 		report := vise.Doctor(root)
 		if jsonMode {
@@ -136,7 +136,7 @@ func dispatchCommand(args []string, root string, jsonMode bool, stdout, stderr i
 		return vise.ExitOK
 	case "status":
 		if len(args) != 1 {
-			return renderSimpleError("status", "status accepts no positional arguments", jsonMode, stdout, stderr)
+			return renderUsageError("status", "status accepts no positional arguments", jsonMode, stdout, stderr)
 		}
 		report := vise.BuildStatus(root)
 		if jsonMode {
@@ -199,7 +199,7 @@ func answerHelpOrVersion(args []string, jsonMode bool, stdout, stderr io.Writer)
 	}
 	if args[0] == "version" || args[0] == "--version" {
 		if len(args) != 1 {
-			return renderSimpleError("version", "version accepts no arguments", jsonMode, stdout, stderr), true
+			return renderUsageError("version", "version accepts no arguments", jsonMode, stdout, stderr), true
 		}
 		if jsonMode {
 			// One source for the identity, so version and status cannot
@@ -260,7 +260,7 @@ func isKnownCommand(name string) bool {
 
 func runInit(args []string, root string, jsonMode bool, stdout, stderr io.Writer) int {
 	if len(args) != 0 {
-		return renderSimpleError("init", "init accepts no arguments", jsonMode, stdout, stderr)
+		return renderUsageError("init", "init accepts no arguments", jsonMode, stdout, stderr)
 	}
 	created, err := vise.InitRepository(root)
 	if err != nil {
@@ -350,14 +350,14 @@ func wireRecordConfirmation(opts *vise.RecordOptions, jsonMode bool, stdout io.W
 func runRecord(args []string, root string, jsonMode bool, stdout, stderr io.Writer) int {
 	flags, err := parseRecordFlags(args)
 	if err != nil {
-		return renderSimpleError("record", err.Error(), jsonMode, stdout, stderr)
+		return renderUsageError("record", err.Error(), jsonMode, stdout, stderr)
 	}
 	manifest, manifestBytes, err := vise.LoadManifest(root)
 	if err != nil {
 		return renderOperatorError("record", err.Error(), jsonMode, stdout, stderr)
 	}
 	if err := validateRecordFlags(flags); err != nil {
-		return renderSimpleError("record", err.Error(), jsonMode, stdout, stderr)
+		return renderUsageError("record", err.Error(), jsonMode, stdout, stderr)
 	}
 	opts := chooseRecordRoute(flags)
 	wireRecordConfirmation(&opts, jsonMode, stdout)
@@ -409,10 +409,10 @@ func runVerify(args []string, root string, jsonMode, gate bool, stdout, stderr i
 		if err == nil {
 			err = fmt.Errorf("%s accepts no positional arguments", name)
 		}
-		return renderSimpleError(name, err.Error(), jsonMode, stdout, stderr)
+		return renderUsageError(name, err.Error(), jsonMode, stdout, stderr)
 	}
 	if !gate && *quiet {
-		return renderSimpleError(name, "--quiet is available only for gate", jsonMode, stdout, stderr)
+		return renderUsageError(name, "--quiet is available only for gate", jsonMode, stdout, stderr)
 	}
 	manifest, manifestBytes, err := vise.LoadManifest(root)
 	if err != nil {
@@ -454,7 +454,7 @@ func runVerify(args []string, root string, jsonMode, gate bool, stdout, stderr i
 
 func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
-		return renderSimpleError("run", "usage: vise run <probe-id>", jsonMode, stdout, stderr)
+		return renderUsageError("run", "usage: vise run <probe-id>", jsonMode, stdout, stderr)
 	}
 	manifest, _, err := vise.LoadManifest(root)
 	if err != nil {
@@ -462,7 +462,7 @@ func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Write
 	}
 	probe, ok := manifest.Probe(args[0])
 	if !ok {
-		return renderSimpleError("run", fmt.Sprintf("unknown probe %q; %s", args[0], vise.DeclaredProbeList(manifest)), jsonMode, stdout, stderr)
+		return renderUsageError("run", fmt.Sprintf("unknown probe %q; %s", args[0], vise.DeclaredProbeList(manifest)), jsonMode, stdout, stderr)
 	}
 	runner := vise.Runner{Root: root, Manifest: manifest}
 	if !jsonMode {
@@ -512,6 +512,15 @@ func renderSimpleError(command, detail string, jsonMode bool, stdout, stderr io.
 // it, which is the same conflict fixed in two places out of three.
 func renderOperatorError(command, detail string, jsonMode bool, stdout, stderr io.Writer) int {
 	return renderFailure(command, vise.Failure{Class: "harness", Detail: detail, Operator: true}, jsonMode, stdout, stderr)
+}
+
+// renderUsageError is renderSimpleError for a complaint about the command line
+// — an unknown command, a mistyped probe id, a flag that does not apply. It
+// routes to next.action fix_invocation rather than fix_probe, so an agent that
+// mistyped is told to correct its command, not to repair a harness it never
+// touched.
+func renderUsageError(command, detail string, jsonMode bool, stdout, stderr io.Writer) int {
+	return renderFailure(command, vise.Failure{Class: "harness", Detail: detail, Usage: true}, jsonMode, stdout, stderr)
 }
 
 func renderFailure(command string, failure vise.Failure, jsonMode bool, stdout, stderr io.Writer) int {

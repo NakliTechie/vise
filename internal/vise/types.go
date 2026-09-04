@@ -41,10 +41,11 @@ const (
 	NextHuman         = "human"          // nothing the agent may decide; stop and report
 	NextRecordFirst   = "record_first"   // no baseline exists; an operator records one
 	NextQuarantineAck = "quarantine_ack" // an observation was unstable; stop unless policy tolerates indeterminate
+	NextFixInvocation = "fix_invocation" // the command line was malformed; correct it and rerun, nothing in the repo changed
 )
 
 // KnownNextActions is the vocabulary as data, for the tests that police it.
-var KnownNextActions = []string{NextProceed, NextRevert, NextFixProbe, NextHuman, NextRecordFirst, NextQuarantineAck}
+var KnownNextActions = []string{NextProceed, NextRevert, NextFixProbe, NextHuman, NextRecordFirst, NextQuarantineAck, NextFixInvocation}
 
 type Counts struct {
 	Declared int `json:"declared"`
@@ -79,6 +80,13 @@ type Failure struct {
 	// rule 1 forbids it from touching the file. Two correct instructions
 	// pointing opposite ways is the worst thing a contract can do.
 	Operator bool `json:"operator,omitempty"`
+	// Usage marks a failure that is a complaint about the command line — an
+	// unknown command, a mistyped probe id, a flag that does not apply —
+	// rather than anything about the repository. Without it a typo answered
+	// next.action fix_probe, sending an agent to repair a harness it had not
+	// broken; with it the answer is fix_invocation: correct the command and
+	// rerun, the repository is untouched.
+	Usage bool `json:"usage,omitempty"`
 }
 
 type MetricDelta struct {
@@ -180,13 +188,18 @@ func (o *Outcome) Finalize() {
 	case o.Counts.Harness > 0:
 		o.Exit = ExitHarness
 		o.Verdict = "indeterminate"
-		// human wins whenever any harness failure needs an operator, including
-		// when others do not: the agent cannot finish while one of them stands,
-		// so telling it to repair the rest would send it round a loop it cannot
-		// leave.
-		if o.hasOperatorFailure() {
+		switch {
+		case o.hasUsageFailure():
+			// A complaint about the command line, not the repository. The agent
+			// corrects what it typed; nothing in the checkout needs to change.
+			o.Next = Next{Action: NextFixInvocation, Detail: "the command was rejected; correct the command line and rerun — the repository is untouched"}
+		case o.hasOperatorFailure():
+			// human wins whenever any harness failure needs an operator,
+			// including when others do not: the agent cannot finish while one
+			// of them stands, so telling it to repair the rest would send it
+			// round a loop it cannot leave.
 			o.Next = Next{Action: NextHuman, Detail: "an operator must restore the harness; the repair is in a file an agent may not write"}
-		} else {
+		default:
 			o.Next = Next{Action: NextFixProbe, Detail: "repair the harness or restore its declared inputs, then rerun"}
 		}
 	case o.Counts.Flaky > 0:
@@ -243,6 +256,15 @@ func IntPtr(v int) *int { return &v }
 func (o Outcome) hasOperatorFailure() bool {
 	for _, failure := range o.Failures {
 		if failure.Operator {
+			return true
+		}
+	}
+	return false
+}
+
+func (o Outcome) hasUsageFailure() bool {
+	for _, failure := range o.Failures {
+		if failure.Usage {
 			return true
 		}
 	}

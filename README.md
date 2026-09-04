@@ -138,7 +138,7 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 |---|---|---|---|
 | 0 | green | `proceed` | next step |
 | 1 | behavior differs | `revert` | revert, or ask an operator to accept a new baseline |
-| 2 | harness broken | `fix_probe` / `human` | `fix_probe`: repair the probe your change broke. `human`: stop — the repair is in a file you may not write |
+| 2 | harness broken, or a usage error | `fix_probe` / `human` / `fix_invocation` | `fix_probe`: repair the probe your change broke. `human`: stop — the repair is in a file you may not write. `fix_invocation`: your command line was wrong — correct it and rerun, the repository is untouched |
 | 3 | flaky, indeterminate | `quarantine_ack` | stop unless your policy tolerates indeterminate |
 | 4 | no baseline | `record_first` | an operator records one |
 | 5 | metric regressed | `revert` | behavior held, quality did not |
