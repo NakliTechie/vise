@@ -109,9 +109,10 @@ that failed: usually a probe id, but `manifest`, `journal`, `vise.lock`,
 the human text.
 
 The closed vocabulary, in full, so you can write the switch: `proceed` ·
-`revert` · `fix_probe` · `human` · `record_first` · `quarantine_ack`. Six values
-and no seventh. If you ever receive one that is not on this list, that is a
-defect in vise — stop and report it rather than guessing what it meant.
+`revert` · `fix_probe` · `human` · `record_first` · `quarantine_ack` ·
+`fix_invocation`. Seven values and no eighth. If you ever receive one that is
+not on this list, that is a defect in vise — stop and report it rather than
+guessing what it meant.
 
 ## Exit 1 — you changed behavior
 
@@ -144,14 +145,18 @@ and your move is to stop and report. You should never be in a position where
 obeying `next.action` means breaking a rule; if you ever are, that is a defect
 in vise and worth saying so.
 
-**Exit 2 has two halves, and one field separates them.** The JSON failure
-carries `operator: true` when the repair lives in a file you may not write.
-Read that rather than matching on the message:
+**Exit 2 has three halves, and `next.action` separates them.** Branch on the
+action, and read `operator` only to distinguish the first two:
 
-| `next.action` | `operator` | whose repair | what you do |
+| `next.action` | `operator` | what happened | what you do |
 |---|---|---|---|
-| `fix_probe` | absent | yours | a probe command your change broke; fix your change |
-| `human` | `true` | the operator's | `vise.toml`, `vise.lock`, `.vise/blobs/`, the journal, or the recorded environment; stop and report |
+| `fix_probe` | absent | a probe command your change broke | fix your change |
+| `human` | `true` | the repair is in `vise.toml`, `vise.lock`, `.vise/blobs/`, the journal, or the recorded environment | stop and report |
+| `fix_invocation` | — | you ran a command vise did not accept — an unknown command, a mistyped probe id, a flag that does not apply | correct the command line and rerun; the repository is untouched, so change nothing in it |
+
+The `fix_invocation` case is the one that is not about the repository at all.
+The other two are the message table below; a usage error carries none of those
+messages, because nothing in the checkout is wrong.
 
 The message table below is for reading, not for branching. If you ever get
 `fix_probe` on a failure whose only repair is in one of those files, that is a
