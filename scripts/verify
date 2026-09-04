@@ -1,6 +1,25 @@
 #!/bin/sh
 set -eu
 
+# Every one of the ten features below has been shown to fail against a
+# deliberate break in the thing it watches, 2026-09-03. A harness feature that
+# cannot fail is worse than no feature: it reports green and buys confidence
+# nobody earned, and this project has already found about ninety tests in that
+# state.
+#
+#   orientation     status renamed its ready state
+#   readiness       doctor dropped the env-fingerprint check
+#   initialization  init changed its headline; init wrote the wrong ignore line
+#   baseline        record changed its headline; --preview reported zero passes
+#   failure-modes   the timeout message changed; the tracked-artifact refusal changed
+#   metrics         a metric moving the wrong way stopped being a regression
+#   review          the review stopped showing environment drift
+#   example         the capture bound shrank to 64 bytes
+#   dogfood         doctor changed its ready headline
+#   internal-checks any Go test failing, since it runs the suite
+#
+# Repeat it after adding a feature. The method is in GUIDE.md section 11.6.
+
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 VISE_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
 CHECKOUT_ID=$(printf '%s' "$VISE_ROOT" | cksum | awk '{print $1}')
