@@ -4,7 +4,7 @@ A walk through one vise campaign on the command line, with the real output of ev
 
 ## Requirements
 
-- Git, a POSIX `/bin/sh`, Go 1.25.8 or newer.
+- Git, a POSIX `/bin/sh`, Go 1.25.13 or newer.
 - Build from this checkout: `go install ./cmd/vise` (then `vise version` prints `vise 0.3.0-dev`).
 
 ## The loop in one screen
@@ -544,7 +544,7 @@ caller — and an agent is a different caller:
 [[probe]]
 id = "cli-help"
 run = "go run ./cmd/vise --help"
-env = { GOTOOLCHAIN = "go1.25.8", GOCACHE = "/path/to/cache", GOMODCACHE = "/path/to/mod" }
+env = { GOTOOLCHAIN = "go1.25.13", GOCACHE = "/path/to/cache", GOMODCACHE = "/path/to/mod" }
 ```
 
 Without those pins the probe reached for a toolchain download, and inside the
@@ -569,7 +569,7 @@ that does. Fingerprint the same invocation:
 
 ```toml
 [env]
-fingerprint = ["GOTOOLCHAIN=go1.25.8 go version"]
+fingerprint = ["GOTOOLCHAIN=go1.25.13 go version"]
 ```
 
 **Read the review diff before you freeze.** With the toolchain unresolvable, a
@@ -578,7 +578,7 @@ complaint — a green gate over a build that does not build. The two-pass
 self-test cannot tell a deterministic failure from a deterministic success;
 only you can. `record --preview` and `--i-reviewed-the-diff` print exactly what
 is about to be frozen, and the first line of that diff said
-`go: go.mod requires go >= 1.25.8`.
+`go: go.mod requires go >= 1.25.13`.
 
 **Run a cold gate check before you hand the repository over.** The acceptance
 test for "this repository is ready for an agent" is one command, run from an

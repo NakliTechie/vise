@@ -18,7 +18,7 @@ network = "declared-off"
 # first on the caller's PATH. Plain `go version` reports what automatic
 # switching selected, which is a different fact.
 [env]
-fingerprint = ["GOTOOLCHAIN=go1.25.8 go version"]
+fingerprint = ["GOTOOLCHAIN=go1.25.13 go version"]
 
 # The probe judges the program's stdout. The build that produces it runs through
 # a wrapper that is quiet on success and loud on failure, because an agent

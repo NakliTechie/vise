@@ -16,7 +16,7 @@
 set -eu
 
 BIN="$VISE_TMP/app"
-if ! GOCACHE="$PWD/.gocache" GOFLAGS=-mod=vendor GOTOOLCHAIN=go1.25.8 \
+if ! GOCACHE="$PWD/.gocache" GOFLAGS=-mod=vendor GOTOOLCHAIN=go1.25.13 \
      go build -o "$BIN" ./cmd/app 2>"$VISE_TMP/build.err"; then
   # Print only the compiler's own diagnostics. A build failure is deterministic
   # — the code either compiles or it does not — but the toolchain's other
