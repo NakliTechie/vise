@@ -16,7 +16,7 @@ import (
 	"github.com/NakliTechie/vise/internal/vise"
 )
 
-const Version = "0.3.0-dev"
+const Version = "0.3.0"
 
 func Main(args []string, stdout, stderr io.Writer) int {
 	stopProbeOnSignal()
