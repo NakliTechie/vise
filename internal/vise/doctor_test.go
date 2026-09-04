@@ -782,3 +782,40 @@ func TestTheNoBaselineRemedyAccountsForADirtyTree(t *testing.T) {
 		t.Errorf("the remedy ignores the dirty tree record refuses: %q", remedy)
 	}
 }
+
+// Round-four findings from the doctor spar, the clearest four.
+func TestDoctorRoundFourFixes(t *testing.T) {
+	t.Run("an empty committed vise.lock is a corrupt baseline", func(t *testing.T) {
+		root := testGitRepo(t)
+		writeTestFile(t, root, "vise.lock", "")
+		var found bool
+		for _, f := range checkBaselineCommitted(root) {
+			if strings.Contains(f.Detail, "empty") && strings.Contains(f.Detail, "cannot load") {
+				found = true
+				if !strings.Contains(f.Remedy, "remove the corrupt") {
+					t.Errorf("remedy re-records in place, which record refuses: %q", f.Remedy)
+				}
+			}
+		}
+		if !found {
+			t.Error("an empty vise.lock was reported clean")
+		}
+	})
+
+	t.Run("a whitespace-only AGENTS.md is not written rules", func(t *testing.T) {
+		root := testGitRepo(t)
+		writeTestFile(t, root, "AGENTS.md", "   \n\t\n")
+		findings := checkAgentContract(root)
+		if len(findings) == 0 {
+			t.Error("a whitespace-only AGENTS.md passed as written rules")
+		}
+	})
+
+	t.Run("a git failure checking ignores is reported distinctly", func(t *testing.T) {
+		notARepo := t.TempDir()
+		findings := checkLocalStateIgnored(notARepo)
+		if len(findings) == 0 || !strings.Contains(findings[0].Detail, "could not check") {
+			t.Errorf("a git failure was reported as unignored state: %#v", findings)
+		}
+	})
+}

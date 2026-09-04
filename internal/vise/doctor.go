@@ -3,6 +3,7 @@ package vise
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -327,6 +328,21 @@ func mentionsProbeScratch(path string) bool {
 	return bytes.Contains(data, []byte("VISE_TMP"))
 }
 
+// contractHasContent reports whether AGENTS.md holds anything but whitespace. A
+// file of only spaces and newlines has a non-zero size and tells an agent
+// nothing, which is the one thing this check exists to prevent. Bounded: the
+// contract is small and the read is capped.
+func contractHasContent(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		// Unreadable is handled by the caller's error branch; treat an
+		// unreadable file as content here so this helper does not turn a
+		// permission error into "empty".
+		return true
+	}
+	return len(bytes.TrimSpace(data)) > 0
+}
+
 // checkBaselineCommitted: a baseline that lives only on the operator's disk
 // cannot judge anything in a fresh clone, which is where an agent and CI both
 // work.
@@ -406,11 +422,17 @@ func checkBaselineCommitted(root string) []DoctorFinding {
 		// Only report it when there is one to be corrupt: a missing lock is the
 		// finding above, and an unparseable committed side with no working-tree
 		// lock is not this check's concern.
-		if lockErr == nil && len(current) > 0 {
+		if lockErr == nil {
+			detail := "vise.lock is present but not valid JSON, so the gate cannot load this baseline"
+			if len(current) == 0 {
+				detail = "vise.lock is present but empty, so the gate cannot load this baseline"
+			}
 			findings = append(findings, DoctorFinding{
 				Check:  "baseline-committed",
-				Detail: "vise.lock is present but not valid JSON, so the gate cannot load this baseline",
-				Remedy: "re-record the baseline; the vise.lock here is corrupt",
+				Detail: detail,
+				// record refuses an existing lock it cannot load, so re-record
+				// in place fails; the corrupt file has to go first.
+				Remedy: "remove the corrupt vise.lock, then run vise record and commit the new one",
 			})
 		}
 		return findings
@@ -435,7 +457,7 @@ func checkBaselineCommitted(root string) []DoctorFinding {
 		findings = append(findings, DoctorFinding{
 			Check:  "baseline-committed",
 			Detail: fmt.Sprintf("%d of %d hashes the lockfile references are malformed, so the gate cannot load this baseline", malformed, len(referenced)),
-			Remedy: "re-record the baseline; the lockfile it references is corrupt",
+			Remedy: "remove the corrupt vise.lock, then run vise record and commit the new one",
 		})
 	}
 	if missing > 0 {
@@ -479,9 +501,24 @@ func checkLocalStateIgnored(root string) []DoctorFinding {
 	for _, path := range []string{".vise/journal.jsonl", ".vise/run.lock", ".vise/tmp/"} {
 		cmd := exec.Command("git", "check-ignore", "-q", "--no-index", path)
 		cmd.Dir = root
-		if err := cmd.Run(); err != nil {
-			missing = append(missing, path)
+		err := cmd.Run()
+		if err == nil {
+			continue // git says this path is ignored
 		}
+		// check-ignore exits 1 when the path is not ignored and 128 on a real
+		// failure (not a repo, broken git). Only exit 1 is the finding; a git
+		// failure reported as "not ignored, run vise init" sends the operator
+		// to fix the wrong thing, so it is surfaced distinctly.
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			missing = append(missing, path)
+			continue
+		}
+		return []DoctorFinding{{
+			Check:  "local-state-ignored",
+			Detail: "could not check whether git ignores vise's state (" + path + "): " + err.Error(),
+			Remedy: "resolve the git error above, then run vise doctor again",
+		}}
 	}
 	if len(missing) == 0 {
 		return nil
@@ -499,9 +536,10 @@ func checkAgentContract(root string) []DoctorFinding {
 	// A regular file with something in it. An empty AGENTS.md, or a directory
 	// by that name, satisfied a bare Stat while telling an agent nothing —
 	// and the whole value of the check is that somebody wrote the rules down.
-	info, err := os.Lstat(filepath.Join(root, "AGENTS.md"))
+	contractPath := filepath.Join(root, "AGENTS.md")
+	info, err := os.Lstat(contractPath)
 	switch {
-	case err == nil && info.Mode().IsRegular() && info.Size() > 0:
+	case err == nil && info.Mode().IsRegular() && info.Size() > 0 && contractHasContent(contractPath):
 		return nil
 	case err == nil:
 		// "run vise init" is a dead end here: init will not overwrite a file
