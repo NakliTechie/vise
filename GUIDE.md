@@ -461,6 +461,12 @@ next: human — 2 finding(s) an operator should resolve before an agent works he
 It runs no probe, writes nothing, and exits 0 whatever it finds. A clean report is not a
 promise that the gate will pass in a sandbox — only the cold gate below proves
 that — but every finding it does raise would have shown up there as a mystery.
+doctor is a best-effort static predictor: it fails safe (an inspection it cannot
+complete becomes a finding, never a silent pass) and a miss costs a surprise
+rather than a wrong verdict, because the gate still refuses the bad state. Read a
+clean doctor as "this repository clears the common setup traps", not as a
+guarantee — the heuristics that judge a path by its shape or spot a wrapper by a
+`$VISE_TMP` mention have edges the gate does not (SPEC §4).
 
 **Ask the agent what looks wrong, not only to change things.** A refactor
 forces a careful read of code nobody has re-read in weeks, and the agent

@@ -43,6 +43,28 @@ type DoctorReport struct {
 // renaming the emitted name left it checking the old one. The registry is the
 // chain — Doctor iterates it — and a test asserts every finding carries the
 // name it was registered under.
+// Doctor is an advisory, best-effort predictor, held to a lower bar than the
+// gate on purpose. It reads the manifest and the checkout without running a
+// probe, so it cannot know everything the gate learns by running one, and it is
+// not trying to. Two rules bound what a maintainer may rely on:
+//
+//   - It fails safe. Where a check cannot answer — a git command that errors, a
+//     file it cannot read — it reports the uncertainty as a finding, never a
+//     clean pass. A doctor that says ready means "nothing I check is wrong",
+//     not "nothing is wrong".
+//   - A miss costs a surprise, not a wrong verdict. The worst a false clean
+//     does is let an operator meet a gate failure unwarned; the gate still
+//     refuses the bad state.
+//
+// The known limits are the ones a static token scan inherits, and closing them
+// completely is a non-goal because the gate is the real check: portability is
+// judged by the shape of a token, so a path in an unusual place can be missed
+// and shell syntax that looks like a path can be over-flagged; an undeclared
+// wrapper is found by the heuristic that a file names $VISE_TMP, which a
+// coincidence can trip and an unusual wrapper can evade. Four spar rounds by
+// three model families drove the reachable cases to ground; the tail that
+// remains is prediction error, caught by the gate when the probe runs.
+
 type doctorCheck struct {
 	Name string
 	// NeedsManifest is false for a check that inspects only the checkout on
