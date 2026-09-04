@@ -584,3 +584,55 @@ func TestDoctorRefusesANonRegularLockfileInsteadOfHanging(t *testing.T) {
 		t.Fatal("checkBaselineCommitted blocked on a fifo vise.lock")
 	}
 }
+
+// A git failure inspecting the repository is not a clean pass — it is doctor
+// unable to answer, and reporting ready would tell an operator the repository
+// is fit when it is only uninspected. checkTrackedArtifacts and checkSnapshotCost
+// both swallowed a git error into nil; a directory that is not a git repository
+// makes those git calls fail.
+func TestDoctorReportsAGitInspectionFailureInsteadOfPassing(t *testing.T) {
+	notARepo := t.TempDir() // deliberately no git init
+
+	manifest := Manifest{Probes: []Probe{{ID: "p", Run: "printf ok", Timeout: 30, Files: []string{"out.txt"}}}}
+	artifacts := checkTrackedArtifacts(notARepo, manifest)
+	if len(artifacts) == 0 || !strings.Contains(artifacts[0].Detail, "could not inspect") {
+		t.Errorf("a git failure inspecting artifacts was reported clean: %#v", artifacts)
+	}
+
+	cost := checkSnapshotCost(notARepo)
+	if len(cost) == 0 || !strings.Contains(cost[0].Detail, "could not list") {
+		t.Errorf("a git failure sizing the snapshot was reported clean: %#v", cost)
+	}
+}
+
+// The no-lockfile remedy said "run vise record", which record refuses on a
+// repository with no commits (resolveHead). On a fresh git init the bare remedy
+// fails and the finding persists, so it must name the commit step.
+func TestTheNoBaselineRemedyIsRunnableOnAFreshRepo(t *testing.T) {
+	fresh := t.TempDir()
+	testGit(t, fresh, "init", "-q")
+	testGit(t, fresh, "config", "user.email", "doctor-tests@example.invalid")
+	testGit(t, fresh, "config", "user.name", "doctor tests")
+
+	var found *DoctorFinding
+	for i := range checkBaselineCommitted(fresh) {
+		f := checkBaselineCommitted(fresh)[i]
+		if f.Check == "baseline-committed" {
+			found = &f
+		}
+	}
+	if found == nil {
+		t.Fatal("no baseline finding on a fresh repo")
+	}
+	if !strings.Contains(found.Remedy, "commit the harness first") {
+		t.Errorf("the remedy does not account for a no-commits repo: %q", found.Remedy)
+	}
+
+	// And a repository with a commit still gets the plain remedy.
+	withCommit := testGitRepo(t)
+	for _, f := range checkBaselineCommitted(withCommit) {
+		if f.Check == "baseline-committed" && strings.Contains(f.Remedy, "commit the harness first") {
+			t.Errorf("a repo with commits got the no-commits remedy: %q", f.Remedy)
+		}
+	}
+}

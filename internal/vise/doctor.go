@@ -298,10 +298,18 @@ func mentionsProbeScratch(path string) bool {
 // work.
 func checkBaselineCommitted(root string) []DoctorFinding {
 	if _, err := os.Stat(filepath.Join(root, "vise.lock")); err != nil {
+		// "run vise record" is only runnable once there is a commit to record
+		// against — record refuses a repository with no commits (resolveHead).
+		// On a fresh git init the bare remedy fails and the finding persists,
+		// so name the missing step.
+		remedy := "run vise record, then commit vise.lock and .vise/blobs/"
+		if !GitHasCommits(root) {
+			remedy = "commit the harness first (a baseline freezes behavior at a commit), then run vise record and commit vise.lock and .vise/blobs/"
+		}
 		return []DoctorFinding{{
 			Check:  "baseline-committed",
 			Detail: "no vise.lock exists, so there is nothing to gate against",
-			Remedy: "run vise record, then commit vise.lock and .vise/blobs/",
+			Remedy: remedy,
 		}}
 	}
 	// Against HEAD, and against the bytes that are actually here. `git
@@ -451,7 +459,14 @@ const (
 func checkSnapshotCost(root string) []DoctorFinding {
 	paths, err := gitUntrackedPaths(root)
 	if err != nil {
-		return nil
+		// Reported, not swallowed: a git failure listing the untracked tree is
+		// doctor unable to size the snapshot, which is a thing to say rather
+		// than a clean pass.
+		return []DoctorFinding{{
+			Check:  "snapshot-cost",
+			Detail: "could not list the untracked tree to size the work-tree snapshot: " + err.Error(),
+			Remedy: "resolve the git error above, then run vise doctor again",
+		}}
 	}
 	var bytes int64
 	counted := 0
@@ -470,7 +485,7 @@ func checkSnapshotCost(root string) []DoctorFinding {
 	return []DoctorFinding{{
 		Check:  "snapshot-cost",
 		Detail: fmt.Sprintf("%d files totalling %d bytes are untracked and unignored; vise hashes all of them before and after every probe run", counted, bytes),
-		Remedy: "add the generated ones to .gitignore, or commit the ones that belong in the repository; an ignored path is also the only place a probe may write",
+		Remedy: "add the generated ones to .gitignore, or commit the ones that belong in the repository; besides its declared files and $VISE_TMP, an ignored path is where a probe may write without tripping the work-tree check",
 	}}
 }
 
@@ -492,7 +507,17 @@ func checkTrackedArtifacts(root string, manifest Manifest) []DoctorFinding {
 		return nil
 	}
 	tracked, err := GitTrackedPaths(root, declared)
-	if err != nil || len(tracked) == 0 {
+	if err != nil {
+		// A git failure inspecting declared artifacts is not a clean pass: it
+		// is doctor unable to answer the question, and reporting ready would
+		// tell an operator the repository is fit when it is only uninspected.
+		return []DoctorFinding{{
+			Check:  "tracked-artifacts",
+			Detail: "could not inspect declared artifacts: " + err.Error(),
+			Remedy: "resolve the git error above, then run vise doctor again",
+		}}
+	}
+	if len(tracked) == 0 {
 		return nil
 	}
 	sort.Strings(tracked)
