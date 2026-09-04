@@ -44,18 +44,24 @@ type DoctorReport struct {
 // name it was registered under.
 type doctorCheck struct {
 	Name string
-	Run  func(root string, manifest Manifest) []DoctorFinding
+	// NeedsManifest is false for a check that inspects only the checkout on
+	// disk. Those four still run when vise.toml will not parse, so a manifest
+	// error does not hide an uncommitted baseline, unignored state, a missing
+	// contract, or an oversized tree — findings the operator would otherwise
+	// discover only after fixing the manifest and running doctor a second time.
+	NeedsManifest bool
+	Run           func(root string, manifest Manifest) []DoctorFinding
 }
 
 var doctorRegistry = []doctorCheck{
-	{"env-fingerprint", func(_ string, m Manifest) []DoctorFinding { return checkFingerprint(m) }},
-	{"portable-paths", func(_ string, m Manifest) []DoctorFinding { return checkPortablePaths(m) }},
-	{"declared-inputs", checkUndeclaredScripts},
-	{"baseline-committed", func(root string, _ Manifest) []DoctorFinding { return checkBaselineCommitted(root) }},
-	{"local-state-ignored", func(root string, _ Manifest) []DoctorFinding { return checkLocalStateIgnored(root) }},
-	{"agent-contract", func(root string, _ Manifest) []DoctorFinding { return checkAgentContract(root) }},
-	{"tracked-artifacts", checkTrackedArtifacts},
-	{"snapshot-cost", func(root string, _ Manifest) []DoctorFinding { return checkSnapshotCost(root) }},
+	{"env-fingerprint", true, func(_ string, m Manifest) []DoctorFinding { return checkFingerprint(m) }},
+	{"portable-paths", true, func(_ string, m Manifest) []DoctorFinding { return checkPortablePaths(m) }},
+	{"declared-inputs", true, checkUndeclaredScripts},
+	{"baseline-committed", false, func(root string, _ Manifest) []DoctorFinding { return checkBaselineCommitted(root) }},
+	{"local-state-ignored", false, func(root string, _ Manifest) []DoctorFinding { return checkLocalStateIgnored(root) }},
+	{"agent-contract", false, func(root string, _ Manifest) []DoctorFinding { return checkAgentContract(root) }},
+	{"tracked-artifacts", true, checkTrackedArtifacts},
+	{"snapshot-cost", false, func(root string, _ Manifest) []DoctorFinding { return checkSnapshotCost(root) }},
 }
 
 // DoctorChecks is every check name Doctor can emit: the registry, plus the two
@@ -82,6 +88,15 @@ func Doctor(root string) DoctorReport {
 			Detail: err.Error(),
 			Remedy: "fix vise.toml, or run vise init to write a starter manifest",
 		})
+		// The manifest is unusable, so the checks that read it cannot run — but
+		// the four that inspect only the checkout still can, and hiding them
+		// behind the parse error meant a second wave of findings appeared only
+		// after the operator fixed the manifest. Report everything visible now.
+		for _, check := range doctorRegistry {
+			if !check.NeedsManifest {
+				report.Findings = append(report.Findings, check.Run(root, Manifest{})...)
+			}
+		}
 		report.finish()
 		return report
 	}
@@ -428,10 +443,13 @@ func checkAgentContract(root string) []DoctorFinding {
 	case err == nil && info.Mode().IsRegular() && info.Size() > 0:
 		return nil
 	case err == nil:
+		// "run vise init" is a dead end here: init will not overwrite a file
+		// that is already there, so on an empty AGENTS.md it reports nothing to
+		// write and leaves the empty file. The operator has to remove it first.
 		return []DoctorFinding{{
 			Check:  "agent-contract",
 			Detail: "AGENTS.md exists but is empty or is not a regular file, so an agent working here has no written rules",
-			Remedy: "replace it with the agent contract; vise init writes one, and will not overwrite a real file",
+			Remedy: "remove the empty AGENTS.md and run vise init, or copy the agent contract into it by hand; init will not overwrite a file that is already there",
 		}}
 	}
 	return []DoctorFinding{{

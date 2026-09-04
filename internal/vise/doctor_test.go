@@ -636,3 +636,58 @@ func TestTheNoBaselineRemedyIsRunnableOnAFreshRepo(t *testing.T) {
 		}
 	}
 }
+
+// The remedy for an empty AGENTS.md said "run vise init", but init will not
+// overwrite a file that is already there, so it reports nothing to write and
+// leaves the empty file. Following the remedy fixed nothing. The remedy names
+// the removal step now.
+func TestTheEmptyContractRemedyIsRunnable(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "AGENTS.md", "")
+
+	var found *DoctorFinding
+	for _, f := range checkAgentContract(root) {
+		if f.Check == "agent-contract" {
+			found = &f
+		}
+	}
+	if found == nil {
+		t.Fatal("an empty AGENTS.md was not flagged")
+	}
+	// The old remedy said init writes one; it does not, so the remedy must not
+	// promise that.
+	if !strings.Contains(found.Remedy, "remove the empty") {
+		t.Errorf("the remedy does not name the removal init requires: %q", found.Remedy)
+	}
+}
+
+// A manifest that will not parse hid the four checks that inspect only the
+// checkout, so an uncommitted baseline, unignored state, a missing contract, or
+// an oversized tree surfaced only after the manifest was fixed and doctor run
+// again. Those four run now, beside the manifest finding.
+func TestAManifestParseErrorDoesNotHideTheCheckoutChecks(t *testing.T) {
+	root := testGitRepo(t)
+	// A manifest that will not parse, and a repository otherwise unprepared: no
+	// AGENTS.md, no .gitignore for vise state, no baseline.
+	writeTestFile(t, root, "vise.toml", "this is not valid toml = = =\n")
+
+	report := Doctor(root)
+	checks := map[string]bool{}
+	for _, f := range report.Findings {
+		checks[f.Check] = true
+	}
+	if !checks["manifest"] {
+		t.Fatal("a parse error did not produce a manifest finding")
+	}
+	for _, want := range []string{"baseline-committed", "agent-contract"} {
+		if !checks[want] {
+			t.Errorf("the %s finding was hidden behind the manifest parse error", want)
+		}
+	}
+	// The manifest-reading checks must NOT run — they have no manifest to read.
+	for _, mustNot := range []string{"portable-paths", "env-fingerprint", "declared-inputs"} {
+		if checks[mustNot] {
+			t.Errorf("%s ran without a parsed manifest", mustNot)
+		}
+	}
+}
