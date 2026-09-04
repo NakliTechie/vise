@@ -52,20 +52,24 @@ func FirstDiff(label string, expected, got []byte) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "--- expected/%s\n+++ got/%s\n@@ first divergence line %d @@\n", label, label, index+1)
-	for i := start; i < index; i++ {
-		fmt.Fprintf(&b, " %s\n", clipLine(expectedLines[i], 0))
-	}
-	for i := index; i < endExpected; i++ {
-		fmt.Fprintf(&b, "-%s\n", clipLine(expectedLines[i], columnFor(i, index, column)))
-	}
-	for i := index; i < endGot; i++ {
-		fmt.Fprintf(&b, "+%s\n", clipLine(gotLines[i], columnFor(i, index, column)))
-	}
+	writeWindow(&b, ' ', expectedLines, start, index, index, column)
+	writeWindow(&b, '-', expectedLines, index, endExpected, index, column)
+	writeWindow(&b, '+', gotLines, index, endGot, index, column)
 	remaining := max(len(expectedLines)-endExpected, len(gotLines)-endGot)
 	if remaining > 0 {
 		fmt.Fprintf(&b, "… %d later line(s) omitted\n", remaining)
 	}
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// writeWindow renders one side of the divergence window: each line in
+// [from, to) prefixed with sign and clipped so no single line grows without
+// bound. The diverging line (index) is clipped around the differing column;
+// every other line is clipped from its start.
+func writeWindow(b *strings.Builder, sign byte, lines []string, from, to, index, column int) {
+	for i := from; i < to; i++ {
+		fmt.Fprintf(b, "%c%s\n", sign, clipLine(lines[i], columnFor(i, index, column)))
+	}
 }
 
 // columnFor centres the window on the differing column for the diverging line

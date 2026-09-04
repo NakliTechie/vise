@@ -12,39 +12,25 @@ import (
 
 func renderOutcome(w io.Writer, outcome vise.Outcome, label string) {
 	fmt.Fprintf(w, "%s %s%s — %d/%d\n", label, strings.ToUpper(outcome.Verdict), outcome.ClassLabel(), outcome.Counts.Pass, outcome.Counts.Declared)
-	ids := make([]string, 0, len(outcome.Failures))
-	for id := range outcome.Failures {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
+	for _, id := range sortedKeys(outcome.Failures) {
 		failure := outcome.Failures[id]
 		fmt.Fprintf(w, "%s [%s] — %s\n", id, failure.Class, terminalSafe(failure.Detail, false))
 		if failure.Diff != "" {
 			fmt.Fprintln(w, terminalSafe(failure.Diff, true))
 		}
 	}
-	metricIDs := make([]string, 0, len(outcome.Metrics))
-	for id := range outcome.Metrics {
-		metricIDs = append(metricIDs, id)
-	}
-	sort.Strings(metricIDs)
-	for _, id := range metricIDs {
+	for _, id := range sortedKeys(outcome.Metrics) {
 		metric := outcome.Metrics[id]
 		fmt.Fprintf(w, "metric %s: %g -> %g (%+g)\n", id, metric.Base, metric.Now, metric.Delta)
 	}
 	if outcome.Lock != "" {
 		fmt.Fprintln(w, "lock: "+outcome.Lock)
 	}
-	fmt.Fprintf(w, "next: %s — %s\n", outcome.Next.Action, terminalSafe(outcome.Next.Detail, false))
+	renderNextAction(w, outcome.Next)
 }
 
 func renderGate(w io.Writer, outcome vise.Outcome, quiet bool) {
-	ids := make([]string, 0, len(outcome.Failures))
-	for id := range outcome.Failures {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
+	ids := sortedKeys(outcome.Failures)
 	detail := ""
 	if len(ids) > 0 {
 		detail = ": " + strings.Join(ids, ", ")
@@ -57,7 +43,7 @@ func renderGate(w io.Writer, outcome vise.Outcome, quiet bool) {
 		fmt.Fprintln(w, "lock: "+outcome.Lock)
 	}
 	if outcome.Exit != vise.ExitOK {
-		fmt.Fprintf(w, "next: %s — %s\n", outcome.Next.Action, terminalSafe(outcome.Next.Detail, false))
+		renderNextAction(w, outcome.Next)
 	}
 }
 
@@ -76,7 +62,7 @@ func renderStatus(w io.Writer, report vise.StatusReport) {
 	renderStatusDrift(w, report.Lock.Drift)
 	renderStatusProposals(w, report.PendingProposals, report.ProposalError)
 	renderStatusJournalTail(w, report.Journal, report.JournalUnreadable)
-	renderStatusNextAction(w, report.Next)
+	renderNextAction(w, report.Next)
 }
 
 func renderStatusState(w io.Writer, state string) {
@@ -180,11 +166,7 @@ func renderStatusMetrics(metrics map[string]float64) string {
 	if len(metrics) == 0 {
 		return ""
 	}
-	metricIDs := make([]string, 0, len(metrics))
-	for id := range metrics {
-		metricIDs = append(metricIDs, id)
-	}
-	sort.Strings(metricIDs)
+	metricIDs := sortedKeys(metrics)
 	pairs := make([]string, 0, len(metricIDs))
 	for _, id := range metricIDs {
 		pairs = append(pairs, fmt.Sprintf("%s=%g", id, metrics[id]))
@@ -192,7 +174,21 @@ func renderStatusMetrics(metrics map[string]float64) string {
 	return "metrics=" + strings.Join(pairs, ",")
 }
 
-func renderStatusNextAction(w io.Writer, next vise.Next) {
+// sortedKeys returns the keys of m in ascending order, so every rendering that
+// walks a map emits its rows in a stable, reproducible order.
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// renderNextAction prints the single next-action line shared by the outcome,
+// gate, and status renderings. renderDoctor keeps its own line: it escapes the
+// action as well, because a doctor finding can carry bytes from vise.toml.
+func renderNextAction(w io.Writer, next vise.Next) {
 	fmt.Fprintf(w, "next: %s — %s\n", next.Action, terminalSafe(next.Detail, false))
 }
 
