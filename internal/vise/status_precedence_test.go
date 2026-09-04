@@ -170,3 +170,57 @@ func TestStatusDistinguishesAnUnreadableJournalFromAnEmptyOne(t *testing.T) {
 		t.Fatalf("state = %q, next = %#v", report.State, report.Next)
 	}
 }
+
+// A drifted declared input beside an exhausted rerun budget must report
+// rerun-refused, not baseline-drift. gate checks the rerun budget before it
+// judges anything and refuses without ever reporting the drift, so status
+// telling the agent fix_probe — "restore what you moved, then rerun" — for a
+// rerun that is refused is the opposite instruction from the one the next gate
+// gives. Both must say human.
+func TestRerunRefusalOutranksBaselineDrift(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\nhelper.sh\n.n\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n\n[[probe]]\nid = \"p\"\nrun = \"sh helper.sh\"\ntimeout = 30\ndeps = [\"dep.txt\"]\n")
+	writeTestFile(t, root, "dep.txt", "original\n")
+	writeTestFile(t, root, "helper.sh", "cat dep.txt; printf steady\n")
+	testGit(t, root, "add", "vise.toml", ".gitignore", "dep.txt")
+	testGit(t, root, "commit", "-qm", "harness")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+
+	// Two journaled flakes at this commit and lock exhaust the budget, so the
+	// next gate is refused. Verify journals nothing on its own — that is the
+	// CLI layer — so the events go in directly, keyed to the commit and the
+	// lock hash a clean status reports.
+	commit, err := GitHead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockHash := BuildStatus(root).Lock.Hash
+	for i := 0; i < 2; i++ {
+		if err := AppendJournal(root, JournalEvent{Event: "flake", Commit: commit, Lock: lockHash, Flaky: []string{"p"}, Probes: []string{"p"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// And drift the declared input, uncommitted so the commit — and the budget —
+	// is unchanged.
+	writeTestFile(t, root, "dep.txt", "changed\n")
+
+	report := BuildStatus(root)
+	if report.State != "rerun-refused" {
+		t.Errorf("state %q, want rerun-refused — the rerun the drift message names is refused", report.State)
+	}
+	if report.Next.Action != NextHuman {
+		t.Errorf("next %q, want human", report.Next.Action)
+	}
+
+	gate := Verify(root, manifest, manifestBytes, VerifyOptions{EnforceRerunLimit: true}).Outcome.Next.Action
+	if report.Next.Action != gate {
+		t.Errorf("status says %q and gate says %q", report.Next.Action, gate)
+	}
+}

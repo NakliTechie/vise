@@ -242,9 +242,15 @@ func answerHelpOrVersion(args []string, jsonMode bool, stdout, stderr io.Writer)
 	return vise.ExitOK, false
 }
 
-// readOnlyCommands take no state lock. Each one reports a situation without
-// changing it, which is only true if it also creates nothing — see the tests
-// that assert a repository which has never run vise is unchanged by asking.
+// readOnlyCommands take no state lock and write no vise state: no lockfile, no
+// blob, no journal entry. A repository that has never run vise is unchanged by
+// asking, which the tests assert. The one thing status does touch is a scratch
+// directory under .vise/, and only once a baseline exists: to report live
+// environment drift it runs the manifest's [env] fingerprint commands, and
+// those need somewhere to run. That directory lives inside a .vise/ the
+// baseline already created, so "never run vise, unchanged" still holds — but
+// "creates nothing, ever" would not, and doctor differs here: it runs no
+// command at all.
 var readOnlyCommands = map[string]bool{"status": true, "doctor": true}
 
 func isKnownCommand(name string) bool {

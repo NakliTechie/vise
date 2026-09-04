@@ -251,7 +251,17 @@ func buildStaticDrift(root string, manifest Manifest, lock Lockfile, report *Sta
 }
 
 func buildRerunRefusal(root string, manifest Manifest, report *StatusReport) {
-	if report.State != "ready" {
+	// Rerun-refusal outranks the drift states, because gate checks the rerun
+	// budget before it judges anything (verify.go, right after loading state)
+	// and refuses without ever reporting the drift. status computed drift first
+	// and let it win, so a repository with two flakes and a drifted declared
+	// input told the agent fix_probe — "restore what you moved, then rerun" —
+	// while the rerun it named was refused. Both drift states yield here; a
+	// harness-error (broken lock, unreadable HEAD, unreadable journal) does not,
+	// because gate fails on those before it reaches the rerun check.
+	switch report.State {
+	case "ready", "baseline-drift", "environment-drift":
+	default:
 		return
 	}
 	refused, detail, headErr := nextGateRefused(root, manifest, report.Lock.Hash)
