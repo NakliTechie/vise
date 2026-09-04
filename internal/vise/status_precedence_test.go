@@ -224,3 +224,50 @@ func TestRerunRefusalOutranksBaselineDrift(t *testing.T) {
 		t.Errorf("status says %q and gate says %q", report.Next.Action, gate)
 	}
 }
+
+// An unreadable journal with no baseline is not "repair the journal": gate
+// never reads the journal without a baseline (a missing lock returns
+// record_first before the journal is touched), so status overriding the
+// no-baseline state to harness-error told the agent the opposite of the next
+// gate. The journal is still flagged, informationally.
+func TestAnUnreadableJournalDoesNotOverrideTheNoBaselineState(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n\n[[probe]]\nid = \"p\"\nrun = \"printf ok\"\ntimeout = 30\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "harness")
+	// No record — no baseline. A corrupt journal beside it.
+	if err := os.MkdirAll(filepath.Join(root, ".vise"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".vise", "journal.jsonl"), []byte("{\"e\":\"torn\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	report := BuildStatus(root)
+	if report.State == "harness-error" {
+		t.Errorf("an unreadable journal with no baseline was reported as a journal harness error")
+	}
+	if report.Next.Action != NextRecordFirst {
+		t.Errorf("next %q, want record_first — the situation is still to record a baseline", report.Next.Action)
+	}
+	// Still surfaced as information.
+	if !report.JournalUnreadable {
+		t.Error("the unreadable journal was not flagged at all")
+	}
+
+	// And with a baseline, the journal error still takes over.
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".vise", "journal.jsonl"), []byte("{\"e\":\"torn\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if BuildStatus(root).State != "harness-error" {
+		t.Error("with a baseline, an unreadable journal must still be a harness error")
+	}
+}

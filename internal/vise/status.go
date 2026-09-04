@@ -94,13 +94,22 @@ func buildProposalsStatus(root string, manifest Manifest, report *StatusReport) 
 // touch: a probe command its own change broke.
 func buildJournalStatus(root string, report *StatusReport) {
 	journal, err := ReadJournal(root, 5)
-	if err != nil {
-		report.State = "harness-error"
-		report.JournalUnreadable = true
-		report.Next = Next{Action: NextHuman, Detail: "repair the local journal (.vise/journal.jsonl); an agent may not write it"}
-	} else {
+	if err == nil {
 		report.Journal = journal
+		return
 	}
+	report.JournalUnreadable = true
+	// The journal only matters once a baseline exists: gate never reads it
+	// without one — a missing lock returns record_first before the journal is
+	// ever touched (loadVerifyState), and the rerun budget the journal feeds is
+	// about re-gating a baseline. So an unreadable journal beside no baseline is
+	// not "repair the journal"; the situation is still "record a baseline", and
+	// overriding it here told the agent the opposite of what the next gate says.
+	if !report.Lock.Present {
+		return
+	}
+	report.State = "harness-error"
+	report.Next = Next{Action: NextHuman, Detail: "repair the local journal (.vise/journal.jsonl); an agent may not write it"}
 }
 
 func buildLockStatus(root string, manifest Manifest, manifestBytes []byte, manifestErr error, report *StatusReport) {
