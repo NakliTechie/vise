@@ -298,9 +298,16 @@ func baselineDrift(root string, manifest Manifest, lock Lockfile) ([]string, boo
 		tracked, err := GitTrackedPaths(root, probe.Files)
 		switch {
 		case err != nil:
-			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: "cannot inspect declared artifacts: " + err.Error()})
+			// Neither of these is the agent's to repair, and both must carry
+			// Operator so status routes to human where gate does. The
+			// tracked-artifact case is the one that regressed: gate reaches it
+			// through artifacts.reset(), which sets HarnessOperator, and the
+			// dep-input agreement fix beside this one did not extend to it.
+			// The git-inspection failure is environmental, equally not the
+			// agent's.
+			outcome.AddFailure(probe.ID, Failure{Class: "harness", Operator: true, Detail: "cannot inspect declared artifacts: " + err.Error()})
 		case len(tracked) > 0:
-			outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: fmt.Sprintf("declared artifact %q is tracked by git; the next run will refuse it", tracked[0])})
+			outcome.AddFailure(probe.ID, Failure{Class: "harness", Operator: true, Detail: fmt.Sprintf("declared artifact %q is tracked by git; the next run will refuse it", tracked[0])})
 		}
 	}
 	if len(outcome.Failures) == 0 {

@@ -171,4 +171,36 @@ func TestStatusAndGateAgreeAboutWhoRepairsTheDrift(t *testing.T) {
 			t.Errorf("action %q, want %q — the repair is in vise.toml", gate, NextHuman)
 		}
 	})
+
+	// A declared artifact somebody committed. This is the branch a heterogeneous
+	// reviewer caught: gate reaches it through artifacts.reset(), which sets the
+	// operator flag, and the dep-input agreement fix beside it did not extend to
+	// the artifact case two lines down — so status said fix_probe where gate
+	// said human, and the pinning test above covered every drift kind but this.
+	t.Run("a declared artifact is tracked, so an operator owns it", func(t *testing.T) {
+		root := testGitRepo(t)
+		writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n")
+		writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n\n[[probe]]\nid = \"p\"\nrun = \"printf ok > out.txt; printf ok\"\ntimeout = 30\nfiles = [\"out.txt\"]\n")
+		testGit(t, root, "add", "vise.toml", ".gitignore")
+		testGit(t, root, "commit", "-qm", "harness")
+		manifest, manifestBytes, err := LoadManifest(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+			t.Fatalf("record: %#v", result.Outcome)
+		}
+		// The artifact gets committed after recording — the exact "somebody ran
+		// git add -A" mistake.
+		testGit(t, root, "add", "out.txt")
+		testGit(t, root, "commit", "-qm", "committed the artifact by mistake")
+
+		status, gate := both(t, root)
+		if status != gate {
+			t.Errorf("status says %q and gate says %q for a tracked declared artifact", status, gate)
+		}
+		if gate != NextHuman {
+			t.Errorf("action %q, want %q — the agent cannot git rm --cached and edit .gitignore for the manifest it may not touch", gate, NextHuman)
+		}
+	})
 }
