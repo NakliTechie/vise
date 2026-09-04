@@ -251,9 +251,10 @@ func TestAnUnreadableJournalDoesNotOverrideTheNoBaselineState(t *testing.T) {
 	if report.Next.Action != NextRecordFirst {
 		t.Errorf("next %q, want record_first — the situation is still to record a baseline", report.Next.Action)
 	}
-	// Still surfaced as information.
-	if !report.JournalUnreadable {
-		t.Error("the unreadable journal was not flagged at all")
+	// And not flagged either: with no baseline the corrupt journal is not part
+	// of the situation, so surfacing it would be noise an agent might act on.
+	if report.JournalUnreadable {
+		t.Error("the journal was flagged unreadable when no baseline exists")
 	}
 
 	// And with a baseline, the journal error still takes over.

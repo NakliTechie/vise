@@ -98,16 +98,17 @@ func buildJournalStatus(root string, report *StatusReport) {
 		report.Journal = journal
 		return
 	}
-	report.JournalUnreadable = true
 	// The journal only matters once a baseline exists: gate never reads it
 	// without one — a missing lock returns record_first before the journal is
 	// ever touched (loadVerifyState), and the rerun budget the journal feeds is
-	// about re-gating a baseline. So an unreadable journal beside no baseline is
-	// not "repair the journal"; the situation is still "record a baseline", and
-	// overriding it here told the agent the opposite of what the next gate says.
+	// about re-gating a baseline. So with no baseline the corrupt journal is not
+	// part of the situation at all: not the state, and not even the unreadable
+	// flag, which would be noise an agent might act on when the answer is still
+	// "record a baseline".
 	if !report.Lock.Present {
 		return
 	}
+	report.JournalUnreadable = true
 	report.State = "harness-error"
 	report.Next = Next{Action: NextHuman, Detail: "repair the local journal (.vise/journal.jsonl); an agent may not write it"}
 }
