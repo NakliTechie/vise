@@ -46,6 +46,13 @@ func TestTheEvaluatorDigestCoversEveryPieceOfState(t *testing.T) {
 				t.Fatal(err)
 			}
 		}},
+		{"a blob's content overwritten in place", func(t *testing.T, dir string) {
+			// Same filename, different bytes. The store is content-addressed,
+			// so the name no longer matches the content — and hashing the name
+			// alone left this invisible, which is what the guard's message about
+			// "blobs" promised it would catch.
+			writeTestFile(t, dir, filepath.Join(".vise", "blobs", strings.Repeat("a", 64)), "tampered")
+		}},
 	}
 
 	for _, test := range tests {
@@ -201,5 +208,61 @@ func TestTheLaunchFailureNamesTheToolAndNotTheNoise(t *testing.T) {
 	long := "sh: " + strings.Repeat("x", 4000) + ": command not found\n"
 	if got := launchFailureDetail("probe", "x", CaptureBytes([]byte(long))); len(got) > 400 {
 		t.Fatalf("a 4000-character diagnostic rendered %d characters", len(got))
+	}
+}
+
+// A state file replaced by a symlink to identical bytes is a mutation the guard
+// used to miss: os.ReadFile followed the link and hashed the target, so the
+// digest did not move — while the checkout now had a vise.lock pointing outside
+// the repository. readRegularFile refuses the symlink, so the digest call fails
+// instead, which classes the run as harness. hash.go's TamperHash already used
+// readRegularFile; the guard did not, and the two disagreed on the same check.
+func TestTheGuardRefusesAStateFileSwappedForASymlink(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n")
+	writeTestFile(t, root, "vise.lock", "{\"v\":1}")
+	if _, err := evaluatorStateDigest(root); err != nil {
+		t.Fatalf("a clean state failed to digest: %v", err)
+	}
+
+	// An identical-content file elsewhere, and vise.lock pointed at it.
+	decoy := filepath.Join(t.TempDir(), "lock")
+	if err := os.WriteFile(decoy, []byte("{\"v\":1}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock := filepath.Join(root, "vise.lock")
+	if err := os.Remove(lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(decoy, lock); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	if _, err := evaluatorStateDigest(root); err == nil {
+		t.Error("a symlinked vise.lock digested as though it were the file")
+	}
+}
+
+// Absent and empty must not hash alike. A probe that creates an empty vise.lock
+// where none existed has changed the evaluator's state, and writeHashPart frames
+// nil and a zero-byte file identically, so without a presence marker the digest
+// did not move.
+func TestTheGuardTellsAbsentFromEmpty(t *testing.T) {
+	withLock := testGitRepo(t)
+	writeTestFile(t, withLock, "vise.toml", "[vise]\nversion = 1\n")
+	writeTestFile(t, withLock, "vise.lock", "")
+
+	withoutLock := testGitRepo(t)
+	writeTestFile(t, withoutLock, "vise.toml", "[vise]\nversion = 1\n")
+
+	empty, err := evaluatorStateDigest(withLock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	absent, err := evaluatorStateDigest(withoutLock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty == absent {
+		t.Error("an empty vise.lock and an absent one produced the same digest")
 	}
 }
