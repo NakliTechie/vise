@@ -33,7 +33,18 @@ func renderGate(w io.Writer, outcome vise.Outcome, quiet bool) {
 	ids := sortedKeys(outcome.Failures)
 	detail := ""
 	if len(ids) > 0 {
-		detail = ": " + strings.Join(ids, ", ")
+		// Bounded like drift and recorded-commits: a gate where fifty probes
+		// fail must not print a fifty-name line. "Bounded output, always" is
+		// this file's stated doctrine and every other list here honours it; the
+		// gate verdict was the one that grew with the failure count. The full
+		// set is in the JSON failures map.
+		shown := ids
+		suffix := ""
+		if len(shown) > maxDriftLines {
+			shown = shown[:maxDriftLines]
+			suffix = fmt.Sprintf(", … and %d more (see --json)", len(ids)-maxDriftLines)
+		}
+		detail = ": " + strings.Join(shown, ", ") + suffix
 	}
 	fmt.Fprintf(w, "GATE %s%s — %d/%d%s\n", strings.ToUpper(outcome.Verdict), outcome.ClassLabel(), outcome.Counts.Pass, outcome.Counts.Declared, detail)
 	if quiet {

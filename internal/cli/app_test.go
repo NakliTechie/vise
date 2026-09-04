@@ -1576,3 +1576,30 @@ func TestAValueThatCannotBeSerializedIsNotReportedAsSuccess(t *testing.T) {
 		t.Errorf("the failure report claims exit %v", parsed["exit"])
 	}
 }
+
+// "Bounded output, always" is the gate's stated doctrine, and every list in
+// the human render honours it except the one on the verdict line itself: the
+// failing-probe ids were joined uncapped, so a gate where many probes fail grew
+// the line with the failure count. Drift and recorded-commits cap at five; this
+// did not.
+func TestTheGateLineIsBoundedWhenManyProbesFail(t *testing.T) {
+	outcome := vise.NewOutcome("gate")
+	outcome.Counts.Declared = 20
+	for i := 0; i < 20; i++ {
+		outcome.AddFailure(fmt.Sprintf("probe-%02d", i), vise.Failure{Class: "behavior", Detail: "differs"})
+	}
+	outcome.Finalize()
+
+	var out bytes.Buffer
+	renderGate(&out, outcome, true)
+	line := strings.TrimRight(out.String(), "\n")
+	if strings.Count(line, "\n") != 0 {
+		t.Fatalf("the gate verdict spilled onto more than one line:\n%s", line)
+	}
+	if len(line) > 200 {
+		t.Errorf("the gate line is %d characters for 20 failures, so it grows with the count:\n%s", len(line), line)
+	}
+	if !strings.Contains(line, "15 more") {
+		t.Errorf("the gate line does not say how many it left out:\n%s", line)
+	}
+}
