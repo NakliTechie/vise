@@ -241,3 +241,37 @@ func TestStatusDoesNotSayRecordFirstWhenABaselineExists(t *testing.T) {
 		t.Errorf("a fresh repo says %q, want record_first", action)
 	}
 }
+
+// A HEAD that will not read, with a valid baseline present, is a harness
+// problem the next gate will hit. nextGateRefused swallowed the GitHead error
+// into "not refused", so status reported ready/proceed while gate would fail on
+// the same HEAD. The journal read error beside it stays swallowed on purpose —
+// buildJournalStatus rescues that and gate re-reports it — but a HEAD error is
+// rescued by nothing.
+func TestStatusSurfacesAnUnreadableHead(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n\n[[probe]]\nid = \"p\"\nrun = \"printf ok\"\ntimeout = 30\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "harness")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+
+	// Corrupt HEAD after the baseline is in place: a valid lockfile, no
+	// readable HEAD. rev-parse will refuse this.
+	if err := os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("this is not a ref\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report := BuildStatus(root)
+	if report.State == "ready" {
+		t.Errorf("status reports ready with an unreadable HEAD: next=%q", report.Next.Action)
+	}
+	if report.Next.Action != NextHuman {
+		t.Errorf("next %q, want human", report.Next.Action)
+	}
+}

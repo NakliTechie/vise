@@ -254,7 +254,13 @@ func buildRerunRefusal(root string, manifest Manifest, report *StatusReport) {
 	if report.State != "ready" {
 		return
 	}
-	if refused, detail := nextGateRefused(root, manifest, report.Lock.Hash); refused {
+	refused, detail, headErr := nextGateRefused(root, manifest, report.Lock.Hash)
+	if headErr != nil {
+		report.State = "harness-error"
+		report.Next = Next{Action: NextHuman, Detail: "git HEAD will not read, so the next gate cannot run: " + headErr.Error()}
+		return
+	}
+	if refused {
 		report.State = "rerun-refused"
 		report.Next = Next{Action: NextHuman, Detail: "the next gate is refused (" + detail + "); commit, re-record, or change the manifest"}
 	}
@@ -334,10 +340,16 @@ func baselineDrift(root string, manifest Manifest, lock Lockfile) ([]string, boo
 // nextGateRefused asks the rerun limit whether a full gate at HEAD would be
 // refused right now. Errors read as "not refused": status must stay bounded
 // and exit 0, and gate itself reports the failure with its remedy.
-func nextGateRefused(root string, manifest Manifest, lockHash string) (bool, string) {
+func nextGateRefused(root string, manifest Manifest, lockHash string) (refused bool, detail string, headErr error) {
 	commit, err := GitHead(root)
 	if err != nil {
-		return false, ""
+		// Surfaced, not swallowed. A journal read error below stays swallowed
+		// because buildJournalStatus rescues it and gate re-reports it; a HEAD
+		// that will not read is rescued by nothing, so status would report
+		// ready while the next gate fails on the same HEAD. In this section a
+		// valid lockfile is already present, so there were commits — a HEAD
+		// error here is corruption, not an unborn branch.
+		return false, "", err
 	}
 	ids := make([]string, 0, len(manifest.Probes)+len(manifest.Metrics))
 	for _, probe := range manifest.Probes {
@@ -347,9 +359,9 @@ func nextGateRefused(root string, manifest Manifest, lockHash string) (bool, str
 		ids = append(ids, metric.ID)
 	}
 	sort.Strings(ids)
-	refused, detail, err := RerunLimitReached(root, commit, lockHash, ids)
+	refused, detail, err = RerunLimitReached(root, commit, lockHash, ids)
 	if err != nil {
-		return false, ""
+		return false, "", nil
 	}
-	return refused, detail
+	return refused, detail, nil
 }
