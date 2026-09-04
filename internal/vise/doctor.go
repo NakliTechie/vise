@@ -376,16 +376,28 @@ func checkBaselineCommitted(root string) []DoctorFinding {
 	if len(source) == 0 || json.Unmarshal(source, &lock) != nil {
 		return findings
 	}
-	var missing int
+	var missing, malformed int
 	referenced := referencedHashes(lock)
 	for hash := range referenced {
 		name, err := HashName(hash)
 		if err != nil {
+			// A referenced hash that will not parse is not a clean skip: the
+			// gate refuses a lockfile like this (validateLockfileHashes), so
+			// doctor silently continuing reported ready for a baseline the gate
+			// cannot load.
+			malformed++
 			continue
 		}
 		if _, err := gitFileAtHead(root, ".vise/blobs/"+name); err != nil {
 			missing++
 		}
+	}
+	if malformed > 0 {
+		findings = append(findings, DoctorFinding{
+			Check:  "baseline-committed",
+			Detail: fmt.Sprintf("%d of %d hashes the lockfile references are malformed, so the gate cannot load this baseline", malformed, len(referenced)),
+			Remedy: "re-record the baseline; the lockfile it references is corrupt",
+		})
 	}
 	if missing > 0 {
 		findings = append(findings, DoctorFinding{

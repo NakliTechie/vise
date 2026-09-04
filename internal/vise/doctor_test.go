@@ -691,3 +691,24 @@ func TestAManifestParseErrorDoesNotHideTheCheckoutChecks(t *testing.T) {
 		}
 	}
 }
+
+// A referenced hash that will not parse was silently skipped by the blob audit,
+// so doctor reported ready for a lockfile the gate refuses (validateLockfileHashes).
+// A malformed hash is a corrupt baseline, and doctor should say so rather than
+// pass it.
+func TestDoctorReportsAMalformedReferencedHash(t *testing.T) {
+	root := testGitRepo(t)
+	// A lockfile that parses as JSON but references a hash that is not a valid
+	// sha256: reference.
+	writeTestFile(t, root, "vise.lock", `{"v":1,"probes":{"p":{"exit":0,"stdout":"not-a-valid-hash","recorded_commit":"abc"}}}`)
+
+	var found bool
+	for _, f := range checkBaselineCommitted(root) {
+		if strings.Contains(f.Detail, "malformed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a malformed referenced hash was not reported")
+	}
+}
