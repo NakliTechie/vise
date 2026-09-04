@@ -9,13 +9,18 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 )
 
 func HashBytes(data []byte) string {
 	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return formatSHA256(sum[:])
+}
+
+// formatSHA256 renders a digest as vise writes it everywhere: the "sha256:"
+// prefix and lowercase hex. Three functions here built that string by hand.
+func formatSHA256(sum []byte) string {
+	return "sha256:" + hex.EncodeToString(sum)
 }
 
 // HashFile digests a file without holding it in memory. A declared dependency
@@ -31,7 +36,7 @@ func HashFile(path string) (string, error) {
 	if _, err := io.Copy(digest, file); err != nil {
 		return "", err
 	}
-	return "sha256:" + hex.EncodeToString(digest.Sum(nil)), nil
+	return formatSHA256(digest.Sum(nil)), nil
 }
 
 func HashDependencies(root string, deps []string) (map[string]string, error) {
@@ -57,13 +62,7 @@ func TamperHash(root string, manifest, lock []byte) (string, error) {
 	if err := json.Unmarshal(lock, &parsed); err != nil {
 		return "", fmt.Errorf("parse lockfile for tamper hash: %w", err)
 	}
-	refs := referencedHashes(parsed)
-	hashes := make([]string, 0, len(refs))
-	for hash := range refs {
-		hashes = append(hashes, hash)
-	}
-	sort.Strings(hashes)
-	for _, hash := range hashes {
+	for _, hash := range sortedKeys(referencedHashes(parsed)) {
 		path, err := BlobPath(root, hash)
 		if err != nil {
 			return "", err
