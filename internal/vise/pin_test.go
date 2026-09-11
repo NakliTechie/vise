@@ -1230,7 +1230,9 @@ func TestLockfileRefusesAMalformedPinObject(t *testing.T) {
 	}
 	specHash := HashBytes([]byte("hello Ada\n"))
 	for name, mutate := range map[string]func(string) string{
-		"a spec hash that is not a hash": func(s string) string { return strings.Replace(s, `"spec/greet.stdout": "`+specHash+`"`, `"spec/greet.stdout": "nonsense"`, 1) },
+		"a spec hash that is not a hash": func(s string) string {
+			return strings.Replace(s, `"spec/greet.stdout": "`+specHash+`"`, `"spec/greet.stdout": "nonsense"`, 1)
+		},
 		"an accepted_commit that is not a commit": func(s string) string {
 			return strings.Replace(s, `"accepted_commit": null`, `"accepted_commit": "abc"`, 1)
 		},
