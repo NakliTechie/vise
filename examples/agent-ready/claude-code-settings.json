@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(/vise.toml)",
+      "Edit(/vise.lock)",
+      "Edit(/.vise/blobs/**)",
+      "Edit(/spec/**)",
+      "Bash(vise record*)"
+    ]
+  }
+}
