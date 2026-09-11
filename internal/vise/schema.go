@@ -93,6 +93,19 @@ func validateLockfileSchema(lock Lockfile) error {
 				return fmt.Errorf("probe %s artifact %q: %w", id, path, err)
 			}
 		}
+		if probe.Pin != nil {
+			if len(probe.Pin.Spec) == 0 {
+				return fmt.Errorf("probe %s is a pin with no spec hashes", id)
+			}
+			for path := range probe.Pin.Spec {
+				if err := ValidateSpecPath("", path); err != nil {
+					return fmt.Errorf("probe %s spec %q: %w", id, path, err)
+				}
+			}
+			if probe.Pin.AcceptedCommit != nil && !commitPattern.MatchString(*probe.Pin.AcceptedCommit) {
+				return fmt.Errorf("probe %s accepted_commit %q is not a Git object name", id, *probe.Pin.AcceptedCommit)
+			}
+		}
 	}
 	for id := range lock.Metrics {
 		if !idPattern.MatchString(id) {

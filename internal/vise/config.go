@@ -43,6 +43,11 @@ type Probe struct {
 	Deps    []string          `toml:"deps" json:"deps,omitempty"`
 	Files   []string          `toml:"files" json:"files,omitempty"`
 	Env     map[string]string `toml:"env" json:"env,omitempty"`
+	// Expect makes the probe a pin (pin.go). It is part of the marshalled
+	// entry, so run_hash covers it: changing which file is the spec is
+	// definition drift, the same as changing run. Nil is omitted, so a
+	// preserve probe's run_hash is what it was before pins existed.
+	Expect *Expect `toml:"expect" json:"expect,omitempty"`
 }
 
 type Metric struct {
@@ -123,6 +128,15 @@ func applyProbeDefaults(probe *Probe) {
 	}
 	sort.Strings(probe.Deps)
 	sort.Strings(probe.Files)
+	// A pin that says nothing about its exit expects 0, and the default is
+	// written into the entry so run_hash does not depend on whether the
+	// operator typed it. An expectation that says nothing at all is left as
+	// it is, so validation can refuse it: defaulting it here would turn
+	// `expect = {}` into a pin that expects exit 0 and silence, which the
+	// fresh-eyes check of this change caught on the real load path.
+	if probe.Expect != nil && probe.Expect.Exit == nil && !probe.Expect.isEmpty() {
+		probe.Expect.Exit = IntPtr(0)
+	}
 }
 
 func (m *Manifest) applyDefaults() {
@@ -201,6 +215,9 @@ func (m Manifest) Validate(root string) error {
 			return err
 		}
 	}
+	if err := validateSpecArtifactOverlap(m.Probes); err != nil {
+		return err
+	}
 	for i, metric := range m.Metrics {
 		where := fmt.Sprintf("metric[%d]", i)
 		if err := validateID(metric.ID, where); err != nil {
@@ -257,6 +274,9 @@ func validateProbeShape(root string, probe Probe, where string) error {
 	}
 	files := func(path string) error { return ValidateArtifactPath(root, path) }
 	if err := claimPaths(seenPaths, probe.Files, where, "artifact", "files", files); err != nil {
+		return err
+	}
+	if err := validateExpect(root, probe, where); err != nil {
 		return err
 	}
 	return validateEnv(probe.Env, where)

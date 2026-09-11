@@ -70,9 +70,17 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 	// metrics were still being run, which means an analyzer executes against a
 	// tree whose behavior has already changed, its number is compared to a
 	// baseline recorded against different behavior, and the agent is handed a
-	// quality figure that describes something it is about to revert.
-	if opts.ProbeID == "" && outcome.Counts.Harness == 0 && outcome.Counts.Behavior == 0 && outcome.Counts.Flaky == 0 {
-		result.Flaky = append(result.Flaky, evaluateMetrics(&outcome, runner, manifest.Metrics, state.lock.Metrics)...)
+	// quality figure that describes something it is about to revert. The same
+	// holds while a pin is unmet: a half-built feature's number describes
+	// nothing. Metrics held back are counted as skipped, not as passes, which
+	// the old pass formula did: one behavior failure beside two metrics read
+	// as 2/3 with neither metric run.
+	if opts.ProbeID == "" {
+		if outcome.Counts.Harness == 0 && outcome.Counts.Behavior == 0 && outcome.Counts.Flaky == 0 && outcome.Counts.Unmet == 0 {
+			result.Flaky = append(result.Flaky, evaluateMetrics(&outcome, runner, manifest.Metrics, state.lock.Metrics)...)
+		} else {
+			outcome.Counts.Skipped = len(manifest.Metrics)
+		}
 	}
 	return finalizeVerifyResult(result, outcome)
 }
@@ -169,8 +177,25 @@ func validateVerifyInputs(root string, outcome *Outcome, manifest Manifest, lock
 	if _, ok := outcome.Failures["fingerprint"]; ok {
 		outcome.Next.Detail = "restore the recorded toolchain or ask an operator to re-record on this machine"
 	}
-	// No probe ran, so nothing passed; the count must not imply otherwise.
+	// No probe ran, so nothing passed; the count must not imply otherwise,
+	// and every declared check without a failure of its own was skipped,
+	// not silently absent. Counted by id, because a fingerprint or journal
+	// failure is a harness count that names no declared check.
 	outcome.Counts.Pass = 0
+	skipped := 0
+	for _, probe := range probes {
+		if _, failed := outcome.Failures[probe.ID]; !failed {
+			skipped++
+		}
+	}
+	if validateSets {
+		for _, metric := range manifest.Metrics {
+			if _, failed := outcome.Failures[metric.ID]; !failed {
+				skipped++
+			}
+		}
+	}
+	outcome.Counts.Skipped = skipped
 	return false
 }
 
@@ -198,6 +223,20 @@ func replayProbes(root string, outcome *Outcome, runner Runner, probes []Probe, 
 	var flaky []string
 	for _, probe := range probes {
 		expected := expectedProbes[probe.ID]
+		if probe.IsPin() && expected.Pin != nil {
+			if outcome.Pins == nil {
+				outcome.Pins = &PinSummary{Unmet: []string{}, PassingUnaccepted: []string{}}
+			}
+			outcome.Pins.Evaluated++
+			if expected.Pin.AcceptedCommit == nil {
+				if replayUnacceptedPin(root, outcome, runner, probe, expected) {
+					flaky = append(flaky, probe.ID)
+				}
+				continue
+			}
+			// An accepted pin is judged exactly as a preserve probe is: a
+			// divergence is behavior, a condition is harness.
+		}
 		first := runner.RunProbe(probe, true)
 		if first.HarnessError != "" {
 			outcome.AddFailure(probe.ID, first.harnessFailure())
@@ -219,6 +258,66 @@ func replayProbes(root string, outcome *Outcome, runner Runner, probes []Probe, 
 		}
 	}
 	return flaky
+}
+
+// replayUnacceptedPin judges a pin no operator has accepted. It reports
+// whether the pin flaked. The unmet table: a completed run matching the spec
+// passes (and is named as passing-unaccepted); a stable mismatch, a stable
+// launch failure or timeout, or a stable missing artifact is unmet — what
+// not-built-yet looks like; any difference between the two runs on the
+// complete observation is a flake; any hard condition is harness, whatever
+// else happened. A timed-out run is never compared by its bytes.
+func replayUnacceptedPin(root string, outcome *Outcome, runner Runner, probe Probe, expected ProbeLock) (flaked bool) {
+	first := runner.RunProbe(probe, true)
+	if first.HarnessError != "" && !first.Tolerated {
+		outcome.AddFailure(probe.ID, first.harnessFailure())
+		return false
+	}
+	if first.HarnessError == "" && RunMatchesLock(first, expected) {
+		outcome.Pins.addPassingUnaccepted(probe.ID)
+		return false
+	}
+	second := runner.RunProbe(probe, true)
+	if second.HarnessError != "" && !second.Tolerated {
+		outcome.AddFailure(probe.ID, second.harnessFailure())
+		return false
+	}
+	if !pinObservationsEqual(first, second) {
+		outcome.AddFailure(probe.ID, probeMismatchFailure(root, "flake", "mismatching observations differed across the single retry", expected, first))
+		return true
+	}
+	failure := probeMismatchFailure(root, "unmet", unmetDetail(first, expected), expected, first)
+	if first.TimedOut {
+		// The bytes a killed run printed are not an observation; the diff
+		// would compare them as if they were.
+		failure.Diff = first.HarnessError
+	}
+	outcome.AddFailure(probe.ID, failure)
+	outcome.Pins.addUnmet(probe.ID)
+	return false
+}
+
+// unmetDetail says in one line what the run did, so an agent can see a 127
+// for what it is even though the class is unmet, and which part of a
+// completed run's observation missed the spec.
+func unmetDetail(run RunResult, expected ProbeLock) string {
+	if run.HarnessError != "" {
+		return "not built yet: " + run.HarnessError
+	}
+	switch {
+	case run.Exit != expected.Exit:
+		return fmt.Sprintf("not built yet: exit %d where the spec expects %d", run.Exit, expected.Exit)
+	case run.Stdout.Hash != expected.Stdout:
+		return "not built yet: stdout does not match the spec"
+	case run.Stderr.Hash != expected.Stderr:
+		return "not built yet: stderr does not match the spec"
+	}
+	for _, path := range sortedKeys(expected.Files) {
+		if run.Files[path].Hash != expected.Files[path] {
+			return "not built yet: artifact " + path + " does not match the spec"
+		}
+	}
+	return "not built yet: the observed output does not match the spec"
 }
 
 // probeMismatchFailure builds the failure for a probe whose replay did not
@@ -372,6 +471,12 @@ func validateProbeEntry(root string, outcome *Outcome, probe Probe, lock Lockfil
 		outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: "declared probe input changed after recording"})
 		return
 	}
+	if probe.IsPin() || expected.Pin != nil {
+		if failure, ok := validatePinEntry(root, probe, expected); ok {
+			outcome.AddFailure(probe.ID, failure)
+			return
+		}
+	}
 	checks := []struct {
 		hash  string
 		large bool
@@ -396,6 +501,40 @@ func validateProbeEntry(root string, outcome *Outcome, probe Probe, lock Lockfil
 			return
 		}
 	}
+}
+
+// validatePinEntry is the double-entry property: the spec is hashed into the
+// judge, so a spec that differs from what the baseline holds — edited,
+// missing, unreadable, replaced by a symlink — is harness drift routed to a
+// human, never an expectation the gate compares against. run_hash already
+// catches a probe that became a pin or stopped being one, since expect is in
+// the definition; this covers the bytes.
+func validatePinEntry(root string, probe Probe, expected ProbeLock) (Failure, bool) {
+	switch {
+	case probe.IsPin() && expected.Pin == nil:
+		return Failure{Class: "harness", Detail: "probe is declared as a pin and the baseline holds no spec for it; re-record", Operator: true}, true
+	case !probe.IsPin():
+		return Failure{Class: "harness", Detail: "baseline holds a spec for a probe that no longer declares an expectation; re-record", Operator: true}, true
+	}
+	_, hashes, err := specContents(root, *probe.Expect)
+	if err != nil {
+		return Failure{Class: "harness", Detail: err.Error() + "; restore the spec, or an operator re-records", Operator: true}, true
+	}
+	if !stringMapEqual(hashes, expected.Pin.Spec) {
+		return Failure{Class: "harness", Detail: "spec changed after recording, not behavior; restore the spec file, or an operator re-records to re-accept", Operator: true}, true
+	}
+	// The spec hashes matching is not the same as the expectation being the
+	// spec: a lockfile whose stdout hash names other bytes than the spec file's
+	// would judge against something no human wrote. Rebuild the expectation
+	// from the spec and compare every field the gate will judge.
+	rebuilt, err := pinExpectation(root, probe, map[string][]byte{})
+	if err != nil {
+		return Failure{Class: "harness", Detail: err.Error() + "; restore the spec, or an operator re-records", Operator: true}, true
+	}
+	if rebuilt.Exit != expected.Exit || rebuilt.Stdout != expected.Stdout || rebuilt.Stderr != expected.Stderr || !stringMapEqual(rebuilt.Files, expected.Files) {
+		return Failure{Class: "harness", Detail: "the baseline's expectation for this pin is not what its spec files say; an operator re-records", Operator: true}, true
+	}
+	return Failure{}, false
 }
 
 func stringMapEqual(a, b map[string]string) bool {

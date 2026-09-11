@@ -144,6 +144,7 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 | 3 | flaky, indeterminate | `quarantine_ack` | stop unless your policy tolerates indeterminate |
 | 4 | no baseline | `record_first` | an operator records one |
 | 5 | metric regressed | `revert` | behavior held, quality did not |
+| 6 | a pin is unmet | `build` | a pinned spec nobody has accepted is not met yet — keep building toward it; `vise verify --probe <id>` shows the diff. Nothing that already held has moved, or the exit would be 1 |
 
 ## Commands
 
@@ -166,13 +167,13 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 vise doctor
 ```
 
-Eight checks, each one a setup failure that cost a session when vise was first
+Ten checks, each one a setup failure that cost a session when vise was first
 handed to real coding agents: a toolchain nobody fingerprinted, a probe naming
 a path that exists only on your machine, a harness wrapper a probe runs
 without declaring it as an input, a baseline that was never committed so a fresh clone
 cannot gate, vise's own local state left unignored, a repository with no
-written rules for the agent, a declared artifact somebody committed with `git add -A`, and an untracked, unignored file set large enough
-to make every gate slow for no visible reason. Every finding names its remedy. It runs no probe,
+written rules for the agent, a declared artifact somebody committed with `git add -A`, an untracked, unignored file set large enough
+to make every gate slow for no visible reason, a pin's spec that is missing or not the bytes HEAD holds, and a pin's spec under an ignore rule. Every finding names its remedy. It runs no probe,
 writes nothing, and exits 0 whatever it finds — a usage error is exit 2 like anywhere else, because that is a complaint about the command line rather than a report about the repository.
 
 The failures are invisible from where you sit and expensive from where the
@@ -221,7 +222,7 @@ vise carries no model and edits no code. Pull the AI out and it is a plain golde
 ## Development
 
 ```sh
-scripts/verify verify          # the committed harness: 10 features, from any directory
+scripts/verify verify          # the committed harness: 11 features, from any directory
 scripts/verify verify baseline # one feature
 go test -race ./... && go vet ./... && shellcheck scripts/verify scripts/dogfood && govulncheck ./...
 ```

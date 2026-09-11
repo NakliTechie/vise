@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# Every one of the ten features below has been shown to fail against a
+# Every one of the eleven features below has been shown to fail against a
 # deliberate break in the thing it watches, 2026-09-03. A harness feature that
 # cannot fail is worse than no feature: it reports green and buys confidence
 # nobody earned, and this project has already found about ninety tests in that
@@ -14,6 +14,7 @@ set -eu
 #   failure-modes   the timeout message changed; the tracked-artifact refusal changed
 #   metrics         a metric moving the wrong way stopped being a regression
 #   review          the review stopped showing environment drift
+#   pin             an edited spec gated green; the unmet exit became 1
 #   example         the capture bound shrank to 64 bytes
 #   dogfood         doctor changed its ready headline
 #   internal-checks any Go test failing, since it runs the suite
@@ -58,6 +59,7 @@ Features:
   failure-modes     Behavior diff, dependency drift, flake, and rerun refusal
   metrics           Metric baseline and no-regress enforcement
   review            Preview and accept an overwrite; frozen metric definitions
+  pin               A spec written before the code: unmet, build, accept, drift
   example           The shipped agent-ready template, instantiated and gated
   dogfood           Use vise to gate a source change in a clone of vise
   internal-checks   Go unit/integration tests and vet
@@ -180,7 +182,12 @@ verify_orientation() {
   # making a command always exit nonzero passed this whole harness.
   expect_exit 0 sh -c "'$VERIFY_BIN' --help >'$VERIFY_RUN/help.out'"
   grep -q 'deterministic behavior locks' "$VERIFY_RUN/help.out" || fail orientation "help omitted the product description"
-  expect_vise_json_exit orientation 0 '"version":"0.3.0-dev"' "$VISE_ROOT" version
+  # The version the binary reports is the one its source declares; a literal
+  # here went stale the day the release dropped the -dev suffix, and the whole
+  # harness has been red since v0.3.0 was tagged.
+  declared=$(awk -F'"' '/^const Version = / { print $2; exit }' "$VISE_ROOT/internal/cli/app.go")
+  [ -n "$declared" ] || fail orientation "could not read const Version from internal/cli/app.go"
+  expect_vise_json_exit orientation 0 "\"version\":\"$declared\"" "$VISE_ROOT" version
   expect_single_json_object orientation "$VISE_ROOT" version
   outside=$(mktemp -d "$VERIFY_RUN/orientation.XXXXXX")
   expect_single_json_object orientation "$outside" status
@@ -402,6 +409,76 @@ EOF
   summary review pass
 }
 
+verify_pin() {
+  repo=$(new_repo pin)
+  mkdir -p "$repo/spec"
+  printf 'hello Ada\n' > "$repo/spec/greet.stdout"
+  cat > "$repo/vise.toml" <<'EOF'
+[vise]
+version = 1
+[stubs]
+network = "declared-off"
+[[probe]]
+id = "old"
+run = "printf stable"
+[[probe]]
+id = "greet"
+run = "./bin/greet"
+expect.stdout = "spec/greet.stdout"
+EOF
+  commit_fixture "$repo"
+  # Recording before the program exists freezes the spec, accepts nothing,
+  # and says so: the pin is unmet in the counts and named in the result.
+  expect_vise_json_exit pin 0 '"unmet":\["greet"\]' "$repo" record
+  git -C "$repo" add vise.lock .vise/blobs
+  git -C "$repo" commit -qm baseline
+  expect_vise_json_exit pin 0 '"unmet":1' "$repo" record --i-reviewed-the-diff
+  # The gate is red with the one new exit, and the instruction is build, not
+  # revert. The preserve probe beside it passed; the pin did not.
+  expect_vise_json_exit pin 6 '"action":"build"' "$repo" gate
+  expect_vise_json_exit pin 6 '"class":"unmet"' "$repo" verify --probe greet
+  expect_vise_json_exit pin 6 '"pass":1' "$repo" gate
+  # The planted failure: the spec edited to match whatever the program does.
+  # Its hash is in the lockfile, so the answer is human, never green or build.
+  printf 'whatever\n' > "$repo/spec/greet.stdout"
+  expect_vise_json_exit pin 2 '"action":"human"' "$repo" gate
+  expect_vise_json_exit pin 2 'spec changed after recording' "$repo" gate
+  git -C "$repo" checkout -q -- spec/greet.stdout
+  # Building to the spec: green, with the pin named as passing and not yet
+  # accepted — only a record accepts, and this gate wrote no acceptance.
+  mkdir -p "$repo/bin"
+  printf '#!/bin/sh\nprintf "hello Ada\\n"\n' > "$repo/bin/greet"
+  chmod +x "$repo/bin/greet"
+  expect_vise_json_exit pin 0 '"passing_unaccepted":\["greet"\]' "$repo" gate
+  grep -q '"accepted_commit": null' "$repo/vise.lock" || fail pin "a gate accepted a pin; only record may"
+  git -C "$repo" add bin
+  git -C "$repo" commit -qm "build greet"
+  # Acceptance is a review gesture: the preview shows the transition as a
+  # line of its own, and the accepted lockfile names the commit.
+  preview=$(cd "$repo" && "$VERIFY_BIN" record --preview --json)
+  printf '%s\n' "$preview" | grep -q 'greet pin: unaccepted' || fail pin "preview hid the acceptance transition"
+  candidate=$(printf '%s\n' "$preview" | sed -n 's/.*"candidate":"\(sha256:[0-9a-f]*\)".*/\1/p')
+  test -n "$candidate" || fail pin "preview returned no candidate digest"
+  expect_vise_json_exit pin 0 '"accepted":\["greet"\]' "$repo" record --accept "$candidate"
+  if grep -q '"accepted_commit": null' "$repo/vise.lock"; then
+    fail pin "record did not accept a met pin on a clean tree"
+  fi
+  git -C "$repo" add vise.lock .vise/blobs
+  git -C "$repo" commit -qm accepted
+  expect_vise_json_exit pin 0 '"verdict":"green"' "$repo" gate
+  # Accepted, a pin is judged like any probe: a regression is behavior, exit
+  # 1, revert — never build.
+  printf '#!/bin/sh\nprintf "goodbye Ada\\n"\n' > "$repo/bin/greet"
+  expect_vise_json_exit pin 1 '"action":"revert"' "$repo" gate
+  # And a record on that regressed tree is refused rather than demoting the
+  # acceptance: the lockfile is untouched.
+  git -C "$repo" commit -qam "regress greet"
+  cp "$repo/vise.lock" "$VERIFY_RUN/pin-lock.before"
+  expect_vise_json_exit pin 1 'no longer meets its spec' "$repo" record --i-reviewed-the-diff
+  cmp -s "$VERIFY_RUN/pin-lock.before" "$repo/vise.lock" || fail pin "a refused record wrote the lockfile"
+  summary pin pass
+}
+
 verify_example() {
   # The copyable setup in examples/agent-ready, instantiated into a real Go
   # project and driven end to end. A template nobody runs is a template with an
@@ -595,6 +672,7 @@ run_feature() {
     failure-modes) verify_failure_modes ;;
     metrics) verify_metrics ;;
     review) verify_review ;;
+    pin) verify_pin ;;
     example) verify_example ;;
     dogfood) verify_dogfood ;;
     internal-checks) verify_internal_checks ;;
@@ -614,7 +692,7 @@ case "${1:-}" in
     if test "$#" -eq 2; then
       run_feature "$2"
     elif test "$#" -eq 1; then
-      for feature in orientation readiness initialization baseline failure-modes metrics review example dogfood internal-checks; do
+      for feature in orientation readiness initialization baseline failure-modes metrics review pin example dogfood internal-checks; do
         run_feature "$feature"
       done
       summary full pass

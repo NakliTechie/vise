@@ -587,6 +587,15 @@ func TestRunMirrorsLaunchFailureExit(t *testing.T) {
 	if exit, _, stderr := cliRun(t, root, "record"); exit != 2 || !strings.Contains(stderr, "exit 127") {
 		t.Fatalf("record must still refuse a launch failure: exit=%d stderr=%q", exit, stderr)
 	}
+
+	// A 127 with a hard condition beside it is not a launch failure to pass
+	// through: the probe left a stray in the checkout on its way down, and
+	// exit 127 used to exempt the whole result from saying so.
+	root = cliRepo(t, basicManifest(""), "#!/bin/sh\nprintf x > stray.txt; exec definitely-not-a-command-xyz")
+	exit, _, stderr = cliRun(t, root, "run", "behavior")
+	if exit != 2 || !strings.Contains(stderr, "neither tracks nor ignores") {
+		t.Fatalf("run must report the mutation beside the 127: exit=%d stderr=%q", exit, stderr)
+	}
 }
 
 func TestEmptyManifestNeverGatesGreen(t *testing.T) {

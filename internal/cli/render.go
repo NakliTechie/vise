@@ -62,12 +62,38 @@ func renderGate(w io.Writer, outcome vise.Outcome, quiet bool) {
 // JSON report carries the full list.
 const maxDriftLines = 5
 
+// renderPinsRecorded is the record line's pin summary: how many an operator
+// has accepted, and which the frozen tree does not meet, bounded. Nothing for
+// a manifest with no pins, so the line reads as it always did.
+func renderPinsRecorded(pins *vise.PinsRecorded) string {
+	if pins == nil {
+		return ""
+	}
+	summary := fmt.Sprintf(" · pins: %d accepted, %d unmet", len(pins.Accepted), len(pins.Unmet))
+	if len(pins.Unmet) > 0 {
+		summary += " (" + boundedList(pins.Unmet, maxDriftLines) + ")"
+	}
+	if len(pins.PassingUnaccepted) > 0 {
+		summary += fmt.Sprintf(", %d met on a dirty tree and not accepted (%s)", len(pins.PassingUnaccepted), boundedList(pins.PassingUnaccepted, maxDriftLines))
+	}
+	return summary
+}
+
+// boundedList joins at most limit ids and counts the rest.
+func boundedList(ids []string, limit int) string {
+	if len(ids) <= limit {
+		return strings.Join(ids, ", ")
+	}
+	return fmt.Sprintf("%s, … and %d more", strings.Join(ids[:limit], ", "), len(ids)-limit)
+}
+
 func renderStatus(w io.Writer, report vise.StatusReport) {
 	renderStatusState(w, report.State)
 	renderStatusManifest(w, report.Manifest)
 	renderStatusLockfile(w, report.Lock)
 	renderStatusFingerprint(w, report.Lock.FingerprintMatch)
 	renderStatusRecordedCommits(w, report.Lock.RecordedCommits)
+	renderStatusPins(w, report.Lock.Pins)
 	renderStatusLockHash(w, report.Lock.Hash)
 	renderStatusLockError(w, report.Lock.Error)
 	renderStatusDrift(w, report.Lock.Drift)
@@ -121,6 +147,24 @@ func renderStatusRecordedCommits(w io.Writer, commits []string) {
 		suffix = fmt.Sprintf(" … %d more (see --json)", len(commits)-maxDriftLines)
 	}
 	fmt.Fprintln(w, "recorded commits: "+terminalSafe(strings.Join(shown, ", "), false)+suffix)
+}
+
+// renderStatusPins is one line, from the lockfile only: what an operator has
+// accepted, and which pins wait. Nothing when the baseline declares no pin,
+// so a status without pins reads as it always did.
+func renderStatusPins(w io.Writer, pins *vise.StatusPins) {
+	if pins == nil {
+		return
+	}
+	line := fmt.Sprintf("pins: %d (accepted %d · unaccepted %d", pins.Declared, pins.Accepted, pins.UnacceptedCount)
+	if pins.UnacceptedCount > 0 {
+		ids := strings.Join(pins.Unaccepted, ", ")
+		if pins.UnacceptedCount > len(pins.Unaccepted) {
+			ids += fmt.Sprintf(", … and %d more", pins.UnacceptedCount-len(pins.Unaccepted))
+		}
+		line += ": " + terminalSafe(ids, false)
+	}
+	fmt.Fprintln(w, line+")")
 }
 
 func renderStatusLockHash(w io.Writer, hash string) {

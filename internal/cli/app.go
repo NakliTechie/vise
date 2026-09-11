@@ -374,6 +374,9 @@ func renderRecordResult(result vise.RecordResult, manifest vise.Manifest, previe
 		if result.Candidate != "" {
 			extra["candidate"] = result.Candidate
 		}
+		if result.Pins != nil {
+			extra["pins"] = result.Pins
+		}
 		return writeOutcomeJSON(stdout, result.Outcome, extra)
 	}
 	if preview && result.Outcome.Exit == vise.ExitOK {
@@ -388,8 +391,11 @@ func renderRecordResult(result vise.RecordResult, manifest vise.Manifest, previe
 		return vise.ExitOK
 	}
 	if result.Outcome.Exit == vise.ExitOK {
-		fmt.Fprintf(stdout, "RECORDED — %d probe(s) · %d metric(s)\n", len(manifest.Probes), len(manifest.Metrics))
+		fmt.Fprintf(stdout, "RECORDED — %d probe(s) · %d metric(s)%s\n", len(manifest.Probes), len(manifest.Metrics), renderPinsRecorded(result.Pins))
 		fmt.Fprintln(stdout, "lock: "+result.Outcome.Lock)
+		if result.Pins != nil && len(result.Pins.Unmet) > 0 {
+			fmt.Fprintf(stdout, "next: %s — %s\n", result.Outcome.Next.Action, terminalSafe(result.Outcome.Next.Detail, false))
+		}
 		return vise.ExitOK
 	}
 	renderOutcome(stderr, result.Outcome, "RECORD")
@@ -484,8 +490,11 @@ func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Write
 	result := runner.RunProbe(probe, true)
 	// run mirrors the probe's own exit. A launch failure is the probe's exit 127 and
 	// passes through; a timeout, a refused artifact, or a lingering pipe holder
-	// has no probe exit to mirror and stays a harness error.
-	if result.HarnessError != "" && !(result.Exit == 127 && !result.TimedOut) {
+	// has no probe exit to mirror and stays a harness error. Only a launch
+	// failure with nothing else beside it passes: exit 127 was exempting the
+	// whole result, so a probe that mutated the checkout on its way to a 127
+	// reported the 127 and nothing about the mutation.
+	if result.HarnessError != "" && !(result.LaunchFailed && result.Tolerated) {
 		return renderSimpleError("run", result.HarnessError, jsonMode, stdout, stderr)
 	}
 	if jsonMode {
@@ -726,7 +735,7 @@ var commands = []struct {
 	{"status", "status", "Render the complete bounded situation",
 		"Usage: vise status [--json]\nReports manifest, lock, fingerprint, proposals, and the last five journal events.\n"},
 	{"doctor", "doctor", "Check the repository is fit to hand to an agent",
-		"Usage: vise doctor [--json]\nReports what an operator should fix before an agent works here: an unfingerprinted toolchain, a probe or metric that names a path outside the checkout, a script a probe runs without declaring, an uncommitted baseline, unignored local state, a missing agent contract, a declared artifact committed to git, and an untracked tree large enough to slow every gate.\nRuns no probe, writes nothing, and always exits 0.\n"},
+		"Usage: vise doctor [--json]\nReports what an operator should fix before an agent works here: an unfingerprinted toolchain, a probe or metric that names a path outside the checkout, a script a probe runs without declaring, an uncommitted baseline, unignored local state, a missing agent contract, a declared artifact committed to git, an untracked tree large enough to slow every gate, a pin's spec that is missing or not what HEAD holds, and a pin's spec under an ignore rule.\nRuns no probe, writes nothing, and always exits 0.\n"},
 	{"version", "version", "Print the vise version",
 		"Usage: vise version [--json]\nPrints the version, and with --json the build revision and whether the tree was modified.\n"},
 }

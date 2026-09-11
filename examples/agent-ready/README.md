@@ -1,7 +1,8 @@
 # An agent-ready vise setup
 
-Copy these three files, adjust the build command, and copy `AGENTS.md` from the
-repository root next to them. `gitignore` here is a fragment to append to the
+Copy these files, adjust the build command, and copy `AGENTS.md` from the
+repository root next to them. `claude-code-settings.json` and `opencode.json`
+are the harness policy for two harnesses, covered below. `gitignore` here is a fragment to append to the
 repository's own `.gitignore`, not a file to copy verbatim — and the `.gocache/`
 line in it is load-bearing, because vise compares the whole work tree around
 every judged run and an unignored build cache is a harness error. Then run the
@@ -25,6 +26,96 @@ env -i HOME="$HOME" PATH="$GO_DIR:/usr/bin:/bin" "$VISE_BIN" gate --quiet
 Both must say green. If they disagree, the gate means something different for
 the agent than for you, and every task you assign will fail for reasons that
 have nothing to do with the task.
+
+## The harness policy, as a file
+
+`claude-code-settings.json` is the fragment for Claude Code — merge it into the
+repository's `.claude/settings.json`. It denies the agent's own editor on the
+judge's files (`vise.toml`, `vise.lock`, `.vise/blobs/`) and on every pin spec
+under `spec/`, and denies `vise record`. **`spec/` is this example's layout,
+not a rule:** the protected set is whatever paths the manifest names under
+`expect`, so edit the rule to match yours. The `Edit(...)` form is the one
+Claude Code consults for path rules; a `Write(...)` rule is accepted and never
+checked.
+
+Two facts from Claude Code's own documentation shape what is and is not in
+that list:
+
+- **The fragment turns the Bash sandbox on and lists the static judge files
+  under `sandbox.filesystem.denyWrite`, which the operating system enforces on
+  every Bash command and its child processes.** (Claude Code also promotes
+  every `Edit` deny rule to that list on its own; the explicit entries mean the
+  protection does not depend on that promotion, and a reader sees it.) That is
+  the property you want on the static judge files — a Python or Node script
+  the agent runs cannot write them either — and it is why the list stops where
+  it does. Without `sandbox.enabled`, the `Edit` rules stop the agent's editor
+  and nothing stops a shell redirect; the first by-hand check below is what
+  tells you which of the two you have.
+- **`vise gate` is one of those child processes.** It has to append
+  `.vise/journal.jsonl`, take `.vise/run.lock`, and write scratch under
+  `.vise/tmp/`. A deny rule on the journal, or on `.vise/` as a whole, would be
+  promoted to an OS-level write denial and the gate would fail on its own
+  bookkeeping. So the journal is *not* in the list, and its protection under
+  this harness is the agent contract's rule 1 alone. vise's rerun budget is
+  derived from the journal; that is the stated residual, the same one SPEC §5
+  states for every harness.
+
+`opencode.json` is the same policy for opencode: `edit` covers every file
+modification (`edit`, `write`, `patch`), rules are matched by pattern with
+the **last** match winning, so the catch-all `*` comes first; `bash` denies
+`vise record`. opencode has no OS-level layer, so a shell redirect into a spec
+is stopped by nothing but the agent contract — the same residual Claude Code
+has without its sandbox — and the first by-hand check tells you so. `spec/*`
+is the example layout here too.
+
+`git checkout <branch>` or `git merge` that would replace `vise.lock` fails
+inside the sandbox with `unable to unlink old`. That is the policy working:
+the agent's branch is not supposed to carry a different lockfile. Reverting
+its own code with `git checkout -- <file>` is unaffected.
+
+**The gate as the stop condition.** A Claude Code `Stop` hook that runs the
+gate and exits 2 on anything but green keeps the agent working until the
+judge says so, with the verdict line as the reason it sees:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "out=$(vise gate --quiet 2>&1); case \"$out\" in 'GATE GREEN'*) exit 0;; esac; printf '%s\\n' \"$out\" >&2; exit 2"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Two limits, both from Claude Code's documentation: it ends the turn anyway
+after 8 consecutive blocks, and the hook's input carries `stop_hook_active`
+so a hook can decline to block a condition that will never resolve. The exit
+code of `vise gate` is the source of truth; the hook is a convenience that
+re-reads it. A gate that is red for a reason the agent cannot fix — a
+harness failure routed to `human`, or a pin the task did not ask it to build
+— is a block the agent will hit eight times, so this hook belongs on a
+campaign where the first gate is green or exit 6, and nowhere else.
+
+**Before trusting the fragment, run both checks once, by hand** — a guard
+nobody has watched fire is a comment:
+
+1. In a session with the fragment loaded, ask the agent to change a line of a
+   file under `spec/`. The edit must be refused by the harness (a permission
+   denial, not the agent's good manners). Then ask it to run
+   `printf x >> spec/<file>` through Bash; with the sandbox on, that must fail
+   too.
+2. Ask it to run `vise gate --json`. It must complete, and
+   `.vise/journal.jsonl` must have gained a `gate` event.
+
+If either check fails, the fragment is not supported for your setup; say so in
+`AGENTS.md`'s project lines rather than shipping a policy that is not there.
 
 ## Verified, not assumed
 

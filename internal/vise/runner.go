@@ -26,6 +26,31 @@ type RunResult struct {
 	// message is what the contract tells agents not to do, and a guard that
 	// scanned literal strings could not see an error built at run time.
 	HarnessOperator bool
+	// The three conditions below are the typed form of what HarnessError says
+	// when a run did not complete: the shell could not launch the command,
+	// the run was killed at its timeout, or a declared artifact was genuinely
+	// absent afterwards. For a preserve probe every one of them is a harness
+	// failure, as before. For a pin that no operator has accepted yet they are
+	// what "not built yet" looks like, and the judge needs them told apart
+	// from each other and from the hard conditions — a mutated checkout, a
+	// write to evaluator state, a pipe holder left behind — which no phase of
+	// any probe may produce. Tolerated is true only when HarnessError describes
+	// nothing but one of the three; any hard condition clears it.
+	LaunchFailed bool
+	Terminated   bool
+	MissingFiles []string
+	Tolerated    bool
+}
+
+// hardHarnessError records a condition no probe may produce whatever its
+// phase, appending it to any earlier failure so the cause is named first.
+func (r *RunResult) hardHarnessError(detail string) {
+	if r.HarnessError == "" {
+		r.HarnessError = detail
+	} else {
+		r.HarnessError = r.HarnessError + "; and " + detail
+	}
+	r.Tolerated = false
 }
 
 type MetricResult struct {
@@ -75,12 +100,29 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 	// order-dependence the snapshot exists to prevent. The earlier failure is
 	// kept when there is one: it is the cause, and the mutation is a
 	// consequence worth naming beside it.
-	if result.HarnessError == "" {
-		files, err := artifacts.capture()
-		if err != nil {
-			result.HarnessError = err.Error()
-		} else {
-			result.Files = files
+	// Artifacts are inspected after a tolerated failure too. A run that timed
+	// out or could not be launched can still have left a symlink or a fifo at
+	// a declared artifact path, and the work-tree snapshot excludes those
+	// paths by design; skipping the inspection would leave Tolerated true
+	// beside a condition no probe may produce. The earlier failure stays the
+	// cause; a hard condition found here is appended, and a missing artifact
+	// is recorded without displacing it.
+	if result.HarnessError == "" || result.Tolerated {
+		files, missing, err := artifacts.capture()
+		result.Files = files
+		switch {
+		case err != nil:
+			result.hardHarnessError(err.Error())
+		case len(missing) > 0:
+			// Genuinely absent, and every artifact that was produced is kept
+			// beside the list — a run that wrote two of three has two
+			// observations worth comparing, and folding them into one string
+			// hid a nondeterministic artifact behind a missing one.
+			result.MissingFiles = missing
+			if result.HarnessError == "" {
+				result.HarnessError = fmt.Sprintf("declared artifact %q was not produced", missing[0])
+				result.Tolerated = true
+			}
 		}
 	}
 	if checkTracked {
@@ -93,11 +135,7 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 			mutation = workspaceMutation("probe", before, after)
 		}
 		if mutation != "" {
-			if result.HarnessError == "" {
-				result.HarnessError = mutation
-			} else {
-				result.HarnessError = result.HarnessError + "; and " + mutation
-			}
+			result.hardHarnessError(mutation)
 		}
 	}
 	return result
@@ -178,11 +216,11 @@ func (r Runner) runShell(kind, id, command string, timeoutSeconds int, extra map
 	result := r.runShellUnguarded(kind, id, command, timeoutSeconds, extra)
 	stateAfter, stateErr := evaluatorStateDigest(r.Root)
 	if stateErr != nil {
-		result.HarnessError = stateErr.Error()
+		result.hardHarnessError(stateErr.Error())
 		return result
 	}
 	if stateAfter != stateBefore {
-		result.HarnessError = evaluatorStateMutated
+		result.hardHarnessError(evaluatorStateMutated)
 	}
 	return result
 }
@@ -244,6 +282,7 @@ func classifyProbe(kind, command string, timeoutSeconds int, cmd *exec.Cmd, stdo
 	result := RunResult{Stdout: stdout.Capture(), Stderr: stderr.Capture(), TimedOut: timedOut}
 	if timedOut {
 		result.HarnessError = fmt.Sprintf("%s timed out after %ds", kind, timeoutSeconds)
+		result.Tolerated = true
 		return result
 	}
 	if errors.Is(waitErr, exec.ErrWaitDelay) {
@@ -258,12 +297,26 @@ func classifyProbe(kind, command string, timeoutSeconds int, cmd *exec.Cmd, stdo
 	var exitErr *exec.ExitError
 	if errors.As(waitErr, &exitErr) {
 		result.Exit = exitErr.ExitCode()
+		if result.Exit < 0 {
+			// Killed by a signal: Go reports -1, which is not an exit status a
+			// probe can expect and was being frozen as one. It is a condition —
+			// tolerated on a pin nobody has accepted, where a skeleton that
+			// crashes is not built yet, and harness everywhere else. The -1
+			// stays on the result: it is nonzero, it can never equal a pin's
+			// expected exit, and the interrupt path asserts on it.
+			result.Terminated = true
+			result.Tolerated = true
+			result.HarnessError = fmt.Sprintf("%s was terminated by a signal before it exited", kind)
+			return result
+		}
 		if result.Exit == 127 {
 			// Name the word the shell could not resolve. "could not be
 			// launched" tells the reader something failed; the missing tool
 			// tells them what to install, and the whole point of these
 			// messages is that the remedy arrives with the failure.
 			result.HarnessError = launchFailureDetail(kind, command, result.Stderr)
+			result.LaunchFailed = true
+			result.Tolerated = true
 		}
 		return result
 	}

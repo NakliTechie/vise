@@ -85,10 +85,13 @@ func TestDeclaredArtifactFailurePrecedence(t *testing.T) {
 func TestDeclaredArtifactCaptureFailures(t *testing.T) {
 	root := testGitRepo(t)
 
-	// A probe that promised an artifact and did not produce one.
+	// A probe that promised an artifact and did not produce one: genuine
+	// absence is reported as a list, not an error, so that a pin nobody has
+	// built yet can be told apart from a harness that is broken — and so that
+	// the artifacts that were produced are still captured beside it.
 	artifacts := newDeclaredArtifacts(root, []string{"out/missing.txt"})
-	if _, err := artifacts.capture(); err == nil || !strings.Contains(err.Error(), "was not produced") {
-		t.Fatalf("missing artifact: %v", err)
+	if files, missing, err := artifacts.capture(); err != nil || len(files) != 0 || len(missing) != 1 || missing[0] != "out/missing.txt" {
+		t.Fatalf("missing artifact: files %v missing %v err %v", files, missing, err)
 	}
 
 	// A symlink where a regular file was promised: refused at path validation,
@@ -104,7 +107,7 @@ func TestDeclaredArtifactCaptureFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifacts = newDeclaredArtifacts(root, []string{"out/linked.txt"})
-	if _, err := artifacts.capture(); err == nil || !strings.Contains(err.Error(), "symlink components are not allowed") {
+	if _, _, err := artifacts.capture(); err == nil || !strings.Contains(err.Error(), "symlink components are not allowed") {
 		t.Fatalf("symlinked artifact: %v", err)
 	}
 
@@ -114,7 +117,7 @@ func TestDeclaredArtifactCaptureFailures(t *testing.T) {
 		t.Skipf("cannot create a fifo here: %v", err)
 	}
 	artifacts = newDeclaredArtifacts(root, []string{"out/pipe"})
-	if _, err := artifacts.capture(); err == nil || !strings.Contains(err.Error(), "is not a regular file") {
+	if _, _, err := artifacts.capture(); err == nil || !strings.Contains(err.Error(), "is not a regular file") {
 		t.Fatalf("fifo artifact: %v", err)
 	}
 
@@ -123,7 +126,7 @@ func TestDeclaredArtifactCaptureFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifacts = newDeclaredArtifacts(root, []string{"./out/real.txt"})
-	captured, err := artifacts.capture()
+	captured, _, err := artifacts.capture()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +136,7 @@ func TestDeclaredArtifactCaptureFailures(t *testing.T) {
 
 	// No declared files still means an empty map, never nil: callers compare
 	// lengths and render it as {}.
-	empty, err := newDeclaredArtifacts(root, nil).capture()
+	empty, _, err := newDeclaredArtifacts(root, nil).capture()
 	if err != nil || empty == nil || len(empty) != 0 {
 		t.Fatalf("empty = %#v, %v", empty, err)
 	}

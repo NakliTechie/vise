@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(/vise.toml)",
+      "Edit(/vise.lock)",
+      "Edit(/.vise/blobs/**)",
+      "Edit(/spec/**)",
+      "Bash(vise record*)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "filesystem": {
+      "denyWrite": ["./vise.toml", "./vise.lock", "./.vise/blobs", "./spec"]
+    }
+  }
+}
