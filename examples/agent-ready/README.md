@@ -1,8 +1,8 @@
 # An agent-ready vise setup
 
-Copy these four files, adjust the build command, and copy `AGENTS.md` from the
-repository root next to them. `claude-code-settings.json` is the harness policy
-for one harness, covered below. `gitignore` here is a fragment to append to the
+Copy these files, adjust the build command, and copy `AGENTS.md` from the
+repository root next to them. `claude-code-settings.json` and `opencode.json`
+are the harness policy for two harnesses, covered below. `gitignore` here is a fragment to append to the
 repository's own `.gitignore`, not a file to copy verbatim — and the `.gocache/`
 line in it is load-bearing, because vise compares the whole work tree around
 every judged run and an unignored build cache is a harness error. Then run the
@@ -59,6 +59,14 @@ that list:
   this harness is the agent contract's rule 1 alone. vise's rerun budget is
   derived from the journal; that is the stated residual, the same one SPEC §5
   states for every harness.
+
+`opencode.json` is the same policy for opencode: `edit` covers every file
+modification (`edit`, `write`, `patch`), rules are matched by pattern with
+the **last** match winning, so the catch-all `*` comes first; `bash` denies
+`vise record`. opencode has no OS-level layer, so a shell redirect into a spec
+is stopped by nothing but the agent contract — the same residual Claude Code
+has without its sandbox — and the first by-hand check tells you so. `spec/*`
+is the example layout here too.
 
 `git checkout <branch>` or `git merge` that would replace `vise.lock` fails
 inside the sandbox with `unable to unlink old`. That is the policy working:
