@@ -279,7 +279,7 @@ func (o *Outcome) Finalize() {
 		o.Verdict = "red"
 		detail := "a pinned spec is not met yet; keep building toward it, do not revert"
 		if o.Pins != nil && o.Pins.UnmetCount > 0 {
-			detail = fmt.Sprintf("%d pin(s) unmet: %s — keep building toward the spec, do not revert; vise verify --probe <id> shows the diff", o.Pins.UnmetCount, describePins(o.Pins.Unmet, o.Pins.UnmetCount))
+			detail = fmt.Sprintf("%d pin(s) unmet (%s) — keep building toward the spec, do not revert; vise verify --probe <id> shows the diff", o.Pins.UnmetCount, describePins(o.Pins.Unmet, o.Pins.UnmetCount))
 		}
 		o.Next = Next{Action: NextBuild, Detail: detail}
 	case o.Counts.Metric > 0:
@@ -291,7 +291,7 @@ func (o *Outcome) Finalize() {
 		o.Verdict = "green"
 		o.Next = Next{Action: NextProceed, Detail: "all declared checks matched"}
 		if o.Pins != nil && o.Pins.PassingUnacceptedCount > 0 {
-			o.Next.Detail = fmt.Sprintf("all declared checks matched; %d pin(s) passing, not yet accepted: %s — an operator records to accept", o.Pins.PassingUnacceptedCount, describePins(o.Pins.PassingUnaccepted, o.Pins.PassingUnacceptedCount))
+			o.Next.Detail = fmt.Sprintf("all declared checks matched; %d pin(s) passing, not yet accepted (%s) — an operator records to accept", o.Pins.PassingUnacceptedCount, describePins(o.Pins.PassingUnaccepted, o.Pins.PassingUnacceptedCount))
 		}
 	}
 	if len(o.Failures) == 0 {

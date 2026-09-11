@@ -405,7 +405,7 @@ func TestRecordFreezesAnUnmetPinWithoutAcceptingIt(t *testing.T) {
 	if counts.Declared != 1 || counts.Pass != 0 || counts.Unmet != 1 {
 		t.Fatalf("counts = %#v; an unmet pin is not a pass", counts)
 	}
-	if !strings.Contains(result.Outcome.Next.Detail, "1 pin(s) unmet: greet") {
+	if !strings.Contains(result.Outcome.Next.Detail, "1 pin(s) unmet (greet)") {
 		t.Fatalf("next = %#v", result.Outcome.Next)
 	}
 	events, err := ReadJournal(root, 5)
@@ -670,7 +670,7 @@ func TestVerifyClassifiesAnUnacceptedPinPerTheUnmetTable(t *testing.T) {
 		if outcome.Pins == nil || outcome.Pins.Evaluated != 1 || outcome.Pins.UnmetCount != 1 || outcome.Pins.Unmet[0] != "greet" {
 			t.Fatalf("%s: pins = %#v", name, outcome.Pins)
 		}
-		if !strings.Contains(outcome.Next.Detail, "1 pin(s) unmet: greet") || !strings.Contains(outcome.Next.Detail, "do not revert") || !strings.Contains(outcome.Next.Detail, "vise verify --probe <id> shows the diff") {
+		if !strings.Contains(outcome.Next.Detail, "1 pin(s) unmet (greet)") || !strings.Contains(outcome.Next.Detail, "do not revert") || !strings.Contains(outcome.Next.Detail, "vise verify --probe <id> shows the diff") {
 			t.Fatalf("%s: next = %#v", name, outcome.Next)
 		}
 		return result
@@ -720,7 +720,7 @@ func TestVerifyClassifiesAnUnacceptedPinPerTheUnmetTable(t *testing.T) {
 	if met.Outcome.Pins == nil || met.Outcome.Pins.PassingUnacceptedCount != 1 || met.Outcome.Pins.PassingUnaccepted[0] != "greet" {
 		t.Fatalf("passing-unaccepted not reported: %#v", met.Outcome.Pins)
 	}
-	if !strings.Contains(met.Outcome.Next.Detail, "1 pin(s) passing, not yet accepted: greet") {
+	if !strings.Contains(met.Outcome.Next.Detail, "1 pin(s) passing, not yet accepted (greet)") {
 		t.Fatalf("next = %#v", met.Outcome.Next)
 	}
 	lock, _, _ := LoadLockfile(root)
@@ -957,7 +957,7 @@ func TestGatePinSummaryIsBoundedAndScopedToWhatRan(t *testing.T) {
 	if all.Outcome.Pins.Evaluated != 5 || all.Outcome.Pins.UnmetCount != 5 || len(all.Outcome.Pins.Unmet) != 3 {
 		t.Fatalf("pins = %#v", all.Outcome.Pins)
 	}
-	if !strings.Contains(all.Outcome.Next.Detail, "5 pin(s) unmet: p1, p2, p3, … and 2 more") {
+	if !strings.Contains(all.Outcome.Next.Detail, "5 pin(s) unmet (p1, p2, p3, … and 2 more)") {
 		t.Fatalf("next = %#v", all.Outcome.Next)
 	}
 	one := Verify(root, manifest, manifestBytes, VerifyOptions{ProbeID: "p4"})

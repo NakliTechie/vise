@@ -365,6 +365,150 @@ Metrics count in the denominator; `verify` and `--json` carry the deltas. The me
 
 The agent may draft a probe into `.vise/proposals.toml` (same schema as `[[probe]]`). `status` counts them (`"pending_proposals":1`); the operator moves accepted entries into `vise.toml` and records after the fix lands. A malformed proposals file is reported as `proposal_error` and changes nothing else.
 
+## 9.5 Pins: a spec written before the code
+
+Everything above freezes behavior the code already has. A **pin** is a probe
+whose expected bytes come from a file a human wrote *before* the code existed.
+Until the working tree produces exactly those bytes the pin is `unmet`: the
+gate exits 6 and tells the agent to `build`, not to revert. Once an operator's
+`record` has seen it met, it is *accepted*, and from then on it is judged like
+every other probe. One lockfile, one gate, two directions: the new thing is
+right, and nothing else moved.
+
+The same repository as §1, with a second probe the tool does not implement yet.
+The spec is the operator's, written first:
+
+```sh
+printf 'rows: 2\ntotal: 3\n' > spec/summary.stdout
+```
+
+```toml
+[[probe]]
+id = "summary"
+run = "./bin/mytool --summary fixtures.csv"
+deps = ["fixtures.csv"]
+expect.stdout = "spec/summary.stdout"     # the spec; absent stderr means expected empty
+```
+
+`expect` is what makes a probe a pin. A stream with no spec is expected empty
+— normalize what you do not care about in `run`, the way every probe does —
+and a pin with artifacts names a spec for each of them under `expect.files`.
+The spec's hash goes into the lockfile beside the expectation, which is the
+whole point: the file the agent might be tempted to edit is part of the judge.
+
+Record before anything is built. The freeze completes; the pin is named as
+unmet, in the line, the JSON, and the journal, rather than counted as a pass:
+
+```text
+$ vise record
+RECORDED — 2 probe(s) · 0 metric(s) · pins: 0 accepted, 1 unmet (summary)
+lock: sha256:874e201afeba528da0a5723f4436553a109a4611985e93d8d150a2b5ec53e82c
+next: proceed — baseline frozen with 1 pin(s) unmet (summary) — an agent builds to them, and an operator records again to accept
+```
+
+Hand it to the agent. Its first gate is exit 6, and that is the one first
+verdict the contract does not treat as a blocked repository:
+
+```text
+$ vise gate
+GATE RED [unmet] — 1/2: summary
+lock: sha256:874e201afeba528da0a5723f4436553a109a4611985e93d8d150a2b5ec53e82c
+next: build — 1 pin(s) unmet (summary) — keep building toward the spec, do not revert; vise verify --probe <id> shows the diff
+
+$ vise verify --probe summary
+VERIFY RED [unmet] — 0/1
+summary [unmet] — not built yet: stdout does not match the spec
+--- expected/stdout
++++ got/stdout
+@@ first divergence line 1 @@
+-rows: 2
+-total: 3
++rows: 0
+```
+
+The diff is the spec on one side and what the code did on the other. The
+detail says what the run actually did — a program that does not exist yet
+reads `not built yet: probe could not be launched (exit 127)`, a hang reads
+`timed out` — so a 127 stays visible as a 127 even though the class is
+`unmet`. Metrics are not run while a pin is unmet, and the counts say
+`skipped`, never pass.
+
+The agent builds the feature and gates. Green — and the pin is named as
+passing but not yet accepted, because only a `record` accepts, and the gate
+writes nothing:
+
+```text
+$ vise gate
+GATE GREEN — 2/2
+lock: sha256:874e201afeba528da0a5723f4436553a109a4611985e93d8d150a2b5ec53e82c
+
+$ vise gate --json   # the pins object
+"pins":{"evaluated":1,"passing_unaccepted":["summary"],"passing_unaccepted_count":1,"unmet":[],"unmet_count":0}
+```
+
+Acceptance is the operator's review gesture, and the preview shows it as a
+line of its own — a record whose only effect is a transition changes what the
+gate will say without changing an expected byte:
+
+```text
+$ vise record --preview
+CANDIDATE BASELINE — no baseline state written (probes ran; declared artifacts were regenerated)
+summary pin: unaccepted -> accepted at 8e0fc8d14f7a9c4d99edbe1809b7d73839e51bf1
+candidate: sha256:0bc449c05a46430c08da5891d2275f8109d07bbe6f968b6cd547fa61e3683509
+next: human — review the diff, then freeze it with record --accept sha256:0bc449c05a46430c08da5891d2275f8109d07bbe6f968b6cd547fa61e3683509
+
+$ vise record --accept sha256:0bc449c05a46430c08da5891d2275f8109d07bbe6f968b6cd547fa61e3683509
+RECORDED — 2 probe(s) · 0 metric(s) · pins: 1 accepted, 0 unmet
+lock: sha256:3144a8fb61c737e19ec4ad3f43452cd1e4927155cc3a643f90490bed2f1827bf
+```
+
+Acceptance is stamped once, on a clean tree, and carried forward for as long
+as the pin's identity — its definition, its inputs, its spec bytes — is
+unchanged. A later record never demotes it: a record that finds an accepted
+pin failing is *refused* (exit 1, `revert`, lockfile untouched), and an
+operator who means to change the expectation edits the spec, which makes a
+new pin. `status` reports what the lockfile says, never a live observation:
+
+```text
+pins: 1 (accepted 1 · unaccepted 0)
+```
+
+Now the case the design exists for. An agent that cannot write `vise.lock`
+edits the spec to match what its program prints. The spec's hash is in the
+lockfile, so the gate does not compare against the edited bytes at all:
+
+```text
+$ vise gate
+GATE INDETERMINATE [harness] — 0/2: summary
+lock: sha256:3144a8fb61c737e19ec4ad3f43452cd1e4927155cc3a643f90490bed2f1827bf
+next: human — an operator must restore the harness; the repair is in a file an agent may not write
+```
+
+`human`, never green, never `build`. Spec files join the operator's territory
+(§11), and the harness policy in `examples/agent-ready/` denies the agent's
+editor on them.
+
+**Approving an observed output.** Sometimes the honest spec is "what the
+program does now, which I have read and agree with." `vise run` is the tool,
+with one rule: never redirect straight into a spec path. The shell truncates
+the tracked file before vise starts, the work-tree snapshot sees a tracked
+file change during the run, and the run is a harness failure with the spec
+already gone. Capture outside the checkout, read it, then move it:
+
+```sh
+vise run summary > "$TMPDIR/summary.out" && mv "$TMPDIR/summary.out" spec/summary.stdout
+```
+
+Then `record`, which freezes the new spec and — the tree being clean and the
+program producing it — accepts the pin in the same step.
+
+What a pin does not defend against is stated in [SPEC §5](SPEC.md): a program
+written to special-case the probe's input and print the spec's bytes gates
+green. The spec is visible to the agent on purpose — it is what the agent is
+building toward — and the defence is the human's: more than one pin per
+feature, inputs that do not appear in the spec text, and a person reading the
+diff.
+
 ## 10. Exit codes and next actions
 
 | exit | meaning | `next.action` | the agent does |
@@ -376,12 +520,13 @@ The agent may draft a probe into `.vise/proposals.toml` (same schema as `[[probe
 | 3 | indeterminate: flake | `quarantine_ack` | stop unless the harness policy tolerates indeterminate |
 | 4 | not initialized | `record_first` | an operator records a baseline |
 | 5 | metric regression under `no-regress` | `revert` | the change held behavior but worsened quality |
+| 6 | a pin nobody has accepted is unmet | `build` | keep building toward the spec; `verify --probe <id>` shows the diff |
 
 `status` exits 0 whatever it finds and reports instead of failing; only a call it cannot understand is exit 2. `run` mirrors the probe's own exit, with three exceptions that have no probe exit to mirror and are exit 2: a timeout, a refused artifact, and a process left holding the pipe. A launch failure is the probe's own 127 and passes through.
 
 ## 11. Operator territory
 
-`vise.toml`, `vise.lock`, `.vise/blobs/`, and the local `.vise/journal.jsonl` are the judge. vise cannot authenticate its caller: the agent harness must deny the gated agent writes to those paths and deny `vise record` during a campaign. The journal is on the list because the rerun limit is derived from it.
+`vise.toml`, `vise.lock`, `.vise/blobs/`, every file named under a probe's `expect`, and the local `.vise/journal.jsonl` are the judge. vise cannot authenticate its caller: the agent harness must deny the gated agent writes to those paths and deny `vise record` during a campaign. The journal is on the list because the rerun limit is derived from it.
 
 ## 11.5 What a green gate does not tell you
 
@@ -679,6 +824,7 @@ vise run <probe-id>                one probe, streamed and not judged; exit mirr
                                    which have no probe exit to mirror and are exit 2
 vise doctor                        what an operator should fix before an agent works here;
                                    runs no probe, writes nothing, exit 0
+                                   (exit 6 from verify/gate: a pin is unmet — build, do not revert)
 vise status                        the whole situation in one bounded read; exit 0
 vise version                       0.3.0-dev
 --json on every command            one JSON object instead of the human rendering

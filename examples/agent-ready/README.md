@@ -73,6 +73,36 @@ inside the sandbox with `unable to unlink old`. That is the policy working:
 the agent's branch is not supposed to carry a different lockfile. Reverting
 its own code with `git checkout -- <file>` is unaffected.
 
+**The gate as the stop condition.** A Claude Code `Stop` hook that runs the
+gate and exits 2 on anything but green keeps the agent working until the
+judge says so, with the verdict line as the reason it sees:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "out=$(vise gate --quiet 2>&1); case \"$out\" in 'GATE GREEN'*) exit 0;; esac; printf '%s\\n' \"$out\" >&2; exit 2"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Two limits, both from Claude Code's documentation: it ends the turn anyway
+after 8 consecutive blocks, and the hook's input carries `stop_hook_active`
+so a hook can decline to block a condition that will never resolve. The exit
+code of `vise gate` is the source of truth; the hook is a convenience that
+re-reads it. A gate that is red for a reason the agent cannot fix — a
+harness failure routed to `human`, or a pin the task did not ask it to build
+— is a block the agent will hit eight times, so this hook belongs on a
+campaign where the first gate is green or exit 6, and nowhere else.
+
 **Before trusting the fragment, run both checks once, by hand** — a guard
 nobody has watched fire is a comment:
 

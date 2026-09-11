@@ -355,7 +355,7 @@ func (r *recordRun) reportPins() {
 	}
 	if len(r.result.Pins.Unmet) == 0 {
 		if len(r.result.Pins.PassingUnaccepted) > 0 && r.result.Outcome.Next.Action == NextProceed {
-			r.result.Outcome.Next.Detail = fmt.Sprintf("baseline frozen; %d pin(s) met but not accepted because the tree is dirty: %s — an operator records on a clean tree to accept", len(r.result.Pins.PassingUnaccepted), boundedIDs(r.result.Pins.PassingUnaccepted, 3))
+			r.result.Outcome.Next.Detail = fmt.Sprintf("baseline frozen; %d pin(s) met but not accepted because the tree is dirty (%s) — an operator records on a clean tree to accept", len(r.result.Pins.PassingUnaccepted), boundedIDs(r.result.Pins.PassingUnaccepted, 3))
 		}
 		return
 	}
@@ -368,9 +368,9 @@ func (r *recordRun) reportPins() {
 		// the pin summary travels in the result and the diff.
 		return
 	}
-	detail := fmt.Sprintf("baseline frozen with %d pin(s) unmet: %s — an agent builds to them, and an operator records again to accept", len(r.result.Pins.Unmet), boundedIDs(r.result.Pins.Unmet, 3))
+	detail := fmt.Sprintf("baseline frozen with %d pin(s) unmet (%s) — an agent builds to them, and an operator records again to accept", len(r.result.Pins.Unmet), boundedIDs(r.result.Pins.Unmet, 3))
 	if len(r.result.Pins.PassingUnaccepted) > 0 {
-		detail += fmt.Sprintf("; %d pin(s) met but not accepted because the tree is dirty: %s", len(r.result.Pins.PassingUnaccepted), boundedIDs(r.result.Pins.PassingUnaccepted, 3))
+		detail += fmt.Sprintf("; %d pin(s) met but not accepted because the tree is dirty (%s)", len(r.result.Pins.PassingUnaccepted), boundedIDs(r.result.Pins.PassingUnaccepted, 3))
 	}
 	if len(r.manifest.Metrics) > 0 {
 		detail += "; metric baselines were taken with those pins unmet"
