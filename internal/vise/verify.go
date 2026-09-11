@@ -286,7 +286,7 @@ func replayUnacceptedPin(root string, outcome *Outcome, runner Runner, probe Pro
 		outcome.AddFailure(probe.ID, probeMismatchFailure(root, "flake", "mismatching observations differed across the single retry", expected, first))
 		return true
 	}
-	failure := probeMismatchFailure(root, "unmet", unmetDetail(first), expected, first)
+	failure := probeMismatchFailure(root, "unmet", unmetDetail(first, expected), expected, first)
 	if first.TimedOut {
 		// The bytes a killed run printed are not an observation; the diff
 		// would compare them as if they were.
@@ -298,10 +298,24 @@ func replayUnacceptedPin(root string, outcome *Outcome, runner Runner, probe Pro
 }
 
 // unmetDetail says in one line what the run did, so an agent can see a 127
-// for what it is even though the class is unmet.
-func unmetDetail(run RunResult) string {
+// for what it is even though the class is unmet, and which part of a
+// completed run's observation missed the spec.
+func unmetDetail(run RunResult, expected ProbeLock) string {
 	if run.HarnessError != "" {
 		return "not built yet: " + run.HarnessError
+	}
+	switch {
+	case run.Exit != expected.Exit:
+		return fmt.Sprintf("not built yet: exit %d where the spec expects %d", run.Exit, expected.Exit)
+	case run.Stdout.Hash != expected.Stdout:
+		return "not built yet: stdout does not match the spec"
+	case run.Stderr.Hash != expected.Stderr:
+		return "not built yet: stderr does not match the spec"
+	}
+	for _, path := range sortedKeys(expected.Files) {
+		if run.Files[path].Hash != expected.Files[path] {
+			return "not built yet: artifact " + path + " does not match the spec"
+		}
 	}
 	return "not built yet: the observed output does not match the spec"
 }
@@ -508,6 +522,17 @@ func validatePinEntry(root string, probe Probe, expected ProbeLock) (Failure, bo
 	}
 	if !stringMapEqual(hashes, expected.Pin.Spec) {
 		return Failure{Class: "harness", Detail: "spec changed after recording, not behavior; restore the spec file, or an operator re-records to re-accept", Operator: true}, true
+	}
+	// The spec hashes matching is not the same as the expectation being the
+	// spec: a lockfile whose stdout hash names other bytes than the spec file's
+	// would judge against something no human wrote. Rebuild the expectation
+	// from the spec and compare every field the gate will judge.
+	rebuilt, err := pinExpectation(root, probe, map[string][]byte{})
+	if err != nil {
+		return Failure{Class: "harness", Detail: err.Error() + "; restore the spec, or an operator re-records", Operator: true}, true
+	}
+	if rebuilt.Exit != expected.Exit || rebuilt.Stdout != expected.Stdout || rebuilt.Stderr != expected.Stderr || !stringMapEqual(rebuilt.Files, expected.Files) {
+		return Failure{Class: "harness", Detail: "the baseline's expectation for this pin is not what its spec files say; an operator re-records", Operator: true}, true
 	}
 	return Failure{}, false
 }

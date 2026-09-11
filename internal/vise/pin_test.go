@@ -3,6 +3,7 @@ package vise
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -503,8 +504,8 @@ func TestRecordOnADirtyTreeNeverAcceptsAPin(t *testing.T) {
 	if lock.Probes["greet"].Pin.AcceptedCommit != nil {
 		t.Fatal("a dirty record accepted a pin; the tree it saw is not HEAD")
 	}
-	if result.Pins == nil || len(result.Pins.Unmet) != 1 {
-		t.Fatalf("pins = %#v", result.Pins)
+	if result.Pins == nil || len(result.Pins.Unmet) != 0 || len(result.Pins.PassingUnaccepted) != 1 {
+		t.Fatalf("a met pin on a dirty tree is passing-unaccepted, not unmet: %#v", result.Pins)
 	}
 }
 
@@ -1129,5 +1130,188 @@ func TestDoctorReportsSpecGaps(t *testing.T) {
 	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\nspec/\n")
 	if f := findingsFor("spec-ignored"); len(f) != 1 || !strings.Contains(f[0].Detail, "spec/greet.stdout") {
 		t.Fatalf("ignored spec: %#v", f)
+	}
+}
+
+// Findings from the between-batch cold review (GPT via codex, 2026-09-12),
+// each pinned so the fix cannot drift out.
+
+// Two timed-out runs still compare their missing-artifact sets: a run that
+// sometimes writes its artifact before hanging is unstable, not slow.
+func TestTimedOutPinRunsStillCompareTheirArtifactSets(t *testing.T) {
+	a := RunResult{TimedOut: true, Tolerated: true, HarnessError: "t", MissingFiles: []string{"out/a"}}
+	b := RunResult{TimedOut: true, Tolerated: true, HarnessError: "t"}
+	if pinObservationsEqual(a, b) {
+		t.Fatal("different artifact sets across two timeouts must not agree")
+	}
+	if !pinObservationsEqual(a, a) {
+		t.Fatal("the same timeout must agree with itself")
+	}
+}
+
+// A probe killed by a signal is a condition, never an exit a pin could
+// expect: tolerated on an unaccepted pin, harness on an accepted one.
+func TestASignalDeathIsATypedConditionNotAnExit(t *testing.T) {
+	root := testGitRepo(t)
+	runner := Runner{Root: root, Manifest: testManifest()}
+	run := runner.RunProbe(Probe{ID: "crash", Run: "kill -9 $$", Timeout: 5}, true)
+	if !run.Terminated || !run.Tolerated || run.Exit >= 0 || pinCondition(run) != "terminated" || !strings.Contains(run.HarnessError, "terminated by a signal") {
+		t.Fatalf("signal death: %#v", run)
+	}
+
+	writeTestFile(t, root, "spec/crash.stdout", "ok\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n[[probe]]\nid = \"crash\"\nrun = \"kill -9 $$\"\nexpect.stdout = \"spec/crash.stdout\"\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "crashing pin")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPinRepo(t, root, manifest, manifestBytes)
+	result := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	if result.Outcome.Exit != ExitUnmet || !strings.Contains(result.Outcome.Failures["crash"].Detail, "terminated by a signal") {
+		t.Fatalf("a crashing unaccepted pin is unmet, naming the signal: %#v", result.Outcome)
+	}
+}
+
+// --allow-dirty freezes a met pin without accepting it, and the record says
+// which pins were met rather than calling them unmet.
+func TestADirtyRecordReportsAMetPinAsPassingNotUnmet(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, manifestBytes := load()
+	writeTestFile(t, root, "bin/greet", "#!/bin/sh\nprintf 'hello Ada\\n'\n")
+	if err := os.Chmod(filepath.Join(root, "bin", "greet"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result := Record(root, manifest, manifestBytes, RecordOptions{AllowDirty: true})
+	if result.Outcome.Exit != ExitOK || result.Pins == nil {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+	if len(result.Pins.Unmet) != 0 || len(result.Pins.PassingUnaccepted) != 1 || result.Pins.PassingUnaccepted[0] != "greet" || len(result.Pins.Accepted) != 0 {
+		t.Fatalf("pins = %#v", result.Pins)
+	}
+	if result.Outcome.Counts.Unmet != 0 || !strings.Contains(result.Outcome.Next.Detail, "met but not accepted because the tree is dirty") {
+		t.Fatalf("outcome = %#v", result.Outcome)
+	}
+}
+
+// The unmet detail names the part of the observation that missed the spec.
+func TestUnmetDetailNamesTheStreamThatMissed(t *testing.T) {
+	expected := ProbeLock{Exit: 0, Stdout: "sha256:a", Stderr: "sha256:b", Files: map[string]string{"out/x": "sha256:c"}}
+	cases := []struct {
+		run  RunResult
+		want string
+	}{
+		{RunResult{Exit: 3, Stdout: Capture{Hash: "sha256:a"}}, "exit 3 where the spec expects 0"},
+		{RunResult{Stdout: Capture{Hash: "sha256:z"}}, "stdout does not match"},
+		{RunResult{Stdout: Capture{Hash: "sha256:a"}, Stderr: Capture{Hash: "sha256:z"}}, "stderr does not match"},
+		{RunResult{Stdout: Capture{Hash: "sha256:a"}, Stderr: Capture{Hash: "sha256:b"}, Files: map[string]Capture{"out/x": {Hash: "sha256:z"}}}, "artifact out/x does not match"},
+		{RunResult{LaunchFailed: true, Tolerated: true, HarnessError: "probe could not be launched (exit 127)"}, "not built yet: probe could not be launched"},
+	}
+	for _, c := range cases {
+		if got := unmetDetail(c.run, expected); !strings.Contains(got, c.want) {
+			t.Fatalf("detail %q lacks %q", got, c.want)
+		}
+	}
+}
+
+// A lockfile whose pin object is malformed is refused at load, as every
+// other malformed hash or commit is.
+func TestLockfileRefusesAMalformedPinObject(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, manifestBytes := load()
+	recordPinRepo(t, root, manifest, manifestBytes)
+	good, err := os.ReadFile(filepath.Join(root, "vise.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(good), `"accepted_commit": null`) {
+		t.Fatalf("an unaccepted pin must carry accepted_commit as null, never omit it:\n%s", good)
+	}
+	specHash := HashBytes([]byte("hello Ada\n"))
+	for name, mutate := range map[string]func(string) string{
+		"a spec hash that is not a hash": func(s string) string { return strings.Replace(s, `"spec/greet.stdout": "`+specHash+`"`, `"spec/greet.stdout": "nonsense"`, 1) },
+		"an accepted_commit that is not a commit": func(s string) string {
+			return strings.Replace(s, `"accepted_commit": null`, `"accepted_commit": "abc"`, 1)
+		},
+		"a pin with no spec hashes": func(s string) string {
+			return regexp.MustCompile(`(?s)"spec": \{[^}]*\}`).ReplaceAllString(s, `"spec": {}`)
+		},
+	} {
+		mutated := mutate(string(good))
+		if mutated == string(good) {
+			t.Fatalf("%s: the mutation did not apply:\n%s", name, good)
+		}
+		if err := os.WriteFile(filepath.Join(root, "vise.lock"), []byte(mutated), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := LoadLockfile(root); err == nil {
+			t.Fatalf("%s loaded", name)
+		}
+	}
+	os.WriteFile(filepath.Join(root, "vise.lock"), good, 0o644)
+
+	// And a lockfile whose expectation is not what the spec says — the spec
+	// hashes match, the stdout hash names other bytes — is refused by the
+	// gate's pre-flight as an operator repair, never judged.
+	other := HashBytes([]byte("other\n"))
+	if err := WriteBlobs(root, map[string][]byte{other: []byte("other\n")}); err != nil {
+		t.Fatal(err)
+	}
+	tampered := strings.Replace(string(good), `"stdout": "`+specHash+`"`, `"stdout": "`+other+`"`, 1)
+	if err := os.WriteFile(filepath.Join(root, "vise.lock"), []byte(tampered), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	if result.Outcome.Exit != ExitHarness || !strings.Contains(result.Outcome.Failures["greet"].Detail, "not what its spec files say") {
+		t.Fatalf("a lockfile expectation that is not the spec must be refused: %#v", result.Outcome)
+	}
+}
+
+// Identity is run_hash plus deps plus spec hashes: changing the command or an
+// input resets acceptance the same way changing the spec does.
+func TestPinIdentityCoversTheCommandAndTheInputs(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "spec/greet.stdout", "hello Ada\n")
+	writeTestFile(t, root, "fixtures/name", "Ada\n")
+	writeTestFile(t, root, "bin/greet", "#!/bin/sh\nprintf 'hello %s\\n' \"$(cat fixtures/name)\"\n")
+	if err := os.Chmod(filepath.Join(root, "bin", "greet"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifestText := "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n[[probe]]\nid = \"greet\"\nrun = \"./bin/greet\"\ndeps = [\"fixtures/name\"]\nexpect.stdout = \"spec/greet.stdout\"\n"
+	writeTestFile(t, root, "vise.toml", manifestText)
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "pin with a dep")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPinRepo(t, root, manifest, manifestBytes)
+	if lock, _, _ := LoadLockfile(root); lock.Probes["greet"].Pin.AcceptedCommit == nil {
+		t.Fatal("the pin was not accepted on a clean, met tree")
+	}
+
+	// A changed input: still met (the output is the same because the spec
+	// and the fixture were changed together), but a new identity.
+	writeTestFile(t, root, "fixtures/name", "Ada\n\n")
+	writeTestFile(t, root, "bin/greet", "#!/bin/sh\nprintf 'hello %s\\n' \"$(head -1 fixtures/name)\"\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "change the input")
+	preview := Record(root, manifest, manifestBytes, RecordOptions{Preview: true})
+	if !strings.Contains(preview.ReviewDiff, "accepted afresh") {
+		t.Fatalf("a changed dep must reset the identity:\n%s", preview.ReviewDiff)
+	}
+
+	// A changed command: same.
+	writeTestFile(t, root, "vise.toml", strings.Replace(manifestText, "./bin/greet", "sh bin/greet", 1))
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "change the command")
+	manifest2, manifestBytes2, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview = Record(root, manifest2, manifestBytes2, RecordOptions{Preview: true})
+	if !strings.Contains(preview.ReviewDiff, "accepted afresh") {
+		t.Fatalf("a changed command must reset the identity:\n%s", preview.ReviewDiff)
 	}
 }

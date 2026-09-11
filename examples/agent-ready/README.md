@@ -41,11 +41,16 @@ checked.
 Two facts from Claude Code's own documentation shape what is and is not in
 that list:
 
-- **With the Bash sandbox on, every `Edit` deny rule is also added to
-  `sandbox.filesystem.denyWrite`, which the operating system enforces on every
-  Bash command and its child processes.** That is the property you want on the
-  static judge files — a Python or Node script the agent runs cannot write them
-  either — and it is why the list stops where it does.
+- **The fragment turns the Bash sandbox on and lists the static judge files
+  under `sandbox.filesystem.denyWrite`, which the operating system enforces on
+  every Bash command and its child processes.** (Claude Code also promotes
+  every `Edit` deny rule to that list on its own; the explicit entries mean the
+  protection does not depend on that promotion, and a reader sees it.) That is
+  the property you want on the static judge files — a Python or Node script
+  the agent runs cannot write them either — and it is why the list stops where
+  it does. Without `sandbox.enabled`, the `Edit` rules stop the agent's editor
+  and nothing stops a shell redirect; the first by-hand check below is what
+  tells you which of the two you have.
 - **`vise gate` is one of those child processes.** It has to append
   `.vise/journal.jsonl`, take `.vise/run.lock`, and write scratch under
   `.vise/tmp/`. A deny rule on the journal, or on `.vise/` as a whole, would be

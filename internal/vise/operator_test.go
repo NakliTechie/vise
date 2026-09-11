@@ -218,8 +218,8 @@ func TestNoFixProbeActionPointsAtAFileTheAgentMayNotWrite(t *testing.T) {
 // Anything that replaces the whole Next has to appear here with a reason.
 func TestNothingOverridesTheActionFinalizeChose(t *testing.T) {
 	allowed := map[string]string{
-		"record.go:404": "record --preview: no failure exists, so there is nothing for the operator flag to mark; human means an operator reviews a diff",
-		"record.go:555": "record's flake path: no harness failure exists, and a nondeterministic probe is usually a nondeterministic program, which an agent may fix",
+		"record.go:425": "record --preview: no failure exists, so there is nothing for the operator flag to mark; human means an operator reviews a diff",
+		"record.go:576": "record's flake path: no harness failure exists, and a nondeterministic probe is usually a nondeterministic program, which an agent may fix",
 	}
 	// Not `outcome.Next`: the first version of this guard matched that literal
 	// name, and the very bug it was written for assigns to `blocked.Next`. It

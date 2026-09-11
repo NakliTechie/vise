@@ -73,6 +73,9 @@ func renderPinsRecorded(pins *vise.PinsRecorded) string {
 	if len(pins.Unmet) > 0 {
 		summary += " (" + boundedList(pins.Unmet, maxDriftLines) + ")"
 	}
+	if len(pins.PassingUnaccepted) > 0 {
+		summary += fmt.Sprintf(", %d met on a dirty tree and not accepted (%s)", len(pins.PassingUnaccepted), boundedList(pins.PassingUnaccepted, maxDriftLines))
+	}
 	return summary
 }
 

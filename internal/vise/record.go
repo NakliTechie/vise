@@ -39,6 +39,11 @@ type RecordResult struct {
 type PinsRecorded struct {
 	Accepted []string `json:"accepted"`
 	Unmet    []string `json:"unmet"`
+	// PassingUnaccepted names pins the record saw meet their spec without
+	// accepting them — a --allow-dirty record, whose tree is not HEAD. They
+	// are not unmet, and they are not accepted; the operator records again
+	// on a clean tree.
+	PassingUnaccepted []string `json:"passing_unaccepted,omitempty"`
 }
 
 type recordSelfTestResult struct {
@@ -304,11 +309,7 @@ func (r *recordRun) acceptance(id string, plan pinPlan) *string {
 	if plan.accepted != nil {
 		return plan.accepted
 	}
-	if r.dirty {
-		return nil
-	}
-	run, ok := r.selfTest.probes[id]
-	if !ok || run.HarnessError != "" || !RunMatchesLock(run, plan.expected) {
+	if r.dirty || !r.pinMet(id, plan) {
 		return nil
 	}
 	commit := r.commit
@@ -321,16 +322,27 @@ func (r *recordRun) pinsRecorded() *PinsRecorded {
 		return nil
 	}
 	summary := &PinsRecorded{Accepted: []string{}, Unmet: []string{}}
-	for id := range r.pins {
-		if r.lock.Probes[id].Pin.AcceptedCommit != nil {
+	for id, plan := range r.pins {
+		switch {
+		case r.lock.Probes[id].Pin.AcceptedCommit != nil:
 			summary.Accepted = append(summary.Accepted, id)
-		} else {
+		case r.pinMet(id, plan):
+			summary.PassingUnaccepted = append(summary.PassingUnaccepted, id)
+		default:
 			summary.Unmet = append(summary.Unmet, id)
 		}
 	}
 	sort.Strings(summary.Accepted)
 	sort.Strings(summary.Unmet)
+	sort.Strings(summary.PassingUnaccepted)
 	return summary
+}
+
+// pinMet reports whether this record's first pass saw the pin produce its
+// spec with no condition — the observation acceptance is decided on.
+func (r *recordRun) pinMet(id string, plan pinPlan) bool {
+	run, ok := r.selfTest.probes[id]
+	return ok && run.HarnessError == "" && RunMatchesLock(run, plan.expected)
 }
 
 // reportPins makes the outcome say what the freeze did about its pins rather
@@ -338,7 +350,13 @@ func (r *recordRun) pinsRecorded() *PinsRecorded {
 // completed — and the unmet pins are counted as unmet, not as passes.
 func (r *recordRun) reportPins() {
 	r.result.Pins = r.pinsRecorded()
-	if r.result.Pins == nil || len(r.result.Pins.Unmet) == 0 {
+	if r.result.Pins == nil {
+		return
+	}
+	if len(r.result.Pins.Unmet) == 0 {
+		if len(r.result.Pins.PassingUnaccepted) > 0 && r.result.Outcome.Next.Action == NextProceed {
+			r.result.Outcome.Next.Detail = fmt.Sprintf("baseline frozen; %d pin(s) met but not accepted because the tree is dirty: %s — an operator records on a clean tree to accept", len(r.result.Pins.PassingUnaccepted), boundedIDs(r.result.Pins.PassingUnaccepted, 3))
+		}
 		return
 	}
 	outcome := &r.result.Outcome
@@ -351,6 +369,9 @@ func (r *recordRun) reportPins() {
 		return
 	}
 	detail := fmt.Sprintf("baseline frozen with %d pin(s) unmet: %s — an agent builds to them, and an operator records again to accept", len(r.result.Pins.Unmet), boundedIDs(r.result.Pins.Unmet, 3))
+	if len(r.result.Pins.PassingUnaccepted) > 0 {
+		detail += fmt.Sprintf("; %d pin(s) met but not accepted because the tree is dirty: %s", len(r.result.Pins.PassingUnaccepted), boundedIDs(r.result.Pins.PassingUnaccepted, 3))
+	}
 	if len(r.manifest.Metrics) > 0 {
 		detail += "; metric baselines were taken with those pins unmet"
 	}

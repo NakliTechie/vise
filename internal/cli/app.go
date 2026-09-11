@@ -490,8 +490,11 @@ func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Write
 	result := runner.RunProbe(probe, true)
 	// run mirrors the probe's own exit. A launch failure is the probe's exit 127 and
 	// passes through; a timeout, a refused artifact, or a lingering pipe holder
-	// has no probe exit to mirror and stays a harness error.
-	if result.HarnessError != "" && !(result.Exit == 127 && !result.TimedOut) {
+	// has no probe exit to mirror and stays a harness error. Only a launch
+	// failure with nothing else beside it passes: exit 127 was exempting the
+	// whole result, so a probe that mutated the checkout on its way to a 127
+	// reported the 127 and nothing about the mutation.
+	if result.HarnessError != "" && !(result.LaunchFailed && result.Tolerated) {
 		return renderSimpleError("run", result.HarnessError, jsonMode, stdout, stderr)
 	}
 	if jsonMode {

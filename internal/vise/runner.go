@@ -37,6 +37,7 @@ type RunResult struct {
 	// any probe may produce. Tolerated is true only when HarnessError describes
 	// nothing but one of the three; any hard condition clears it.
 	LaunchFailed bool
+	Terminated   bool
 	MissingFiles []string
 	Tolerated    bool
 }
@@ -296,6 +297,18 @@ func classifyProbe(kind, command string, timeoutSeconds int, cmd *exec.Cmd, stdo
 	var exitErr *exec.ExitError
 	if errors.As(waitErr, &exitErr) {
 		result.Exit = exitErr.ExitCode()
+		if result.Exit < 0 {
+			// Killed by a signal: Go reports -1, which is not an exit status a
+			// probe can expect and was being frozen as one. It is a condition —
+			// tolerated on a pin nobody has accepted, where a skeleton that
+			// crashes is not built yet, and harness everywhere else. The -1
+			// stays on the result: it is nonzero, it can never equal a pin's
+			// expected exit, and the interrupt path asserts on it.
+			result.Terminated = true
+			result.Tolerated = true
+			result.HarnessError = fmt.Sprintf("%s was terminated by a signal before it exited", kind)
+			return result
+		}
 		if result.Exit == 127 {
 			// Name the word the shell could not resolve. "could not be
 			// launched" tells the reader something failed; the missing tool

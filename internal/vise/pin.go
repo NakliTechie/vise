@@ -248,11 +248,14 @@ func pinIdentityEqual(old, fresh ProbeLock) bool {
 // only its condition: the bytes a run printed before it was killed depend on
 // timing, so two timed-out runs agree by having both timed out.
 func pinObservationsEqual(a, b RunResult) bool {
-	if a.TimedOut || b.TimedOut {
-		return a.TimedOut == b.TimedOut
-	}
-	if a.LaunchFailed != b.LaunchFailed || !stringSliceEqual(a.MissingFiles, b.MissingFiles) {
+	if a.LaunchFailed != b.LaunchFailed || a.Terminated != b.Terminated || !stringSliceEqual(a.MissingFiles, b.MissingFiles) {
 		return false
+	}
+	if a.TimedOut || b.TimedOut {
+		// Bytes printed before the kill depend on timing and are not compared;
+		// the artifact set is, because a run that sometimes writes its
+		// artifact before hanging is unstable, not merely slow.
+		return a.TimedOut == b.TimedOut
 	}
 	return RunResultsEqual(a, b)
 }
@@ -265,6 +268,8 @@ func pinCondition(run RunResult) string {
 		return "timed_out"
 	case run.LaunchFailed:
 		return "launch_failed"
+	case run.Terminated:
+		return "terminated"
 	case len(run.MissingFiles) > 0:
 		return "artifact_missing"
 	}
