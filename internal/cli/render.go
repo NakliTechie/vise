@@ -90,6 +90,7 @@ func renderStatus(w io.Writer, report vise.StatusReport) {
 	renderStatusLockfile(w, report.Lock)
 	renderStatusFingerprint(w, report.Lock.FingerprintMatch)
 	renderStatusRecordedCommits(w, report.Lock.RecordedCommits)
+	renderStatusPins(w, report.Lock.Pins)
 	renderStatusLockHash(w, report.Lock.Hash)
 	renderStatusLockError(w, report.Lock.Error)
 	renderStatusDrift(w, report.Lock.Drift)
@@ -143,6 +144,24 @@ func renderStatusRecordedCommits(w io.Writer, commits []string) {
 		suffix = fmt.Sprintf(" … %d more (see --json)", len(commits)-maxDriftLines)
 	}
 	fmt.Fprintln(w, "recorded commits: "+terminalSafe(strings.Join(shown, ", "), false)+suffix)
+}
+
+// renderStatusPins is one line, from the lockfile only: what an operator has
+// accepted, and which pins wait. Nothing when the baseline declares no pin,
+// so a status without pins reads as it always did.
+func renderStatusPins(w io.Writer, pins *vise.StatusPins) {
+	if pins == nil {
+		return
+	}
+	line := fmt.Sprintf("pins: %d (accepted %d · unaccepted %d", pins.Declared, pins.Accepted, pins.UnacceptedCount)
+	if pins.UnacceptedCount > 0 {
+		ids := strings.Join(pins.Unaccepted, ", ")
+		if pins.UnacceptedCount > len(pins.Unaccepted) {
+			ids += fmt.Sprintf(", … and %d more", pins.UnacceptedCount-len(pins.Unaccepted))
+		}
+		line += ": " + terminalSafe(ids, false)
+	}
+	fmt.Fprintln(w, line+")")
 }
 
 func renderStatusLockHash(w io.Writer, hash string) {

@@ -1034,3 +1034,50 @@ func TestAMetricHeldBackBehindABehaviorFailureIsSkippedNotPassed(t *testing.T) {
 		t.Fatalf("counts = %#v", counts)
 	}
 }
+
+// status reports pins from the lockfile only — recorded acceptance, never a
+// live observation — bounded at three ids, and says nothing at all when the
+// baseline declares no pin.
+func TestStatusReportsRecordedPinAcceptanceOnly(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, manifestBytes := load()
+	recordPinRepo(t, root, manifest, manifestBytes)
+
+	report := BuildStatus(root)
+	pins := report.Lock.Pins
+	if pins == nil || pins.Declared != 1 || pins.Accepted != 0 || pins.UnacceptedCount != 1 || len(pins.Unaccepted) != 1 || pins.Unaccepted[0] != "greet" {
+		t.Fatalf("pins = %#v", pins)
+	}
+
+	// The tree now meets the spec, but nobody has recorded: status must not
+	// say so, because it did not run the probe and acceptance is record's.
+	writeTestFile(t, root, "bin/greet", "#!/bin/sh\nprintf 'hello Ada\\n'\n")
+	if err := os.Chmod(filepath.Join(root, "bin", "greet"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if again := BuildStatus(root); again.Lock.Pins.Accepted != 0 || again.Lock.Pins.UnacceptedCount != 1 {
+		t.Fatalf("status reported a live observation as acceptance: %#v", again.Lock.Pins)
+	}
+
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "build greet")
+	if result := Record(root, manifest, manifestBytes, RecordOptions{ReviewedDiff: true}); result.Outcome.Exit != ExitOK || len(result.Pins.Accepted) != 1 {
+		t.Fatalf("record: %#v %#v", result.Outcome, result.Pins)
+	}
+	if accepted := BuildStatus(root); accepted.Lock.Pins.Accepted != 1 || accepted.Lock.Pins.UnacceptedCount != 0 || len(accepted.Lock.Pins.Unaccepted) != 0 {
+		t.Fatalf("after acceptance: %#v", accepted.Lock.Pins)
+	}
+
+	plain := testGitRepo(t)
+	writeTestFile(t, plain, "vise.toml", "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n[[probe]]\nid = \"p\"\nrun = \"printf ok\"\n")
+	testGit(t, plain, "add", ".")
+	testGit(t, plain, "commit", "-qm", "no pins")
+	m, b, err := LoadManifest(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPinRepo(t, plain, m, b)
+	if BuildStatus(plain).Lock.Pins != nil {
+		t.Fatal("a baseline with no pins must report no pins object")
+	}
+}

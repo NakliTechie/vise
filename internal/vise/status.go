@@ -22,12 +22,26 @@ type StatusLock struct {
 	Metrics          int      `json:"metrics"`
 	FingerprintMatch *bool    `json:"fingerprint_match,omitempty"`
 	RecordedCommits  []string `json:"recorded_commits,omitempty"`
-	Hash             string   `json:"hash,omitempty"`
-	Error            string   `json:"error,omitempty"`
+	// Pins is recorded acceptance only, read from the lockfile: status runs
+	// no probe and cannot know what a dirty tree does now. Absent when the
+	// baseline declares no pin.
+	Pins  *StatusPins `json:"pins,omitempty"`
+	Hash  string      `json:"hash,omitempty"`
+	Error string      `json:"error,omitempty"`
 	// Drift lists every way vise.toml and vise.lock disagree without running a
 	// probe: missing or extra ids, changed probe definitions, changed
 	// dependency hashes, missing blobs. Non-empty drift means gate will refuse.
 	Drift []string `json:"drift,omitempty"`
+}
+
+// StatusPins is the lockfile's word on its pins: how many an operator has
+// accepted, and which have not been — bounded at pinIDLimit ids, with the
+// count carrying the rest.
+type StatusPins struct {
+	Declared        int      `json:"declared"`
+	Accepted        int      `json:"accepted"`
+	Unaccepted      []string `json:"unaccepted"`
+	UnacceptedCount int      `json:"unaccepted_count"`
 }
 
 // StatusTool identifies the binary answering the question. Two builds print
@@ -128,6 +142,7 @@ func buildLockStatus(root string, manifest Manifest, manifestBytes []byte, manif
 		}
 		buildLockCounts(lock, report)
 		buildRecordedCommits(lock, report)
+		buildPinsStatus(lock, report)
 		if manifestErr != nil {
 			// A valid baseline with no manifest to define it is a broken
 			// harness, not an uninitialized repo. The state left standing here
@@ -187,6 +202,29 @@ func buildRecordedCommits(lock Lockfile, report *StatusReport) {
 		report.Lock.RecordedCommits = append(report.Lock.RecordedCommits, commit)
 	}
 	sort.Strings(report.Lock.RecordedCommits)
+}
+
+func buildPinsStatus(lock Lockfile, report *StatusReport) {
+	var pins *StatusPins
+	for _, id := range sortedKeys(lock.Probes) {
+		probe := lock.Probes[id]
+		if probe.Pin == nil {
+			continue
+		}
+		if pins == nil {
+			pins = &StatusPins{Unaccepted: []string{}}
+		}
+		pins.Declared++
+		if probe.Pin.AcceptedCommit != nil {
+			pins.Accepted++
+			continue
+		}
+		pins.UnacceptedCount++
+		if len(pins.Unaccepted) < pinIDLimit {
+			pins.Unaccepted = append(pins.Unaccepted, id)
+		}
+	}
+	report.Lock.Pins = pins
 }
 
 func buildFingerprintComparison(root string, manifest Manifest, lock Lockfile, report *StatusReport) {
