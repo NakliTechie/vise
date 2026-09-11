@@ -330,3 +330,707 @@ func TestPinObservationsCompareConditionsNotBytesOnTimeout(t *testing.T) {
 		t.Fatal("a launch failure and an ordinary exit 127 must not agree")
 	}
 }
+
+// pinRepo is a committed repository with one pin whose program does not exist
+// yet: the spec is on disk, the manifest names it, and ./bin/greet is not
+// there. It returns the root and a loader for the manifest.
+func pinRepo(t *testing.T) (string, func() (Manifest, []byte)) {
+	t.Helper()
+	root := testGitRepo(t)
+	writeTestFile(t, root, "spec/greet.stdout", "hello Ada\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n[[probe]]\nid = \"greet\"\nrun = \"./bin/greet\"\nexpect.stdout = \"spec/greet.stdout\"\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "pin greet before building it")
+	load := func() (Manifest, []byte) {
+		t.Helper()
+		manifest, bytes, err := LoadManifest(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return manifest, bytes
+	}
+	return root, load
+}
+
+func buildGreet(t *testing.T, root, output string) {
+	t.Helper()
+	writeTestFile(t, root, "bin/greet", "#!/bin/sh\nprintf '"+output+"'\n")
+	if err := os.Chmod(filepath.Join(root, "bin", "greet"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "build greet: "+output)
+}
+
+func headCommit(t *testing.T, root string) string {
+	t.Helper()
+	commit, err := GitHead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return commit
+}
+
+// Recording before the program exists freezes the spec as the expectation,
+// tolerates the launch failure, accepts nothing, and says so — in the
+// result, the counts, and the journal — instead of claiming every check
+// matched.
+func TestRecordFreezesAnUnmetPinWithoutAcceptingIt(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, manifestBytes := load()
+	result := Record(root, manifest, manifestBytes, RecordOptions{})
+	if result.Outcome.Exit != ExitOK {
+		t.Fatalf("record refused an unbuilt pin: %#v", result.Outcome)
+	}
+	lock, _, err := LoadLockfile(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := lock.Probes["greet"]
+	specHash := HashBytes([]byte("hello Ada\n"))
+	if entry.Stdout != specHash || entry.Stderr != emptyHash || entry.Exit != 0 {
+		t.Fatalf("the expectation is not the spec: %#v", entry)
+	}
+	if entry.Pin == nil || entry.Pin.AcceptedCommit != nil || entry.Pin.Spec["spec/greet.stdout"] != specHash {
+		t.Fatalf("pin provenance = %#v", entry.Pin)
+	}
+	if data, ok, err := BlobData(root, specHash, false); !ok || err != nil || string(data) != "hello Ada\n" {
+		t.Fatalf("the spec bytes were not stored as a blob: %v %v", ok, err)
+	}
+	if result.Pins == nil || len(result.Pins.Unmet) != 1 || result.Pins.Unmet[0] != "greet" || len(result.Pins.Accepted) != 0 {
+		t.Fatalf("pins = %#v", result.Pins)
+	}
+	counts := result.Outcome.Counts
+	if counts.Declared != 1 || counts.Pass != 0 || counts.Unmet != 1 {
+		t.Fatalf("counts = %#v; an unmet pin is not a pass", counts)
+	}
+	if !strings.Contains(result.Outcome.Next.Detail, "1 pin(s) unmet: greet") {
+		t.Fatalf("next = %#v", result.Outcome.Next)
+	}
+	events, err := ReadJournal(root, 5)
+	if err != nil || len(events) != 1 || events[0].Pins == nil || len(events[0].Pins.Unmet) != 1 || events[0].Counts.Unmet != 1 || events[0].Counts.Pass != 0 {
+		t.Fatalf("journal = %#v, %v", events, err)
+	}
+}
+
+// Two records on the same tree produce byte-identical lockfiles, an unmet pin
+// included, and the review diff between them is empty.
+func TestRecordOfAnUnchangedUnmetPinIsByteIdentical(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, manifestBytes := load()
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("first record: %#v", result.Outcome)
+	}
+	first, err := os.ReadFile(filepath.Join(root, "vise.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "baseline")
+	result := Record(root, manifest, manifestBytes, RecordOptions{ReviewedDiff: true})
+	if result.Outcome.Exit != ExitOK {
+		t.Fatalf("second record: %#v", result.Outcome)
+	}
+	second, _ := os.ReadFile(filepath.Join(root, "vise.lock"))
+	if string(first) != string(second) {
+		t.Fatalf("re-record changed the lockfile:\n%s\n---\n%s", first, second)
+	}
+	if result.ReviewDiff != "No recorded behavior changed." {
+		t.Fatalf("diff = %q", result.ReviewDiff)
+	}
+}
+
+// Once the program produces the spec, a clean-tree record accepts the pin at
+// HEAD; the preview shows the transition as a line of its own; a later record
+// on an unchanged tree carries the acceptance instead of restamping it.
+func TestRecordAcceptsAMetPinOnACleanTreeAndCarriesItForward(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, manifestBytes := load()
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("first record: %#v", result.Outcome)
+	}
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "baseline")
+	buildGreet(t, root, "hello Ada\\n")
+	built := headCommit(t, root)
+
+	preview := Record(root, manifest, manifestBytes, RecordOptions{Preview: true})
+	if preview.Outcome.Exit != ExitOK || !strings.Contains(preview.ReviewDiff, "greet pin: unaccepted -> accepted at "+built) {
+		t.Fatalf("preview = %#v\n%s", preview.Outcome, preview.ReviewDiff)
+	}
+	if preview.Pins == nil || len(preview.Pins.Accepted) != 1 {
+		t.Fatalf("preview pins = %#v", preview.Pins)
+	}
+	accepted := Record(root, manifest, manifestBytes, RecordOptions{Accept: preview.Candidate})
+	if accepted.Outcome.Exit != ExitOK {
+		t.Fatalf("accept: %#v", accepted.Outcome)
+	}
+	lock, _, _ := LoadLockfile(root)
+	if got := lock.Probes["greet"].Pin.AcceptedCommit; got == nil || *got != built {
+		t.Fatalf("accepted_commit = %v, want %s", got, built)
+	}
+	if accepted.Outcome.Counts.Unmet != 0 || accepted.Outcome.Counts.Pass != 1 || strings.Contains(accepted.Outcome.Next.Detail, "unmet") {
+		t.Fatalf("an accepted pin reported as unmet: %#v", accepted.Outcome)
+	}
+	bytesAfterAccept, _ := os.ReadFile(filepath.Join(root, "vise.lock"))
+
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "accept greet")
+	again := Record(root, manifest, manifestBytes, RecordOptions{ReviewedDiff: true})
+	if again.Outcome.Exit != ExitOK {
+		t.Fatalf("re-record: %#v", again.Outcome)
+	}
+	bytesAgain, _ := os.ReadFile(filepath.Join(root, "vise.lock"))
+	if string(bytesAfterAccept) != string(bytesAgain) {
+		t.Fatalf("acceptance was restamped:\n%s\n---\n%s", bytesAfterAccept, bytesAgain)
+	}
+}
+
+// A dirty tree is not HEAD, so a record with --allow-dirty freezes an unmet
+// pin but never accepts a met one.
+func TestRecordOnADirtyTreeNeverAcceptsAPin(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, manifestBytes := load()
+	writeTestFile(t, root, "bin/greet", "#!/bin/sh\nprintf 'hello Ada\\n'\n")
+	if err := os.Chmod(filepath.Join(root, "bin", "greet"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result := Record(root, manifest, manifestBytes, RecordOptions{AllowDirty: true})
+	if result.Outcome.Exit != ExitOK {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+	lock, _, _ := LoadLockfile(root)
+	if lock.Probes["greet"].Pin.AcceptedCommit != nil {
+		t.Fatal("a dirty record accepted a pin; the tree it saw is not HEAD")
+	}
+	if result.Pins == nil || len(result.Pins.Unmet) != 1 {
+		t.Fatalf("pins = %#v", result.Pins)
+	}
+}
+
+// An accepted pin whose identity is unchanged must still meet its spec, or
+// the record is refused as a behavior failure — acceptance is never revoked
+// by a later record, and a regression is never laundered into "not built
+// yet".
+func TestRecordRefusesToWriteWhenAnAcceptedPinNoLongerMeetsItsSpec(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, manifestBytes := load()
+	buildGreet(t, root, "hello Ada\\n")
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK || len(result.Pins.Accepted) != 1 {
+		t.Fatalf("first record: %#v %#v", result.Outcome, result.Pins)
+	}
+	before, _ := os.ReadFile(filepath.Join(root, "vise.lock"))
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "accepted")
+	buildGreet(t, root, "goodbye Ada\\n")
+
+	result := Record(root, manifest, manifestBytes, RecordOptions{ReviewedDiff: true})
+	failure := result.Outcome.Failures["greet"]
+	if result.Outcome.Exit != ExitBehavior || failure.Class != "behavior" || result.Outcome.Next.Action != NextRevert {
+		t.Fatalf("outcome = %#v", result.Outcome)
+	}
+	if !strings.Contains(failure.Detail, "accepted pin no longer meets its spec") || !strings.Contains(result.Outcome.Next.Detail, "change the spec to re-accept") {
+		t.Fatalf("failure = %#v next = %#v", failure, result.Outcome.Next)
+	}
+	if !strings.Contains(failure.Diff, "-hello Ada") || !strings.Contains(failure.Diff, "+goodbye Ada") {
+		t.Fatalf("diff %q does not show spec versus observed", failure.Diff)
+	}
+	after, _ := os.ReadFile(filepath.Join(root, "vise.lock"))
+	if string(before) != string(after) {
+		t.Fatal("a refused record wrote the lockfile")
+	}
+
+	// The program regressing to a launch failure is the same refusal, not a
+	// tolerated condition: tolerance is for pins nobody has accepted.
+	os.Remove(filepath.Join(root, "bin", "greet"))
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "remove greet")
+	gone := Record(root, manifest, manifestBytes, RecordOptions{ReviewedDiff: true})
+	if gone.Outcome.Exit != ExitHarness || gone.Outcome.Failures["greet"].Class != "harness" {
+		t.Fatalf("an accepted pin that cannot launch must be harness, not unmet: %#v", gone.Outcome)
+	}
+}
+
+// Changing the spec changes the pin's identity: the old acceptance is not
+// carried, the diff says so, and the pin is unaccepted until the tree meets
+// the new spec.
+func TestRecordTreatsAChangedSpecAsANewPin(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, manifestBytes := load()
+	buildGreet(t, root, "hello Ada\\n")
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("first record: %#v", result.Outcome)
+	}
+	accepted := headCommit(t, root)
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "accepted")
+	writeTestFile(t, root, "spec/greet.stdout", "hello, Ada!\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "raise the bar")
+
+	preview := Record(root, manifest, manifestBytes, RecordOptions{Preview: true})
+	want := "greet pin: accepted at " + accepted + " -> unaccepted (spec, definition, or inputs changed; a new acceptance is due)"
+	if !strings.Contains(preview.ReviewDiff, want) {
+		t.Fatalf("diff lacks %q:\n%s", want, preview.ReviewDiff)
+	}
+	if !strings.Contains(preview.ReviewDiff, "-hello Ada") || !strings.Contains(preview.ReviewDiff, "+hello, Ada!") {
+		t.Fatalf("diff does not show old spec versus new spec:\n%s", preview.ReviewDiff)
+	}
+	result := Record(root, manifest, manifestBytes, RecordOptions{Accept: preview.Candidate})
+	if result.Outcome.Exit != ExitOK {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+	lock, _, _ := LoadLockfile(root)
+	if lock.Probes["greet"].Pin.AcceptedCommit != nil || len(result.Pins.Unmet) != 1 {
+		t.Fatalf("a changed spec kept its acceptance: %#v", lock.Probes["greet"].Pin)
+	}
+}
+
+// A spec that is not on disk stops the record before any probe runs, as an
+// operator repair naming the file.
+func TestRecordRefusesAMissingSpecByNameBeforeRunningAnything(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, manifestBytes := load()
+	os.Remove(filepath.Join(root, "spec", "greet.stdout"))
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "lose the spec")
+	result := Record(root, manifest, manifestBytes, RecordOptions{})
+	failure := result.Outcome.Failures["greet"]
+	if result.Outcome.Exit != ExitHarness || !failure.Operator || result.Outcome.Next.Action != NextHuman {
+		t.Fatalf("outcome = %#v", result.Outcome)
+	}
+	if !strings.Contains(failure.Detail, `spec "spec/greet.stdout" does not exist`) {
+		t.Fatalf("detail = %q", failure.Detail)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".vise", "tmp")); err == nil {
+		t.Fatal("a probe ran: the scratch directory exists")
+	}
+}
+
+// A skeleton that exits cleanly without writing its artifact yet is an
+// unmet pin, not a broken harness — the freeze proceeds with the missing
+// artifact as the pin's stable condition.
+func TestRecordToleratesAMissingArtifactOnAnUnacceptedPin(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\nout/\n")
+	writeTestFile(t, root, "spec/report.json", "{}\n")
+	writeTestFile(t, root, "bin/report", "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(filepath.Join(root, "bin", "report"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n[[probe]]\nid = \"report\"\nrun = \"./bin/report\"\nfiles = [\"out/report.json\"]\nexpect.files = { \"out/report.json\" = \"spec/report.json\" }\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "skeleton")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := Record(root, manifest, manifestBytes, RecordOptions{})
+	if result.Outcome.Exit != ExitOK || result.Pins == nil || len(result.Pins.Unmet) != 1 {
+		t.Fatalf("outcome = %#v pins = %#v", result.Outcome, result.Pins)
+	}
+	lock, _, _ := LoadLockfile(root)
+	if lock.Probes["report"].Files["out/report.json"] != HashBytes([]byte("{}\n")) {
+		t.Fatalf("artifact expectation = %v", lock.Probes["report"].Files)
+	}
+}
+
+func recordPinRepo(t *testing.T, root string, manifest Manifest, manifestBytes []byte) {
+	t.Helper()
+	if result := Record(root, manifest, manifestBytes, RecordOptions{}); result.Outcome.Exit != ExitOK {
+		t.Fatalf("record: %#v", result.Outcome)
+	}
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "baseline")
+}
+
+// The unmet table, row by row, on a pin nobody has accepted. Exit 6, class
+// unmet, next build; the diff is spec versus observed; the detail says what
+// the run did so a 127 is visible as a 127.
+func TestVerifyClassifiesAnUnacceptedPinPerTheUnmetTable(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, manifestBytes := load()
+	recordPinRepo(t, root, manifest, manifestBytes)
+
+	check := func(name, wantDetail string) VerifyResult {
+		t.Helper()
+		result := Verify(root, manifest, manifestBytes, VerifyOptions{})
+		outcome := result.Outcome
+		failure := outcome.Failures["greet"]
+		if outcome.Exit != ExitUnmet || outcome.Verdict != "red" || failure.Class != "unmet" || outcome.Next.Action != NextBuild {
+			t.Fatalf("%s: outcome = %#v", name, outcome)
+		}
+		if !strings.Contains(failure.Detail, wantDetail) {
+			t.Fatalf("%s: detail %q lacks %q", name, failure.Detail, wantDetail)
+		}
+		if outcome.Counts.Unmet != 1 || outcome.Counts.Pass != 0 || outcome.Classes[0] != "unmet" {
+			t.Fatalf("%s: counts = %#v classes = %v", name, outcome.Counts, outcome.Classes)
+		}
+		if outcome.Pins == nil || outcome.Pins.Evaluated != 1 || outcome.Pins.UnmetCount != 1 || outcome.Pins.Unmet[0] != "greet" {
+			t.Fatalf("%s: pins = %#v", name, outcome.Pins)
+		}
+		if !strings.Contains(outcome.Next.Detail, "1 pin(s) unmet: greet") || !strings.Contains(outcome.Next.Detail, "do not revert") || !strings.Contains(outcome.Next.Detail, "vise verify --probe <id> shows the diff") {
+			t.Fatalf("%s: next = %#v", name, outcome.Next)
+		}
+		return result
+	}
+
+	// Row: launch failure, stable — the program does not exist.
+	launch := check("launch failure", "not built yet: probe could not be launched (exit 127)")
+	if !strings.Contains(launch.Outcome.Failures["greet"].Detail, "greet") {
+		t.Fatalf("the missing word is not named: %q", launch.Outcome.Failures["greet"].Detail)
+	}
+
+	// Row: stable mismatch — the program exists and prints the wrong thing.
+	writeTestFile(t, root, "bin/greet", "#!/bin/sh\nprintf 'hi Ada\\n'\n")
+	if err := os.Chmod(filepath.Join(root, "bin", "greet"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mismatch := check("mismatch", "does not match the spec")
+	if diff := mismatch.Outcome.Failures["greet"].Diff; !strings.Contains(diff, "-hello Ada") || !strings.Contains(diff, "+hi Ada") {
+		t.Fatalf("diff %q is not spec versus observed", diff)
+	}
+
+	// Row: unstable — flake, never unmet.
+	writeTestFile(t, root, "bin/greet", "#!/bin/sh\nif test -f .toggle; then rm .toggle; printf 'a\\n'; else touch .toggle; printf 'b\\n'; fi\n")
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n.toggle\n")
+	flake := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	if flake.Outcome.Exit != ExitIndeterminate || flake.Outcome.Failures["greet"].Class != "flake" || flake.Outcome.Counts.Unmet != 0 {
+		t.Fatalf("an unstable unmet pin must be a flake: %#v", flake.Outcome)
+	}
+	os.Remove(filepath.Join(root, ".toggle"))
+
+	// Row: a hard condition beside a tolerated one is harness, whatever the
+	// phase — the run left a stray file in the checkout.
+	writeTestFile(t, root, "bin/greet", "#!/bin/sh\nprintf x > stray.txt; ./bin/not-built\n")
+	hard := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	if hard.Outcome.Exit != ExitHarness || hard.Outcome.Failures["greet"].Class != "harness" {
+		t.Fatalf("a hard condition on an unmet pin must be harness: %#v", hard.Outcome)
+	}
+	os.Remove(filepath.Join(root, "stray.txt"))
+
+	// Row: the spec met — pass, and named as passing-unaccepted on a green
+	// gate, never silently promoted.
+	writeTestFile(t, root, "bin/greet", "#!/bin/sh\nprintf 'hello Ada\\n'\n")
+	met := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	if met.Outcome.Exit != ExitOK || met.Outcome.Verdict != "green" || met.Outcome.Counts.Pass != 1 {
+		t.Fatalf("met: %#v", met.Outcome)
+	}
+	if met.Outcome.Pins == nil || met.Outcome.Pins.PassingUnacceptedCount != 1 || met.Outcome.Pins.PassingUnaccepted[0] != "greet" {
+		t.Fatalf("passing-unaccepted not reported: %#v", met.Outcome.Pins)
+	}
+	if !strings.Contains(met.Outcome.Next.Detail, "1 pin(s) passing, not yet accepted: greet") {
+		t.Fatalf("next = %#v", met.Outcome.Next)
+	}
+	lock, _, _ := LoadLockfile(root)
+	if lock.Probes["greet"].Pin.AcceptedCommit != nil {
+		t.Fatal("a gate accepted a pin; only record may")
+	}
+}
+
+// Row: timeout, stable — the bytes printed before the kill differ between
+// the two runs (each prints its pid) and are not compared; two timeouts agree
+// by having both timed out. The manifest declares the one-second timeout, so
+// the definition is what was recorded.
+func TestVerifyTreatsAStableTimeoutOnAnUnacceptedPinAsUnmet(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "spec/slow.stdout", "done\n")
+	writeTestFile(t, root, "bin/slow", "#!/bin/sh\nprintf \"$$\"; sleep 5\n")
+	if err := os.Chmod(filepath.Join(root, "bin", "slow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n[[probe]]\nid = \"slow\"\nrun = \"./bin/slow\"\ntimeout = 1\nexpect.stdout = \"spec/slow.stdout\"\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "slow pin")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPinRepo(t, root, manifest, manifestBytes)
+	result := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	failure := result.Outcome.Failures["slow"]
+	if result.Outcome.Exit != ExitUnmet || failure.Class != "unmet" || result.Outcome.Counts.Flaky != 0 {
+		t.Fatalf("two timeouts printing different bytes must agree as unmet: %#v", result.Outcome)
+	}
+	if !strings.Contains(failure.Detail, "not built yet: probe timed out after 1s") || failure.Diff != "probe timed out after 1s" {
+		t.Fatalf("failure = %#v", failure)
+	}
+}
+
+// A skeleton that exits cleanly without its artifact is unmet with the
+// artifact named; the artifacts it did produce are compared.
+func TestVerifyTreatsAMissingArtifactOnAnUnacceptedPinAsUnmet(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\nout/\n")
+	writeTestFile(t, root, "spec/a.json", "a\n")
+	writeTestFile(t, root, "spec/b.json", "b\n")
+	writeTestFile(t, root, "bin/report", "#!/bin/sh\nexit 0\n")
+	if err := os.Chmod(filepath.Join(root, "bin", "report"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n[[probe]]\nid = \"report\"\nrun = \"./bin/report\"\nfiles = [\"out/a.json\", \"out/b.json\"]\nexpect.files = { \"out/a.json\" = \"spec/a.json\", \"out/b.json\" = \"spec/b.json\" }\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "skeleton")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPinRepo(t, root, manifest, manifestBytes)
+
+	result := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	failure := result.Outcome.Failures["report"]
+	if result.Outcome.Exit != ExitUnmet || failure.Class != "unmet" || !strings.Contains(failure.Detail, `declared artifact "out/a.json" was not produced`) {
+		t.Fatalf("outcome = %#v", result.Outcome)
+	}
+
+	// Half built: a is right, b still missing — still unmet, still naming b.
+	writeTestFile(t, root, "bin/report", "#!/bin/sh\nmkdir -p out; printf 'a\\n' > out/a.json\n")
+	half := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	if half.Outcome.Exit != ExitUnmet || !strings.Contains(half.Outcome.Failures["report"].Detail, `"out/b.json" was not produced`) {
+		t.Fatalf("half built: %#v", half.Outcome)
+	}
+	if diff := half.Outcome.Failures["report"].Diff; !strings.Contains(diff, "file/out/b.json: the baseline records it and the run produced nothing") {
+		t.Fatalf("diff = %q", diff)
+	}
+}
+
+// An accepted pin is judged exactly as a preserve probe: a divergence is
+// behavior → revert (exit 1, which outranks any unmet pin), and a condition
+// is harness — tolerance is for pins nobody has accepted.
+func TestVerifyJudgesAnAcceptedPinAsAPreserveProbe(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, manifestBytes := load()
+	buildGreet(t, root, "hello Ada\\n")
+	recordPinRepo(t, root, manifest, manifestBytes)
+
+	writeTestFile(t, root, "bin/greet", "#!/bin/sh\nprintf 'goodbye Ada\\n'\n")
+	regressed := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	if regressed.Outcome.Exit != ExitBehavior || regressed.Outcome.Failures["greet"].Class != "behavior" || regressed.Outcome.Next.Action != NextRevert {
+		t.Fatalf("regressed: %#v", regressed.Outcome)
+	}
+	if regressed.Outcome.Pins == nil || regressed.Outcome.Pins.Evaluated != 1 || regressed.Outcome.Pins.UnmetCount != 0 {
+		t.Fatalf("pins = %#v", regressed.Outcome.Pins)
+	}
+
+	os.Remove(filepath.Join(root, "bin", "greet"))
+	gone := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	if gone.Outcome.Exit != ExitHarness || gone.Outcome.Failures["greet"].Class != "harness" {
+		t.Fatalf("an accepted pin that cannot launch is harness: %#v", gone.Outcome)
+	}
+}
+
+// Behavior outranks unmet: while building, breaking something that already
+// held is the first thing to undo. And metrics are not run while a pin is
+// unmet, counted as skipped rather than as passes.
+func TestVerifyPrecedenceBehaviorOverUnmetAndMetricsSkipped(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "spec/greet.stdout", "hello Ada\n")
+	writeTestFile(t, root, "bin/old", "#!/bin/sh\nprintf 'old\\n'\n")
+	if err := os.Chmod(filepath.Join(root, "bin", "old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "metric.sh", "#!/bin/sh\nprintf 1\n")
+	writeTestFile(t, root, "vise.toml", `[vise]
+version = 1
+[stubs]
+network = "declared-off"
+[[probe]]
+id = "old"
+run = "./bin/old"
+[[probe]]
+id = "greet"
+run = "./bin/greet"
+expect.stdout = "spec/greet.stdout"
+[[metric]]
+id = "count"
+run = "sh metric.sh"
+[[metric]]
+id = "count2"
+run = "sh metric.sh"
+`)
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "one preserve, one pin, two metrics")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPinRepo(t, root, manifest, manifestBytes)
+
+	unmet := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	counts := unmet.Outcome.Counts
+	if unmet.Outcome.Exit != ExitUnmet || counts.Declared != 4 || counts.Pass != 1 || counts.Unmet != 1 || counts.Skipped != 2 {
+		t.Fatalf("unmet with metrics: exit %d counts %#v", unmet.Outcome.Exit, counts)
+	}
+	if len(unmet.Outcome.Metrics) != 0 {
+		t.Fatalf("metrics were evaluated while a pin was unmet: %#v", unmet.Outcome.Metrics)
+	}
+
+	writeTestFile(t, root, "bin/old", "#!/bin/sh\nprintf 'changed\\n'\n")
+	both := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	if both.Outcome.Exit != ExitBehavior || both.Outcome.Next.Action != NextRevert || both.Outcome.Counts.Behavior != 1 || both.Outcome.Counts.Unmet != 1 {
+		t.Fatalf("behavior must outrank unmet: %#v", both.Outcome)
+	}
+	if got := both.Outcome.Classes; len(got) != 2 || got[0] != "behavior" || got[1] != "unmet" {
+		t.Fatalf("classes = %v", got)
+	}
+}
+
+// The planted failure: an agent that cannot write vise.lock edits the spec
+// to match its output instead. The spec's hash is in the lockfile, so the
+// gate answers harness, operator, human — never green, never build.
+func TestVerifyRoutesAnEditedSpecToAHumanNotToGreen(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, manifestBytes := load()
+	recordPinRepo(t, root, manifest, manifestBytes)
+	writeTestFile(t, root, "bin/greet", "#!/bin/sh\nprintf 'whatever I printed\\n'\n")
+	if err := os.Chmod(filepath.Join(root, "bin", "greet"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "spec/greet.stdout", "whatever I printed\n")
+
+	result := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	failure := result.Outcome.Failures["greet"]
+	if result.Outcome.Exit != ExitHarness || failure.Class != "harness" || !failure.Operator || result.Outcome.Next.Action != NextHuman {
+		t.Fatalf("an edited spec gated %#v", result.Outcome)
+	}
+	if !strings.Contains(failure.Detail, "spec changed after recording, not behavior") {
+		t.Fatalf("detail = %q", failure.Detail)
+	}
+
+	// Deleting the spec, or replacing it with a symlink to matching bytes,
+	// is the same answer by name.
+	os.Remove(filepath.Join(root, "spec", "greet.stdout"))
+	missing := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	if missing.Outcome.Exit != ExitHarness || !strings.Contains(missing.Outcome.Failures["greet"].Detail, `spec "spec/greet.stdout" does not exist`) {
+		t.Fatalf("missing spec: %#v", missing.Outcome)
+	}
+	elsewhere := filepath.Join(t.TempDir(), "greet.stdout")
+	if err := os.WriteFile(elsewhere, []byte("hello Ada\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, filepath.Join(root, "spec", "greet.stdout")); err != nil {
+		t.Fatal(err)
+	}
+	linked := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	if linked.Outcome.Exit != ExitHarness || !strings.Contains(linked.Outcome.Failures["greet"].Detail, "symlink") {
+		t.Fatalf("symlinked spec with matching bytes must not be followed: %#v", linked.Outcome)
+	}
+}
+
+// An unmet-only verdict does not end a flake chain: unmet is the build loop's
+// resting state, and letting it renew the budget would let an agent buy
+// reruns by alternating a flaky implementation with a deliberate 127.
+func TestAnUnmetOnlyVerdictDoesNotResetTheFlakeBudget(t *testing.T) {
+	commit, lock := strings.Repeat("a", 40), "sha256:lock"
+	flake := JournalEvent{Event: "flake", Commit: commit, Lock: lock, Verdict: "indeterminate", Flaky: []string{"greet"}, Probes: []string{"greet"}}
+	unmet := JournalEvent{Event: "gate", Commit: commit, Lock: lock, Verdict: "red", Counts: &Counts{Declared: 1, Unmet: 1}, Probes: []string{"greet"}}
+	behavior := JournalEvent{Event: "gate", Commit: commit, Lock: lock, Verdict: "red", Counts: &Counts{Declared: 1, Behavior: 1}, Probes: []string{"greet"}}
+
+	if count, _ := ConsecutiveFlakes([]JournalEvent{flake, unmet, flake}, commit, lock, []string{"greet"}); count != 2 {
+		t.Fatalf("an unmet-only red reset the chain: count = %d, want 2", count)
+	}
+	if count, _ := ConsecutiveFlakes([]JournalEvent{flake, behavior, flake}, commit, lock, []string{"greet"}); count != 1 {
+		t.Fatalf("a behavior red must still end the chain: count = %d, want 1", count)
+	}
+}
+
+// Pin state travels on the gate as a bounded summary of what was evaluated:
+// --probe reports one pin, and ids are capped at three with a count.
+func TestGatePinSummaryIsBoundedAndScopedToWhatRan(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "spec/out", "hello\n")
+	body := "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n"
+	for _, id := range []string{"p1", "p2", "p3", "p4", "p5"} {
+		body += "[[probe]]\nid = \"" + id + "\"\nrun = \"./bin/" + id + "\"\nexpect.stdout = \"spec/out\"\n"
+	}
+	writeTestFile(t, root, "vise.toml", body)
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "five pins")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPinRepo(t, root, manifest, manifestBytes)
+
+	all := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	if all.Outcome.Pins.Evaluated != 5 || all.Outcome.Pins.UnmetCount != 5 || len(all.Outcome.Pins.Unmet) != 3 {
+		t.Fatalf("pins = %#v", all.Outcome.Pins)
+	}
+	if !strings.Contains(all.Outcome.Next.Detail, "5 pin(s) unmet: p1, p2, p3, … and 2 more") {
+		t.Fatalf("next = %#v", all.Outcome.Next)
+	}
+	one := Verify(root, manifest, manifestBytes, VerifyOptions{ProbeID: "p4"})
+	if one.Outcome.Pins.Evaluated != 1 || one.Outcome.Pins.UnmetCount != 1 || one.Outcome.Pins.Unmet[0] != "p4" {
+		t.Fatalf("--probe pins = %#v", one.Outcome.Pins)
+	}
+}
+
+// The record self-test on an unaccepted pin: a stable timeout freezes; two
+// passes that disagree on the observation refuse with exit 3; a hard
+// condition refuses with exit 2 whatever the pin's phase.
+func TestRecordSelfTestOnAnUnacceptedPin(t *testing.T) {
+	setup := func(t *testing.T, program, extraIgnore string) (string, Manifest, []byte) {
+		t.Helper()
+		root := testGitRepo(t)
+		writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n"+extraIgnore)
+		writeTestFile(t, root, "spec/p.stdout", "done\n")
+		writeTestFile(t, root, "bin/p", program)
+		if err := os.Chmod(filepath.Join(root, "bin", "p"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n[[probe]]\nid = \"p\"\nrun = \"./bin/p\"\ntimeout = 1\nexpect.stdout = \"spec/p.stdout\"\n")
+		testGit(t, root, "add", ".")
+		testGit(t, root, "commit", "-qm", "pin")
+		manifest, manifestBytes, err := LoadManifest(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return root, manifest, manifestBytes
+	}
+
+	root, manifest, manifestBytes := setup(t, "#!/bin/sh\nprintf \"$$\"; sleep 5\n", "")
+	timeout := Record(root, manifest, manifestBytes, RecordOptions{})
+	if timeout.Outcome.Exit != ExitOK || timeout.Pins == nil || len(timeout.Pins.Unmet) != 1 {
+		t.Fatalf("a stable timeout must freeze as unmet: %#v", timeout.Outcome)
+	}
+
+	root, manifest, manifestBytes = setup(t, "#!/bin/sh\nif test -f .toggle; then rm .toggle; printf a; else touch .toggle; printf b; fi\n", ".toggle\n")
+	unstable := Record(root, manifest, manifestBytes, RecordOptions{})
+	if unstable.Outcome.Exit != ExitIndeterminate || unstable.Outcome.Failures["p"].Class != "flake" {
+		t.Fatalf("passes that disagree must refuse with exit 3: %#v", unstable.Outcome)
+	}
+	if _, err := os.Stat(filepath.Join(root, "vise.lock")); err == nil {
+		t.Fatal("a refused self-test wrote a lockfile")
+	}
+
+	root, manifest, manifestBytes = setup(t, "#!/bin/sh\nprintf x > stray.txt; ./bin/not-built\n", "")
+	hard := Record(root, manifest, manifestBytes, RecordOptions{})
+	if hard.Outcome.Exit != ExitHarness || hard.Outcome.Failures["p"].Class != "harness" || !strings.Contains(hard.Outcome.Failures["p"].Detail, "neither tracks nor ignores") {
+		t.Fatalf("a hard condition on an unaccepted pin must refuse with exit 2: %#v", hard.Outcome)
+	}
+}
+
+// A metric held back behind a behavior failure is skipped, not passed. v0.3
+// counted it as a pass: one behavior failure beside one metric read 1/2 with
+// the metric never run. No pins involved; this is the counts rule on its own.
+func TestAMetricHeldBackBehindABehaviorFailureIsSkippedNotPassed(t *testing.T) {
+	root := testGitRepo(t)
+	writeTestFile(t, root, "bin/p", "#!/bin/sh\nprintf ok\n")
+	if err := os.Chmod(filepath.Join(root, "bin", "p"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[stubs]\nnetwork = \"declared-off\"\n[[probe]]\nid = \"p\"\nrun = \"./bin/p\"\n[[metric]]\nid = \"m\"\nrun = \"printf 1\"\n")
+	testGit(t, root, "add", ".")
+	testGit(t, root, "commit", "-qm", "probe and metric")
+	manifest, manifestBytes, err := LoadManifest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPinRepo(t, root, manifest, manifestBytes)
+	writeTestFile(t, root, "bin/p", "#!/bin/sh\nprintf changed\n")
+	result := Verify(root, manifest, manifestBytes, VerifyOptions{})
+	counts := result.Outcome.Counts
+	if result.Outcome.Exit != ExitBehavior || counts.Declared != 2 || counts.Pass != 0 || counts.Behavior != 1 || counts.Skipped != 1 {
+		t.Fatalf("counts = %#v", counts)
+	}
+}

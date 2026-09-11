@@ -144,6 +144,7 @@ vise's primary user is a coding agent mid-loop: context-poor, liable to be kille
 | 3 | flaky, indeterminate | `quarantine_ack` | stop unless your policy tolerates indeterminate |
 | 4 | no baseline | `record_first` | an operator records one |
 | 5 | metric regressed | `revert` | behavior held, quality did not |
+| 6 | a pin is unmet | `build` | a pinned spec nobody has accepted is not met yet — keep building toward it; `vise verify --probe <id>` shows the diff. Nothing that already held has moved, or the exit would be 1 |
 
 ## Commands
 

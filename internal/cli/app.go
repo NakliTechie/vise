@@ -374,6 +374,9 @@ func renderRecordResult(result vise.RecordResult, manifest vise.Manifest, previe
 		if result.Candidate != "" {
 			extra["candidate"] = result.Candidate
 		}
+		if result.Pins != nil {
+			extra["pins"] = result.Pins
+		}
 		return writeOutcomeJSON(stdout, result.Outcome, extra)
 	}
 	if preview && result.Outcome.Exit == vise.ExitOK {
@@ -388,8 +391,11 @@ func renderRecordResult(result vise.RecordResult, manifest vise.Manifest, previe
 		return vise.ExitOK
 	}
 	if result.Outcome.Exit == vise.ExitOK {
-		fmt.Fprintf(stdout, "RECORDED — %d probe(s) · %d metric(s)\n", len(manifest.Probes), len(manifest.Metrics))
+		fmt.Fprintf(stdout, "RECORDED — %d probe(s) · %d metric(s)%s\n", len(manifest.Probes), len(manifest.Metrics), renderPinsRecorded(result.Pins))
 		fmt.Fprintln(stdout, "lock: "+result.Outcome.Lock)
+		if result.Pins != nil && len(result.Pins.Unmet) > 0 {
+			fmt.Fprintf(stdout, "next: %s — %s\n", result.Outcome.Next.Action, terminalSafe(result.Outcome.Next.Detail, false))
+		}
 		return vise.ExitOK
 	}
 	renderOutcome(stderr, result.Outcome, "RECORD")

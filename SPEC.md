@@ -134,7 +134,7 @@ Shared exit-code vocabulary, one code per distinct next action:
 ```json
 { "v": 1, "cmd": "gate", "exit": 1, "verdict": "red",
   "classes": ["behavior"],
-  "counts": { "declared": 7, "pass": 5, "behavior": 2, "flaky": 0, "harness": 0, "metric": 0 },
+  "counts": { "declared": 7, "pass": 5, "behavior": 2, "flaky": 0, "harness": 0, "metric": 0, "unmet": 0, "skipped": 0 },
   "failures": {
     "cli-help": { "class": "behavior", "expect": {"exit": 0}, "got": {"exit": 1},
                    "diff": "…first-divergence unified diff, truncated with counts…" } },
@@ -212,9 +212,9 @@ A probe's judgment depends on more than the manifest entry: fixtures, normalizer
 **Local, gitignored, append-only** JSONL — operator-side state like blobs' scratch, NOT committed (v0.2 had it committed; that dirtied the tree after every gate, broke one-transform-per-commit, and made merge conflicts by design — both reviews' finding). Cross-machine trajectory is out of scope for v0; the committed artifacts (lockfile, blobs) carry everything judgment needs.
 
 ```jsonl
-{"e":"record","at":"2026-09-03T02:14:07.918Z","commit":"06aee75…","counts":{"declared":7,"pass":7,"behavior":0,"flaky":0,"harness":0,"metric":0},"lock":"sha256:…"}
-{"e":"gate","at":"2026-09-03T02:15:41.220Z","commit":"1652409…","dirty":true,"verdict":"green","counts":{"declared":7,"pass":7,"behavior":0,"flaky":0,"harness":0,"metric":0},"metrics":{"complexity":131},"probe_set":["cli-help","convert-fixture","complexity"],"lock":"sha256:…"}
-{"e":"flake","at":"2026-09-03T02:16:02.551Z","commit":"1652409…","dirty":true,"verdict":"indeterminate","counts":{"declared":7,"pass":6,"behavior":0,"flaky":1,"harness":0,"metric":0},"flaky":["convert-fixture"],"probe_set":["cli-help","convert-fixture","complexity"],"lock":"sha256:…"}
+{"e":"record","at":"2026-09-03T02:14:07.918Z","commit":"06aee75…","counts":{"declared":7,"pass":7,"behavior":0,"flaky":0,"harness":0,"metric":0,"unmet":0,"skipped":0},"lock":"sha256:…"}
+{"e":"gate","at":"2026-09-03T02:15:41.220Z","commit":"1652409…","dirty":true,"verdict":"green","counts":{"declared":7,"pass":7,"behavior":0,"flaky":0,"harness":0,"metric":0,"unmet":0,"skipped":0},"metrics":{"complexity":131},"probe_set":["cli-help","convert-fixture","complexity"],"lock":"sha256:…"}
+{"e":"flake","at":"2026-09-03T02:16:02.551Z","commit":"1652409…","dirty":true,"verdict":"indeterminate","counts":{"declared":7,"pass":6,"behavior":0,"flaky":1,"harness":0,"metric":0,"unmet":0,"skipped":0},"flaky":["convert-fixture"],"probe_set":["cli-help","convert-fixture","complexity"],"lock":"sha256:…"}
 ```
 
 Every event carries `e`, `at` (RFC 3339, UTC, nanosecond precision), `commit` and `lock`. `dirty` is present only when true. `counts` carries every class, including the zero-valued ones, because a consumer summing them should not have to know which names it might be missing.

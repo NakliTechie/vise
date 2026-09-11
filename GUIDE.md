@@ -128,7 +128,7 @@ GATE GREEN — 2/2
 [exit 0]
 
 $ vise gate --json
-{"cmd":"gate","counts":{"behavior":0,"declared":2,"flaky":0,"harness":0,"metric":0,"pass":2},"exit":0,"lock":"sha256:47ea…","next":{"action":"proceed","detail":"all declared checks matched"},"v":1,"verdict":"green"}
+{"cmd":"gate","counts":{"behavior":0,"declared":2,"flaky":0,"harness":0,"metric":0,"pass":2,"skipped":0,"unmet":0},"exit":0,"lock":"sha256:47ea…","next":{"action":"proceed","detail":"all declared checks matched"},"v":1,"verdict":"green"}
 [exit 0]
 ```
 

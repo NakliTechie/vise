@@ -64,6 +64,7 @@ func TestEveryDeclaredNextActionIsUsed(t *testing.T) {
 		NextRecordFirst:   "NextRecordFirst",
 		NextQuarantineAck: "NextQuarantineAck",
 		NextFixInvocation: "NextFixInvocation",
+		NextBuild:         "NextBuild",
 	}
 	if len(constants) != len(KnownNextActions) {
 		t.Fatalf("KnownNextActions has %d entries, the constants have %d", len(KnownNextActions), len(constants))

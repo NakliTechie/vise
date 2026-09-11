@@ -62,6 +62,28 @@ func renderGate(w io.Writer, outcome vise.Outcome, quiet bool) {
 // JSON report carries the full list.
 const maxDriftLines = 5
 
+// renderPinsRecorded is the record line's pin summary: how many an operator
+// has accepted, and which the frozen tree does not meet, bounded. Nothing for
+// a manifest with no pins, so the line reads as it always did.
+func renderPinsRecorded(pins *vise.PinsRecorded) string {
+	if pins == nil {
+		return ""
+	}
+	summary := fmt.Sprintf(" · pins: %d accepted, %d unmet", len(pins.Accepted), len(pins.Unmet))
+	if len(pins.Unmet) > 0 {
+		summary += " (" + boundedList(pins.Unmet, maxDriftLines) + ")"
+	}
+	return summary
+}
+
+// boundedList joins at most limit ids and counts the rest.
+func boundedList(ids []string, limit int) string {
+	if len(ids) <= limit {
+		return strings.Join(ids, ", ")
+	}
+	return fmt.Sprintf("%s, … and %d more", strings.Join(ids[:limit], ", "), len(ids)-limit)
+}
+
 func renderStatus(w io.Writer, report vise.StatusReport) {
 	renderStatusState(w, report.State)
 	renderStatusManifest(w, report.Manifest)

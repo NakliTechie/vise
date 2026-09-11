@@ -69,6 +69,9 @@ type JournalEvent struct {
 	Flaky   []string           `json:"flaky,omitempty"`
 	Probes  []string           `json:"probe_set,omitempty"`
 	Lock    string             `json:"lock,omitempty"`
+	// Pins is present on a record event when the manifest declares pins:
+	// which were accepted and which the frozen tree did not meet.
+	Pins *PinsRecorded `json:"pins,omitempty"`
 }
 
 type StateLock struct {
@@ -317,6 +320,13 @@ func validateLockfileHashes(lock Lockfile) error {
 		for path, hash := range probe.Files {
 			if _, err := HashName(hash); err != nil {
 				return fmt.Errorf("probe %s file %s: %w", id, path, err)
+			}
+		}
+		if probe.Pin != nil {
+			for path, hash := range probe.Pin.Spec {
+				if _, err := HashName(hash); err != nil {
+					return fmt.Errorf("probe %s spec %s: %w", id, path, err)
+				}
 			}
 		}
 	}
@@ -686,11 +696,23 @@ func ConsecutiveFlakes(events []JournalEvent, commit, lock string, probes []stri
 			}
 			continue
 		}
-		if (event.Verdict == "green" || event.Verdict == "red") && setCovers(event.Probes, want) {
+		if (event.Verdict == "green" || (event.Verdict == "red" && !unmetOnly(event))) && setCovers(event.Probes, want) {
 			return count, true
 		}
 	}
 	return count, false
+}
+
+// unmetOnly reports a red verdict whose only failing class is unmet. Such a
+// verdict does not end a flake chain: a stable behavior diff is progress of a
+// kind, but unmet is the build loop's resting state, and letting it renew the
+// budget would let an agent alternate a flaky implementation with a
+// deliberate launch failure to buy reruns without committing.
+func unmetOnly(event JournalEvent) bool {
+	if event.Counts == nil {
+		return false
+	}
+	return event.Counts.Unmet > 0 && event.Counts.Behavior == 0 && event.Counts.Metric == 0 && event.Counts.Harness == 0 && event.Counts.Flaky == 0
 }
 
 // setCovers reports whether a judged event's probe set contains every wanted

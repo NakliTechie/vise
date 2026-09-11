@@ -26,11 +26,32 @@ type RecordResult struct {
 	ReviewDiff string
 	// Candidate is the digest of the lockfile these passes would write.
 	Candidate string
+	// Pins says what the freeze did about each pin: which the operator has
+	// accepted (now or before) and which the tree does not yet meet. A record
+	// is not a verdict, and this is how its output says so instead of
+	// claiming every declared check matched.
+	Pins *PinsRecorded
+}
+
+// PinsRecorded is the acceptance summary a record carries in its result and
+// its journal event. Ids are sorted and complete: the journal is the place
+// bounded output does not apply, and the renderer bounds what it shows.
+type PinsRecorded struct {
+	Accepted []string `json:"accepted"`
+	Unmet    []string `json:"unmet"`
 }
 
 type recordSelfTestResult struct {
 	probes  map[string]RunResult
 	metrics map[string]MetricResult
+}
+
+// pinPlan is what record knows about one pin before any probe runs: the
+// expectation read from its spec files, and the acceptance it carries forward
+// from the old lockfile when its identity is unchanged.
+type pinPlan struct {
+	expected ProbeLock
+	accepted *string
 }
 
 type recordRun struct {
@@ -45,6 +66,7 @@ type recordRun struct {
 	fingerprint   Fingerprint
 	commit        string
 	selfTest      recordSelfTestResult
+	pins          map[string]pinPlan
 	lock          Lockfile
 	blobs         map[string][]byte
 	lockBytes     []byte
@@ -66,6 +88,9 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 		return record.result
 	}
 	if !record.resolveHead() {
+		return record.result
+	}
+	if !record.preparePins() {
 		return record.result
 	}
 	if !record.runSelfTest() {
@@ -105,7 +130,44 @@ func Record(root string, manifest Manifest, manifestBytes []byte, opts RecordOpt
 func newRecordRun(root string, manifest Manifest, manifestBytes []byte, opts RecordOptions) *recordRun {
 	outcome := NewOutcome("record")
 	outcome.Counts.Declared = len(manifest.Probes) + len(manifest.Metrics)
-	return &recordRun{root: root, manifest: manifest, manifestBytes: manifestBytes, opts: opts, result: RecordResult{Outcome: outcome}}
+	return &recordRun{root: root, manifest: manifest, manifestBytes: manifestBytes, opts: opts, result: RecordResult{Outcome: outcome}, blobs: make(map[string][]byte), pins: make(map[string]pinPlan)}
+}
+
+// preparePins reads every pin's spec files before any probe runs, so a spec
+// that is missing, unreadable, a symlink, or over the capture bound stops the
+// record before a single command has been launched. The expectation is built
+// here, with its definition and input hashes, because the self-test needs to
+// know which pins an operator has already accepted: a change to an accepted
+// pin's identity is a new pin, and a failing accepted pin is a refusal.
+func (r *recordRun) preparePins() bool {
+	for _, probe := range r.manifest.Probes {
+		if !probe.IsPin() {
+			continue
+		}
+		expected, err := pinExpectation(r.root, probe, r.blobs)
+		if err != nil {
+			r.result.Outcome = harnessForOperatorSaying("record", probe.ID, err.Error(), "restore or commit the spec file the expectation names; an agent may not write it")
+			return false
+		}
+		runHash, err := ProbeRunHash(probe)
+		if err != nil {
+			r.result.Outcome = harnessOnly("record", probe.ID, err.Error())
+			return false
+		}
+		deps, err := HashDependencies(r.root, probe.Deps)
+		if err != nil {
+			r.result.Outcome = harnessOnly("record", probe.ID, err.Error())
+			return false
+		}
+		expected.RunHash = runHash
+		expected.Deps = deps
+		plan := pinPlan{expected: expected}
+		if old, ok := r.oldLock.Probes[probe.ID]; ok && old.Pin != nil && old.Pin.AcceptedCommit != nil && pinIdentityEqual(old, expected) {
+			plan.accepted = old.Pin.AcceptedCommit
+		}
+		r.pins[probe.ID] = plan
+	}
+	return true
 }
 
 func (r *recordRun) checkManifest() bool {
@@ -176,7 +238,7 @@ func (r *recordRun) resolveHead() bool {
 }
 
 func (r *recordRun) runSelfTest() bool {
-	selfTest, ok := runRecordSelfTest(r.root, r.manifest, &r.result.Outcome)
+	selfTest, ok := runRecordSelfTest(r.root, r.manifest, r.pins, &r.result.Outcome)
 	if !ok {
 		return false
 	}
@@ -191,8 +253,15 @@ func (r *recordRun) assembleLockfile() bool {
 		Probes:      make(map[string]ProbeLock, len(r.manifest.Probes)),
 		Metrics:     make(map[string]MetricLock, len(r.manifest.Metrics)),
 	}
-	blobs := make(map[string][]byte)
+	blobs := r.blobs
 	for _, probe := range r.manifest.Probes {
+		if plan, ok := r.pins[probe.ID]; ok {
+			entry := plan.expected
+			entry.RecordedCommit = firstFrozenAt(r.oldLock.Probes[probe.ID], entry, r.commit)
+			entry.Pin.AcceptedCommit = r.acceptance(probe.ID, plan)
+			lock.Probes[probe.ID] = entry
+			continue
+		}
 		runHash, err := ProbeRunHash(probe)
 		if err != nil {
 			r.result.Outcome = harnessOnly("record", probe.ID, err.Error())
@@ -224,6 +293,77 @@ func (r *recordRun) assembleLockfile() bool {
 	r.lock = lock
 	r.blobs = blobs
 	return true
+}
+
+// acceptance decides what accepted_commit a pin's entry carries. Acceptance
+// already on file for an unchanged identity is carried, never restamped and
+// never revoked. Otherwise the pin is accepted at HEAD when this record, on a
+// clean tree, saw both passes produce the spec — a tolerated condition is not
+// a pass, and a dirty tree is not HEAD, so neither can accept.
+func (r *recordRun) acceptance(id string, plan pinPlan) *string {
+	if plan.accepted != nil {
+		return plan.accepted
+	}
+	if r.dirty {
+		return nil
+	}
+	run, ok := r.selfTest.probes[id]
+	if !ok || run.HarnessError != "" || !RunMatchesLock(run, plan.expected) {
+		return nil
+	}
+	commit := r.commit
+	return &commit
+}
+
+// pinsRecorded summarizes the candidate lockfile's pins, sorted.
+func (r *recordRun) pinsRecorded() *PinsRecorded {
+	if len(r.pins) == 0 {
+		return nil
+	}
+	summary := &PinsRecorded{Accepted: []string{}, Unmet: []string{}}
+	for id := range r.pins {
+		if r.lock.Probes[id].Pin.AcceptedCommit != nil {
+			summary.Accepted = append(summary.Accepted, id)
+		} else {
+			summary.Unmet = append(summary.Unmet, id)
+		}
+	}
+	sort.Strings(summary.Accepted)
+	sort.Strings(summary.Unmet)
+	return summary
+}
+
+// reportPins makes the outcome say what the freeze did about its pins rather
+// than that every declared check matched. Exit stays 0 — the freeze
+// completed — and the unmet pins are counted as unmet, not as passes.
+func (r *recordRun) reportPins() {
+	r.result.Pins = r.pinsRecorded()
+	if r.result.Pins == nil || len(r.result.Pins.Unmet) == 0 {
+		return
+	}
+	outcome := &r.result.Outcome
+	outcome.Counts.Unmet = len(r.result.Pins.Unmet)
+	outcome.Counts.Pass = outcome.Counts.Declared - outcome.Counts.Unmet
+	outcome.Classes = append(outcome.Classes, "unmet")
+	if outcome.Next.Action != NextProceed {
+		// A preview's next line already says how to accept the candidate;
+		// the pin summary travels in the result and the diff.
+		return
+	}
+	detail := fmt.Sprintf("baseline frozen with %d pin(s) unmet: %s — an agent builds to them, and an operator records again to accept", len(r.result.Pins.Unmet), boundedIDs(r.result.Pins.Unmet, 3))
+	if len(r.manifest.Metrics) > 0 {
+		detail += "; metric baselines were taken with those pins unmet"
+	}
+	outcome.Next.Detail = detail
+}
+
+// boundedIDs joins at most limit ids and counts the rest, the bound every
+// list in the human output honours.
+func boundedIDs(ids []string, limit int) string {
+	if len(ids) <= limit {
+		return strings.Join(ids, ", ")
+	}
+	return fmt.Sprintf("%s, … and %d more", strings.Join(ids[:limit], ", "), len(ids)-limit)
 }
 
 func (r *recordRun) computeCandidate() bool {
@@ -262,6 +402,7 @@ func (r *recordRun) finishedAfterPreview() bool {
 	r.result.Outcome.Counts.Pass = r.result.Outcome.Counts.Declared
 	r.result.Outcome.Finalize()
 	r.result.Outcome.Next = Next{Action: NextHuman, Detail: "review the diff, then freeze it with record --accept " + r.result.Candidate}
+	r.reportPins()
 	return true
 }
 
@@ -306,7 +447,12 @@ func (r *recordRun) computeTamperHash() bool {
 func (r *recordRun) appendJournal() bool {
 	declared := len(r.manifest.Probes) + len(r.manifest.Metrics)
 	counts := Counts{Declared: declared, Pass: declared}
-	if err := appendJournal(r.root, JournalEvent{Event: "record", Commit: r.commit, Dirty: r.dirty, Counts: &counts, Lock: r.lockHash}); err != nil {
+	pins := r.pinsRecorded()
+	if pins != nil {
+		counts.Unmet = len(pins.Unmet)
+		counts.Pass = declared - counts.Unmet
+	}
+	if err := appendJournal(r.root, JournalEvent{Event: "record", Commit: r.commit, Dirty: r.dirty, Counts: &counts, Lock: r.lockHash, Pins: pins}); err != nil {
 		r.result.Outcome = harnessForOperator("record", "journal", "baseline was written but journal append failed: "+err.Error())
 		return false
 	}
@@ -316,9 +462,10 @@ func (r *recordRun) appendJournal() bool {
 func (r *recordRun) finalize() {
 	r.result.Outcome.Lock = r.lockHash
 	r.result.Outcome.Finalize()
+	r.reportPins()
 }
 
-func runRecordSelfTest(root string, manifest Manifest, outcome *Outcome) (recordSelfTestResult, bool) {
+func runRecordSelfTest(root string, manifest Manifest, pins map[string]pinPlan, outcome *Outcome) (recordSelfTestResult, bool) {
 	runner := Runner{Root: root, Manifest: manifest}
 	first := recordSelfTestResult{
 		probes:  make(map[string]RunResult, len(manifest.Probes)),
@@ -326,6 +473,14 @@ func runRecordSelfTest(root string, manifest Manifest, outcome *Outcome) (record
 	}
 	for _, probe := range manifest.Probes {
 		run := runner.RunProbe(probe, true)
+		if plan, ok := pins[probe.ID]; ok {
+			if failure, refused := pinSelfTestFailure(root, plan, run); refused {
+				outcome.AddFailure(probe.ID, failure)
+			} else {
+				first.probes[probe.ID] = run
+			}
+			continue
+		}
 		if run.HarnessError != "" {
 			outcome.AddFailure(probe.ID, run.harnessFailure())
 		} else {
@@ -340,14 +495,34 @@ func runRecordSelfTest(root string, manifest Manifest, outcome *Outcome) (record
 			first.metrics[metric.ID] = run
 		}
 	}
-	if outcome.Counts.Harness > 0 {
+	if outcome.Counts.Harness > 0 || outcome.Counts.Behavior > 0 {
 		outcome.Finalize()
 		outcome.Counts.Pass = 0 // a baseline needs both passes; none was frozen
+		if outcome.Counts.Harness == 0 {
+			outcome.Next.Detail = "an accepted pin no longer meets its spec at this tree; fix the code, or change the spec to re-accept it"
+		}
 		return recordSelfTestResult{}, false
 	}
 
 	for _, probe := range manifest.Probes {
 		run := runner.RunProbe(probe, true)
+		if plan, ok := pins[probe.ID]; ok {
+			if failure, refused := pinSelfTestFailure(root, plan, run); refused {
+				outcome.AddFailure(probe.ID, failure)
+				continue
+			}
+			// An unaccepted pin's two passes must agree with each other on
+			// the complete observation, condition included; that they may
+			// both miss the spec is the point of recording before building.
+			if !pinObservationsEqual(first.probes[probe.ID], run) {
+				outcome.AddFailure(probe.ID, Failure{
+					Class:  "flake",
+					Detail: "record self-test diverged across two full-suite passes",
+					Diff:   DiffRunResults(first.probes[probe.ID], run),
+				})
+			}
+			continue
+		}
 		if run.HarnessError != "" {
 			outcome.AddFailure(probe.ID, run.harnessFailure())
 			continue
@@ -371,16 +546,43 @@ func runRecordSelfTest(root string, manifest Manifest, outcome *Outcome) (record
 			outcome.AddFailure(metric.ID, Failure{Class: "flake", Detail: "metric diverged across two full-suite passes"})
 		}
 	}
-	if outcome.Counts.Harness > 0 || outcome.Counts.Flaky > 0 {
+	if outcome.Counts.Harness > 0 || outcome.Counts.Flaky > 0 || outcome.Counts.Behavior > 0 {
 		outcome.Finalize()
 		outcome.Counts.Pass = 0 // a baseline needs both passes; none was frozen
-		if outcome.Counts.Harness == 0 {
+		switch {
+		case outcome.Counts.Harness > 0:
+		case outcome.Counts.Flaky > 0:
 			outcome.Next = Next{Action: NextFixProbe, Detail: "make the named probes deterministic (normalize timestamps, ordering, temp paths, seeds), then rerun vise record"}
+		default:
+			outcome.Next.Detail = "an accepted pin no longer meets its spec at this tree; fix the code, or change the spec to re-accept it"
 		}
 		return recordSelfTestResult{}, false
 	}
 
 	return first, true
+}
+
+// pinSelfTestFailure classifies one record pass of a pin. A hard condition is
+// a harness failure for any pin. An accepted pin whose identity is unchanged
+// must meet its spec on this tree, or the record is refused as a behavior
+// failure: the operator either fixes the code or changes the spec, and a
+// changed spec is a new pin. An unaccepted pin may end in any tolerated
+// condition or miss its spec outright — that is what recording before
+// building looks like — so nothing about it is refused here.
+func pinSelfTestFailure(root string, plan pinPlan, run RunResult) (Failure, bool) {
+	if run.HarnessError != "" && !run.Tolerated {
+		return run.harnessFailure(), true
+	}
+	if plan.accepted == nil {
+		return Failure{}, false
+	}
+	if run.HarnessError != "" {
+		return run.harnessFailure(), true
+	}
+	if RunMatchesLock(run, plan.expected) {
+		return Failure{}, false
+	}
+	return probeMismatchFailure(root, "behavior", "accepted pin no longer meets its spec at this tree", plan.expected, run), true
 }
 
 func RunResultsEqual(a, b RunResult) bool {
@@ -506,7 +708,51 @@ func appendFingerprintDiff(b *strings.Builder, oldFingerprint, newFingerprint Fi
 // scrutinise, because an observation is going away, and it had already been
 // the one showing less once.
 func appendOneSidedProbeDiff(b *strings.Builder, mark byte, id string, probe ProbeLock) {
-	fmt.Fprintf(b, "%c probe %s (exit %d, stdout %s, stderr %s, %d file(s), recorded at %s)\n", mark, id, probe.Exit, probe.Stdout, probe.Stderr, len(probe.Files), probe.RecordedCommit)
+	fmt.Fprintf(b, "%c probe %s (exit %d, stdout %s, stderr %s, %d file(s), recorded at %s%s)\n", mark, id, probe.Exit, probe.Stdout, probe.Stderr, len(probe.Files), probe.RecordedCommit, pinSuffix(probe))
+}
+
+// pinSuffix names a pin's acceptance in a one-sided diff line, or nothing for
+// a preserve probe.
+func pinSuffix(probe ProbeLock) string {
+	if probe.Pin == nil {
+		return ""
+	}
+	return ", pin " + acceptanceLabel(probe.Pin)
+}
+
+func acceptanceLabel(pin *PinLock) string {
+	if pin == nil || pin.AcceptedCommit == nil {
+		return "unaccepted"
+	}
+	return "accepted at " + *pin.AcceptedCommit
+}
+
+// appendPinTransition renders a change in a pin's acceptance state, one line
+// per pin whose state moves. A record whose only effect is such a transition
+// changes what the gate will say without changing an expected byte, and the
+// operator accepting the candidate has to see that.
+func appendPinTransition(b *strings.Builder, id string, oldProbe, newProbe ProbeLock) {
+	switch {
+	case oldProbe.Pin == nil && newProbe.Pin == nil:
+		return
+	case oldProbe.Pin == nil:
+		fmt.Fprintf(b, "%s pin: preserve probe -> %s\n", id, acceptanceLabel(newProbe.Pin))
+	case newProbe.Pin == nil:
+		fmt.Fprintf(b, "%s pin: %s -> preserve probe\n", id, acceptanceLabel(oldProbe.Pin))
+	default:
+		before, after := acceptanceLabel(oldProbe.Pin), acceptanceLabel(newProbe.Pin)
+		if before == after {
+			return
+		}
+		reason := ""
+		if !pinIdentityEqual(oldProbe, newProbe) && oldProbe.Pin.AcceptedCommit != nil {
+			reason = " (spec, definition, or inputs changed; a new acceptance is due)"
+			if newProbe.Pin.AcceptedCommit != nil {
+				reason = " (spec, definition, or inputs changed; this tree meets the new spec, so it is accepted afresh)"
+			}
+		}
+		fmt.Fprintf(b, "%s pin: %s -> %s%s\n", id, before, after, reason)
+	}
 }
 
 // appendOneSidedMetricDiff is the same idea for a metric.
@@ -518,6 +764,7 @@ func appendChangedProbeDiff(b *strings.Builder, root string, newBlobs map[string
 	if oldProbe.RunHash != newProbe.RunHash {
 		fmt.Fprintf(b, "%s definition changed since the recorded baseline (run_hash %s -> %s); see git diff vise.toml\n", id, oldProbe.RunHash, newProbe.RunHash)
 	}
+	appendPinTransition(b, id, oldProbe, newProbe)
 	if oldProbe.Exit != newProbe.Exit {
 		fmt.Fprintf(b, "%s exit: %d -> %d\n", id, oldProbe.Exit, newProbe.Exit)
 	}
