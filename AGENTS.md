@@ -33,6 +33,10 @@ that first verdict you cannot tell a failure you caused from one that was
 waiting for you, and the two have opposite responses: fix your change, or stop
 and report a blocked repository. It costs one run.
 
+One first verdict is not a block: **exit 6**, `next.action: build`. It means the
+repository carries a *pin* — a spec somebody wrote for behavior that does not
+exist yet — and your task is to build to it. See "Exit 6" below.
+
 **Know which binary you are running.** `vise` comes from your `PATH`, and the
 one there may be older than the repository, or built from somebody's dirty
 tree. `vise version --json` tells you: `version`, `revision`, and `modified`. A
@@ -59,7 +63,9 @@ is the operator's decision; saying which one you used is yours.
 ```sh
 # one focused change
 vise gate --json
-git commit -m "..."        # when, and only when, the gate is green
+git commit -m "..."        # when the gate is green — or when the only class is
+                           # unmet and a pin you are building went from unmet to
+                           # met without any other check moving (see "Exit 6")
 ```
 
 Gate after every change, before moving on. It costs seconds. Do not batch five
@@ -100,6 +106,7 @@ report at all*. Do not read a usage error as a situation.
 | 3 | indeterminate, `flake` | an observation was unstable | `quarantine_ack` — stop and report |
 | 4 | indeterminate | no baseline exists | stop and report |
 | 5 | red, `metric` | behavior held, a tracked metric got worse | revert what worsened it |
+| 6 | red, `unmet` | a pinned spec nobody has accepted is not met yet | `build` — keep building toward it; do not revert |
 
 The JSON always carries `exit`, `verdict`, `counts` and one `next.action`.
 `classes` and `failures` appear only when something failed — a green outcome has
@@ -110,9 +117,9 @@ the human text.
 
 The closed vocabulary, in full, so you can write the switch: `proceed` ·
 `revert` · `fix_probe` · `human` · `record_first` · `quarantine_ack` ·
-`fix_invocation`. Seven values and no eighth. If you ever receive one that is
-not on this list, that is a defect in vise — stop and report it rather than
-guessing what it meant.
+`fix_invocation` · `build`. Eight values and no ninth. If you ever receive one
+that is not on this list, that is a defect in vise — stop and report it rather
+than guessing what it meant.
 
 ## Exit 1 — you changed behavior
 
@@ -166,6 +173,7 @@ disobey.
 | message | cause | your move |
 |---|---|---|
 | `probe definition changed after recording` | you edited `vise.toml` | revert that edit |
+| `spec changed after recording, not behavior` | you edited a file named under a probe's `expect` — a pin's spec | revert that edit; the spec is the operator's, and its hash is in the lockfile |
 | `declared probe input changed after recording` | you edited a file a probe consumes as a fixture | revert it |
 | `metric definition changed after recording` | you edited a metric's definition | revert it |
 | `environment differs from recording` | the toolchain or platform moved | **stop and report** — a human re-records |
@@ -176,10 +184,12 @@ disobey.
 | `is tracked by git` | a declared artifact is a tracked file | **stop and report** — the manifest needs an operator |
 | `written by a newer vise` | the `vise` on your PATH is older than the baseline | **stop and report**: the tool is stale, not the code. `vise version --json` names the build you are running |
 
-**If the gate was already failing before your first edit, you are blocked.**
-Say so immediately and stop. Do not spend the session investigating the
-environment; do not build your own copy of the tooling to work around it. A
-blocked repository is a fact to report, not a puzzle to solve.
+**If the gate was already failing before your first edit, you are blocked** —
+with one exception, exit 6, which is a pin waiting to be built and is covered
+below. For every other failure: say so immediately and stop. Do not spend the
+session investigating the environment; do not build your own copy of the
+tooling to work around it. A blocked repository is a fact to report, not a
+puzzle to solve.
 
 ## Exit 3 — flake
 
@@ -194,10 +204,51 @@ not for retrying.
 
 Rerunning until it passes is the one thing you must not do. Stop and report.
 
+## Exit 6 — a pin is unmet: build to it
+
+A *pin* is a probe whose expected output was written by a human before the
+code existed: files named under `expect` in `vise.toml`, hashed into
+`vise.lock` the way every other observation is. Until the working tree
+produces exactly those bytes, the pin is `unmet`, the gate exits 6, and
+`next.action` is `build`. That is the starting state of a feature, not a
+failure you caused, and it is the one first-gate result that does not block
+you.
+
+`vise verify --probe <id>` shows the diff: the spec on one side, what your
+code did on the other. Read it and build toward the spec. `failures[<id>].detail`
+says what the run actually did — `could not be launched (exit 127)` means the
+program does not exist yet; `timed out` and `was not produced` mean what they
+say — so a 127 stays visible as a 127 even though the class is `unmet`.
+
+**Precedence.** Exit 1 outranks exit 6: if any probe that already held goes
+red while you build, that is the first thing to undo, whatever the pin says.
+Metrics are not run while a pin is unmet, and the JSON counts them as
+`skipped`, not as passes.
+
+**Committing while a pin is unmet.** A commit is sanctioned when the gate is
+green, or when the only failing class is `unmet` and, compared with your
+previous full gate under the same manifest and lock, the set of unmet pins is
+a *proper subset* of what it was and no pin that was passing now fails. Fewer
+by trading one pin for two is not progress; a `--probe` gate is not a
+comparison point; do not claim quality was checked, because the metrics were
+not run.
+
+**When the pin passes.** A green gate names it: `N pin(s) passing, not yet
+accepted`. You do not accept it — only an operator's `vise record` does, and
+the gate never writes the lockfile. Say in your final report which pins your
+work met, so the operator knows to accept them.
+
+**Never write a file named under `expect`.** The spec is the operator's. Its
+hash is in the lockfile, so editing it does not make the gate green: the gate
+answers `spec changed after recording, not behavior`, exit 2, `human`. And
+never make the program special-case the probe's input to print the spec's
+bytes: that gates green and builds nothing, and the human reading your diff
+is the check that catches it.
+
 ## Rules you do not break
 
-1. **Never edit `vise.toml`, `vise.lock`, `.vise/blobs/`, or
-   `.vise/journal.jsonl`.** These are the judge. Be clear about what happens if
+1. **Never edit `vise.toml`, `vise.lock`, `.vise/blobs/`, `.vise/journal.jsonl`,
+   or any file named under a probe's `expect`.** These are the judge. Be clear about what happens if
    you do: vise cannot authenticate its caller, so it will simply believe the
    edited baseline and report green. What catches it is the human reading
    `git diff`, and CI comparing the printed `lock:` hash against the one
