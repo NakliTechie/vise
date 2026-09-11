@@ -31,12 +31,14 @@ job.
 
 ## Status
 
-v0.3, developed in the open, not yet packaged. Build from this checkout. The command surface is implemented and exercised by a committed harness; Service probes, network enforcement, partial recording, and `vise map` are non-goals for v0 ([SPEC §8](SPEC.md#8-non-goals-v0)); Windows is out of scope for a different reason, the POSIX process-group kill the probe lifecycle depends on ([SPEC §2.2](SPEC.md#22-probe-execution-contract)).
+v0.3.0, the first tagged release ([CHANGELOG](CHANGELOG.md)), developed in the open. The command surface is implemented and exercised by a committed harness; Service probes, network enforcement, partial recording, and `vise map` are non-goals for v0 ([SPEC §8](SPEC.md#8-non-goals-v0)); Windows is out of scope for a different reason, the POSIX process-group kill the probe lifecycle depends on ([SPEC §2.2](SPEC.md#22-probe-execution-contract)).
 
 ```sh
-go install ./cmd/vise     # Go 1.25.13+, git, a POSIX /bin/sh
-vise version              # vise 0.3.0-dev
+go install github.com/NakliTechie/vise/cmd/vise@latest   # Go 1.25.13+, git, a POSIX /bin/sh
+vise version                                             # vise 0.3.0
 ```
+
+Or build from this checkout with `go install ./cmd/vise`.
 
 ## Five minutes
 

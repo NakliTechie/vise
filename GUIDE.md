@@ -5,7 +5,7 @@ A walk through one vise campaign on the command line, with the real output of ev
 ## Requirements
 
 - Git, a POSIX `/bin/sh`, Go 1.25.13 or newer.
-- Build from this checkout: `go install ./cmd/vise` (then `vise version` prints `vise 0.3.0-dev`).
+- Install: `go install github.com/NakliTechie/vise/cmd/vise@latest`, or build from this checkout with `go install ./cmd/vise` (then `vise version` prints `vise 0.3.0`; transcripts below were captured on the `0.3.0-dev` build and are unchanged).
 
 ## The loop in one screen
 
