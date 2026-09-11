@@ -125,6 +125,17 @@ run = "./probe-status.sh"
 timeout = 300
 deps = ["probe-status.sh"]
 
+# A pin on vise itself: the pins line of status --json, specified before it
+# was written. spec/cli-status-pins.stdout is the operator's; the gate is red
+# (unmet, exit 6) until status prints exactly that object, and once it does, a
+# record accepts it and it is judged like every other probe.
+[[probe]]
+id = "cli-status-pins"
+run = "./probe-status-pins.sh"
+timeout = 300
+deps = ["probe-status-pins.sh"]
+expect.stdout = "spec/cli-status-pins.stdout"
+
 # An error path is observable behavior too, and the one most likely to be
 # quietly reworded by a refactor. The trailing branch keeps the probe's own
 # exit at 0; what is frozen is the message and the exit code vise printed.
@@ -230,6 +241,51 @@ STATUS
 sed "s/TOOLCHAIN_PLACEHOLDER/$TOOLCHAIN/" probe-status.sh > probe-status.sh.tmp
 mv probe-status.sh.tmp probe-status.sh
 chmod +x probe-status.sh
+
+# A pin on vise itself. The spec below was written on 2026-09-12 before the
+# feature existed; the dogfood target recorded it unmet, gated red with exit 6,
+# and went green once status printed exactly this object. It stays a pin so the
+# lockfile carries the spec's hash: an agent that edits the spec to match its
+# output gets harness/human, not green.
+mkdir -p spec
+printf '{"declared":1,"accepted":0,"unaccepted":["greet"],"unaccepted_count":1}\n' > spec/cli-status-pins.stdout
+
+cat > probe-status-pins.sh <<'PINS'
+#!/bin/sh
+# The pins line of the perception act, as JSON.
+#
+# Rendered against a throwaway repository that declares one pin whose program
+# does not exist, records it (unmet), and asks status what the lockfile says
+# about its pins — recorded acceptance only, never a live observation. This
+# probe is itself a pin: its spec was written before the feature existed.
+set -eu
+BIN="$VISE_TMP/vise"
+GOCACHE="$PWD/.gocache" GOFLAGS=-mod=vendor GOTOOLCHAIN=TOOLCHAIN_PLACEHOLDER \
+  go build -o "$BIN" ./cmd/vise 2>"$VISE_TMP/status-pins-build.err" || {
+    grep -E '(^#|\.go:)' "$VISE_TMP/status-pins-build.err" >&2 || cat "$VISE_TMP/status-pins-build.err" >&2
+    exit 1
+  }
+
+WORK="$VISE_TMP/pinsrepo"
+mkdir -p "$WORK/spec"
+cd "$WORK"
+git init -q .
+git config user.email pins@vise.invalid
+git config user.name pins
+printf '.vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n' > .gitignore
+printf 'hello Ada\n' > spec/greet
+printf '[vise]\nversion = 1\n[[probe]]\nid = "greet"\nrun = "./bin/greet"\nexpect.stdout = "spec/greet"\n' > vise.toml
+git add -A
+git commit -qm base
+"$BIN" record > /dev/null
+# The lock object's pins, without jq: status prints one line, and the object
+# nests no braces of its own. A record event later on the line carries a
+# "pins" too, which is why the match is anchored on "lock".
+"$BIN" status --json | sed -n 's/.*"lock":{[^}]*"pins":\({[^}]*}\).*/\1/p'
+PINS
+sed "s/TOOLCHAIN_PLACEHOLDER/$TOOLCHAIN/" probe-status-pins.sh > probe-status-pins.sh.tmp
+mv probe-status-pins.sh.tmp probe-status-pins.sh
+chmod +x probe-status-pins.sh
 
 step "committing the harness"
 git add -A >/dev/null
