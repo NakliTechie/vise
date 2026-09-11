@@ -37,6 +37,9 @@ type ProbeLock struct {
 	StderrLarge    bool              `json:"stderr_large,omitempty"`
 	Files          map[string]string `json:"files,omitempty"`
 	FilesLarge     map[string]bool   `json:"files_large,omitempty"`
+	// Pin is present only for a pinned probe: the spec hashes its expectation
+	// was read from, and where an operator accepted it (pin.go).
+	Pin *PinLock `json:"pin,omitempty"`
 }
 
 type MetricLock struct {

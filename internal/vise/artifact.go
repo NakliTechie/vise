@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // declaredArtifacts owns the lifecycle of a probe's declared artifact files:
@@ -47,27 +48,38 @@ func (a declaredArtifacts) reset() error {
 }
 
 // capture reads each declared artifact after the probe has run and returns
-// them keyed by their slash-normalized, cleaned path. It returns the first
-// harness error it encounters, already formatted for the caller.
-func (a declaredArtifacts) capture() (map[string]Capture, error) {
+// them keyed by their slash-normalized, cleaned path, plus the sorted list of
+// declared artifacts that were genuinely absent. Every artifact that was
+// produced is captured even when another is missing. The error is reserved
+// for hard conditions — a path that exists but is not a regular file, or one
+// that cannot be inspected or read — because "was not produced" said of an
+// artifact that is there and unreadable would let an unreadable artifact pass
+// for a feature nobody has built yet.
+func (a declaredArtifacts) capture() (map[string]Capture, []string, error) {
 	files := make(map[string]Capture, len(a.files))
+	var missing []string
 	for _, rel := range a.files {
 		if err := ValidateArtifactPath(a.root, rel); err != nil {
-			return nil, fmt.Errorf("artifact %q after probe: %w", rel, err)
+			return nil, nil, fmt.Errorf("artifact %q after probe: %w", rel, err)
 		}
 		path := filepath.Join(a.root, rel)
 		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			missing = append(missing, rel)
+			continue
+		}
 		if err != nil {
-			return nil, fmt.Errorf("declared artifact %q was not produced", rel)
+			return nil, nil, fmt.Errorf("inspect artifact %q after probe: %w", rel, err)
 		}
 		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("declared artifact %q is not a regular file", rel)
+			return nil, nil, fmt.Errorf("declared artifact %q is not a regular file", rel)
 		}
 		capture, err := captureFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("read artifact %q: %w", rel, err)
+			return nil, nil, fmt.Errorf("read artifact %q: %w", rel, err)
 		}
 		files[filepath.ToSlash(filepath.Clean(rel))] = capture
 	}
-	return files, nil
+	sort.Strings(missing)
+	return files, missing, nil
 }
