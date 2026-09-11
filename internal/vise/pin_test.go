@@ -1081,3 +1081,53 @@ func TestStatusReportsRecordedPinAcceptanceOnly(t *testing.T) {
 		t.Fatal("a baseline with no pins must report no pins object")
 	}
 }
+
+// doctor names a spec that is missing, uncommitted, modified since its
+// commit, or under an ignore rule — each an operator repair a fresh clone
+// would otherwise discover — and says nothing about a committed one.
+func TestDoctorReportsSpecGaps(t *testing.T) {
+	root, load := pinRepo(t)
+	manifest, _ := load()
+	findingsFor := func(check string) []DoctorFinding {
+		var out []DoctorFinding
+		for _, f := range Doctor(root).Findings {
+			if f.Check == check {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+	if f := findingsFor("spec-committed"); len(f) != 0 {
+		t.Fatalf("a committed spec was reported: %#v", f)
+	}
+	if f := findingsFor("spec-ignored"); len(f) != 0 {
+		t.Fatalf("an unignored spec was reported: %#v", f)
+	}
+
+	writeTestFile(t, root, "spec/greet.stdout", "edited\n")
+	if f := findingsFor("spec-committed"); len(f) != 1 || !strings.Contains(f[0].Detail, "differs from the committed one") {
+		t.Fatalf("modified spec: %#v", f)
+	}
+	testGit(t, root, "checkout", "--", "spec/greet.stdout")
+
+	writeTestFile(t, root, "spec/new.stdout", "new\n")
+	manifest.Probes = append(manifest.Probes, Probe{ID: "second", Run: "./bin/second", Expect: &Expect{Stdout: "spec/new.stdout"}})
+	if f := checkSpecsCommitted(root, manifest); len(f) != 1 || !strings.Contains(f[0].Detail, "is not committed") {
+		t.Fatalf("uncommitted spec: %#v", f)
+	}
+	testGit(t, root, "add", "spec/new.stdout")
+	if f := checkSpecsCommitted(root, manifest); len(f) != 1 || !strings.Contains(f[0].Detail, "is not committed") {
+		t.Fatalf("a staged spec is tracked and still not what a clone gets: %#v", f)
+	}
+
+	os.Remove(filepath.Join(root, "spec", "greet.stdout"))
+	if f := findingsFor("spec-committed"); len(f) != 1 || !strings.Contains(f[0].Detail, "does not exist") {
+		t.Fatalf("missing spec: %#v", f)
+	}
+	testGit(t, root, "checkout", "--", "spec/greet.stdout")
+
+	writeTestFile(t, root, ".gitignore", ".vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\nspec/\n")
+	if f := findingsFor("spec-ignored"); len(f) != 1 || !strings.Contains(f[0].Detail, "spec/greet.stdout") {
+		t.Fatalf("ignored spec: %#v", f)
+	}
+}

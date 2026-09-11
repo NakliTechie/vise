@@ -85,6 +85,8 @@ var doctorRegistry = []doctorCheck{
 	{"agent-contract", false, func(root string, _ Manifest) []DoctorFinding { return checkAgentContract(root) }},
 	{"tracked-artifacts", true, checkTrackedArtifacts},
 	{"snapshot-cost", false, func(root string, _ Manifest) []DoctorFinding { return checkSnapshotCost(root) }},
+	{"spec-committed", true, checkSpecsCommitted},
+	{"spec-ignored", true, checkSpecsIgnored},
 }
 
 // DoctorChecks is every check name Doctor can emit: the registry, plus the two
@@ -680,5 +682,106 @@ func checkTrackedArtifacts(root string, manifest Manifest) []DoctorFinding {
 		Check:  "tracked-artifacts",
 		Detail: fmt.Sprintf("declared artifacts are tracked by git: %s%s; vise deletes artifacts before every run and refuses to delete a tracked file, so every gate here is a harness error", strings.Join(named, ", "), suffix),
 		Remedy: "git rm --cached the artifacts and add them to .gitignore; they are build output, not source",
+	}}
+}
+
+// checkSpecsCommitted: a pin's spec is what a fresh clone gates against, so
+// it has to be the bytes HEAD holds. Tracked is not enough — a staged file
+// with no commit is tracked, and a tracked file can have uncommitted edits —
+// so the comparison is against HEAD's bytes, the way the baseline check
+// compares vise.lock. A spec that is missing, unreadable, or a symlink is
+// reported here too: record and verify refuse it as an operator repair, and
+// doctor's job is to say so before either runs.
+func checkSpecsCommitted(root string, manifest Manifest) []DoctorFinding {
+	var findings []DoctorFinding
+	seen := make(map[string]bool)
+	for _, probe := range manifest.Probes {
+		if !probe.IsPin() {
+			continue
+		}
+		for _, spec := range probe.Expect.SpecPaths() {
+			if seen[spec] {
+				continue
+			}
+			seen[spec] = true
+			current, err := readRegularFile(filepath.Join(root, spec))
+			switch {
+			case os.IsNotExist(err):
+				findings = append(findings, DoctorFinding{
+					Check:  "spec-committed",
+					Detail: fmt.Sprintf("probe %s expects spec %q, which does not exist", probe.ID, spec),
+					Remedy: "write the expected bytes to " + spec + " and commit it; the spec is the operator's, and an agent may not write it",
+				})
+				continue
+			case err != nil:
+				findings = append(findings, DoctorFinding{
+					Check:  "spec-committed",
+					Detail: fmt.Sprintf("probe %s spec %q cannot be read as a regular file: %v", probe.ID, spec, err),
+					Remedy: "replace " + spec + " with a regular, readable file holding the expected bytes; a symlink or special file here is refused by record and verify",
+				})
+				continue
+			}
+			committed, headErr := gitFileAtHead(root, spec)
+			switch {
+			case headErr != nil:
+				findings = append(findings, DoctorFinding{
+					Check:  "spec-committed",
+					Detail: fmt.Sprintf("probe %s spec %q is not committed, so a fresh clone has no expectation to gate against", probe.ID, spec),
+					Remedy: "git add " + spec + " && git commit",
+				})
+			case !bytes.Equal(current, committed):
+				findings = append(findings, DoctorFinding{
+					Check:  "spec-committed",
+					Detail: fmt.Sprintf("probe %s spec %q differs from the committed one, so a fresh clone gates against different bytes", probe.ID, spec),
+					Remedy: "git add " + spec + " && git commit, or restore the committed spec",
+				})
+			}
+		}
+	}
+	return findings
+}
+
+// checkSpecsIgnored: a spec matched by an ignore rule drops out of the next
+// commit silently, and the operator learns it from a fresh clone that cannot
+// gate. The rule is usually an honest one — `out/` for artifacts — that a
+// spec was written under by accident.
+func checkSpecsIgnored(root string, manifest Manifest) []DoctorFinding {
+	var ignored []string
+	seen := make(map[string]bool)
+	for _, probe := range manifest.Probes {
+		if !probe.IsPin() {
+			continue
+		}
+		for _, spec := range probe.Expect.SpecPaths() {
+			if seen[spec] {
+				continue
+			}
+			seen[spec] = true
+			cmd := exec.Command("git", "check-ignore", "-q", "--no-index", spec)
+			cmd.Dir = root
+			err := cmd.Run()
+			if err == nil {
+				ignored = append(ignored, spec)
+				continue
+			}
+			var exit *exec.ExitError
+			if errors.As(err, &exit) && exit.ExitCode() == 1 {
+				continue // not ignored
+			}
+			return []DoctorFinding{{
+				Check:  "spec-ignored",
+				Detail: "could not check whether git ignores spec " + spec + ": " + err.Error(),
+				Remedy: "resolve the git error above, then run vise doctor again",
+			}}
+		}
+	}
+	if len(ignored) == 0 {
+		return nil
+	}
+	sort.Strings(ignored)
+	return []DoctorFinding{{
+		Check:  "spec-ignored",
+		Detail: "git ignores a pin's spec, so it will drop out of the next commit: " + strings.Join(ignored, ", "),
+		Remedy: "move the spec out of the ignored path, or add a negating rule (!" + ignored[0] + ") to .gitignore",
 	}}
 }

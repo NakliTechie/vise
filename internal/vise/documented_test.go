@@ -30,9 +30,13 @@ func TestEveryDoctorCheckIsDocumented(t *testing.T) {
 func TestEachDoctorCheckEmitsTheNameItIsRegisteredUnder(t *testing.T) {
 	// A repository with as many gaps open at once as static checks can see.
 	root := testGitRepo(t)
-	writeTestFile(t, root, ".gitignore", "node_modules/\n")
+	writeTestFile(t, root, ".gitignore", "node_modules/\nignored/\n")
 	writeTestFile(t, root, "wrapper.sh", "#!/bin/sh\nprintf %s \"$VISE_TMP\"\n")
-	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"sh wrapper.sh\"\nfiles = [\"out/result.txt\"]\nenv = { CACHE = \"/opt/elsewhere\" }\n")
+	// Two pins: one whose spec is uncommitted, one whose spec sits under an
+	// ignore rule — the two gaps the spec checks exist for.
+	writeTestFile(t, root, "spec/uncommitted.stdout", "x\n")
+	writeTestFile(t, root, "ignored/spec.stdout", "x\n")
+	writeTestFile(t, root, "vise.toml", "[vise]\nversion = 1\n[[probe]]\nid = \"p\"\nrun = \"sh wrapper.sh\"\nfiles = [\"out/result.txt\"]\nenv = { CACHE = \"/opt/elsewhere\" }\n[[probe]]\nid = \"pin\"\nrun = \"./bin/pin\"\nexpect.stdout = \"spec/uncommitted.stdout\"\n[[probe]]\nid = \"pin2\"\nrun = \"./bin/pin2\"\nexpect.stdout = \"ignored/spec.stdout\"\n")
 	// A declared artifact somebody committed, the way `git add -A` does.
 	writeTestFile(t, root, filepath.Join("out", "result.txt"), "produced")
 	testGit(t, root, "add", "out/result.txt")
