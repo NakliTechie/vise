@@ -3,3 +3,4 @@ plan/
 .vise/journal.jsonl
 .vise/run.lock
 .vise/tmp/
+.worktrees/
