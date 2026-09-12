@@ -81,3 +81,22 @@ To check whether an observation detects a defect, temporarily change a single
 production constant or message while keeping the program compilable, confirm
 the edit, and run the gate. Restore precisely that edit and gate again. A root
 gate that remains green has not demonstrated coverage of the mutated behavior.
+
+## Bootstrap verification, 2026-09-12
+
+The two-pass recording and subsequent gate passed all seven observations.
+Two compilable production mutations were each caught by the expected probe:
+changing the global help headline failed only `cli-help`; changing `ExitUnmet`
+from 6 to 7 failed only `cli-pin`. Restoring each edit returned the full gate to
+green, with no baseline changes. Other probes were not individually mutated.
+
+A fresh clone of the baseline commit passed all seven observations and doctor
+with a minimal environment and a new checkout build cache. The first attempt
+omitted Go from PATH and was correctly refused; fixing that invocation sufficed.
+The full `scripts/verify verify` suite passed all eleven features after the root
+baseline was committed. ShellCheck passed for all three scripts. Production
+source, existing tests, module versions, and the existing verifier were unchanged.
+Machine-readable results are in [selfgate-evidence.json](selfgate-evidence.json).
+
+One existing cosmetic issue remains visible in the frozen status output:
+`record` journal rows have an empty verdict cell. This setup preserves it.

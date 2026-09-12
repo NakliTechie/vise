@@ -1,0 +1,262 @@
+{
+  "date": "2026-09-12",
+  "baseline_commit": "d74b9b319d8ee9a43e46372d2672462c8dd1ca11",
+  "judge": {
+    "built": "2026-09-11T20:53:29Z",
+    "cmd": "version",
+    "exit": 0,
+    "modified": false,
+    "next": {
+      "action": "proceed",
+      "detail": "version reported"
+    },
+    "revision": "70e04d63bbd7910b9708f5d1480412c40b909859",
+    "v": 1,
+    "version": "0.3.0"
+  },
+  "record": {
+    "candidate": "sha256:f70a9b4d246fb876e657b979374297640181eb4a40f61ffbef8a4563644a88b2",
+    "cmd": "record",
+    "counts": {
+      "behavior": 0,
+      "declared": 7,
+      "flaky": 0,
+      "harness": 0,
+      "metric": 0,
+      "pass": 7,
+      "skipped": 0,
+      "unmet": 0
+    },
+    "exit": 0,
+    "lock": "sha256:81e5446147e7df744f1f3a1e422fa6fe4bbebe1df8522c4214ac415ac98bc170",
+    "next": {
+      "action": "proceed",
+      "detail": "all declared checks matched"
+    },
+    "v": 1,
+    "verdict": "green"
+  },
+  "initial_gate": {
+    "cmd": "gate",
+    "counts": {
+      "behavior": 0,
+      "declared": 7,
+      "flaky": 0,
+      "harness": 0,
+      "metric": 0,
+      "pass": 7,
+      "skipped": 0,
+      "unmet": 0
+    },
+    "exit": 0,
+    "lock": "sha256:81e5446147e7df744f1f3a1e422fa6fe4bbebe1df8522c4214ac415ac98bc170",
+    "next": {
+      "action": "proceed",
+      "detail": "all declared checks matched"
+    },
+    "v": 1,
+    "verdict": "green"
+  },
+  "root_doctor": {
+    "v": 1,
+    "cmd": "doctor",
+    "exit": 0,
+    "ready": true,
+    "findings": [],
+    "next": {
+      "action": "proceed",
+      "detail": "the repository is ready to hand to an agent"
+    }
+  },
+  "mutations": [
+    {
+      "file": "internal/cli/app.go",
+      "change": "Changed global help headline to 'vise — deliberate self-gate mutation'.",
+      "gate": {
+        "classes": [
+          "behavior"
+        ],
+        "cmd": "gate",
+        "counts": {
+          "behavior": 1,
+          "declared": 7,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 6,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 1,
+        "failures": {
+          "cli-help": {
+            "class": "behavior",
+            "detail": "observed behavior differs consistently from the lockfile",
+            "diff": "--- expected/stdout\n+++ got/stdout\n@@ first divergence line 1 @@\n-vise — deterministic behavior locks for agent-led refactoring\n-\n-Usage:\n-  vise <command> [options]\n-\n-Commands:\n-  init                 Write a stub vise.toml and local-state ignores\n-  record               Freeze deterministic behavior into vise.lock\n+vise — deliberate self-gate mutation\n+\n+Usage:\n+  vise <command> [options]\n+\n+Commands:\n+  init                 Write a stub vise.toml and local-state ignores\n+  record               Freeze deterministic behavior into vise.lock\n… 12 later line(s) omitted",
+            "expect": {
+              "exit": 0,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:7d345bb6b80a669ad8e8e3fa2fdee586c4e7fec0f982c8e31de28221209cd30a"
+            },
+            "got": {
+              "exit": 0,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:54192793d9187a95d8b6b1a44a129e4908aa75d5e3c1eb1ad10ba76437bb2f20"
+            }
+          }
+        },
+        "lock": "sha256:81e5446147e7df744f1f3a1e422fa6fe4bbebe1df8522c4214ac415ac98bc170",
+        "next": {
+          "action": "revert",
+          "detail": "revert the unintended behavior change or ask an operator to accept a new baseline"
+        },
+        "v": 1,
+        "verdict": "red"
+      },
+      "restored_gate": {
+        "cmd": "gate",
+        "counts": {
+          "behavior": 0,
+          "declared": 7,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 7,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 0,
+        "lock": "sha256:81e5446147e7df744f1f3a1e422fa6fe4bbebe1df8522c4214ac415ac98bc170",
+        "next": {
+          "action": "proceed",
+          "detail": "all declared checks matched"
+        },
+        "v": 1,
+        "verdict": "green"
+      }
+    },
+    {
+      "file": "internal/vise/types.go",
+      "change": "Changed ExitUnmet from 6 to 7.",
+      "gate": {
+        "classes": [
+          "behavior"
+        ],
+        "cmd": "gate",
+        "counts": {
+          "behavior": 1,
+          "declared": 7,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 6,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 1,
+        "failures": {
+          "cli-pin": {
+            "class": "behavior",
+            "detail": "observed behavior differs consistently from the lockfile",
+            "diff": "exit: expected 0, got 1",
+            "expect": {
+              "exit": 0,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:4fb81b1e856f4a6e3dc9792679bbbf59b35f981d1267744e10c16b1a58acccf2"
+            },
+            "got": {
+              "exit": 1,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:9d25362ade42cfe82d1a74a327f9eb31da1b05e1ec8529ae012e0d2fe21e7391"
+            }
+          }
+        },
+        "lock": "sha256:81e5446147e7df744f1f3a1e422fa6fe4bbebe1df8522c4214ac415ac98bc170",
+        "next": {
+          "action": "revert",
+          "detail": "revert the unintended behavior change or ask an operator to accept a new baseline"
+        },
+        "v": 1,
+        "verdict": "red"
+      },
+      "restored_gate": {
+        "cmd": "gate",
+        "counts": {
+          "behavior": 0,
+          "declared": 7,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 7,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 0,
+        "lock": "sha256:81e5446147e7df744f1f3a1e422fa6fe4bbebe1df8522c4214ac415ac98bc170",
+        "next": {
+          "action": "proceed",
+          "detail": "all declared checks matched"
+        },
+        "v": 1,
+        "verdict": "green"
+      }
+    }
+  ],
+  "fresh_clone": {
+    "commit": "d74b9b319d8ee9a43e46372d2672462c8dd1ca11",
+    "environment": "env -i with the existing HOME and PATH containing /usr/local/go/bin, /usr/bin, /bin; new clone and empty checkout build cache; installed judge invoked by absolute path",
+    "gate": {
+      "cmd": "gate",
+      "counts": {
+        "behavior": 0,
+        "declared": 7,
+        "flaky": 0,
+        "harness": 0,
+        "metric": 0,
+        "pass": 7,
+        "skipped": 0,
+        "unmet": 0
+      },
+      "exit": 0,
+      "lock": "sha256:81e5446147e7df744f1f3a1e422fa6fe4bbebe1df8522c4214ac415ac98bc170",
+      "next": {
+        "action": "proceed",
+        "detail": "all declared checks matched"
+      },
+      "v": 1,
+      "verdict": "green"
+    },
+    "doctor": {
+      "v": 1,
+      "cmd": "doctor",
+      "exit": 0,
+      "ready": true,
+      "findings": [],
+      "next": {
+        "action": "proceed",
+        "detail": "the repository is ready to hand to an agent"
+      }
+    },
+    "git_status_porcelain": "",
+    "initial_attempt": "The first stripped environment omitted Go from PATH and exited 2 at fingerprint capture. Correcting PATH, without changing the repository or baseline, produced the gate result above."
+  },
+  "full_verifier": {
+    "command": "scripts/verify verify",
+    "exit": 0,
+    "output": "VISE_VERIFY {\"feature\":\"orientation\",\"status\":\"pass\"}\nVISE_VERIFY {\"feature\":\"readiness\",\"status\":\"pass\"}\nVISE_VERIFY {\"feature\":\"initialization\",\"status\":\"pass\"}\nVISE_VERIFY {\"feature\":\"baseline\",\"status\":\"pass\"}\nVISE_VERIFY {\"feature\":\"failure-modes\",\"status\":\"pass\"}\nVISE_VERIFY {\"feature\":\"metrics\",\"status\":\"pass\"}\nVISE_VERIFY {\"feature\":\"review\",\"status\":\"pass\"}\nVISE_VERIFY {\"feature\":\"pin\",\"status\":\"pass\"}\nVISE_VERIFY {\"feature\":\"example\",\"status\":\"pass\"}\nVISE_VERIFY {\"feature\":\"dogfood\",\"status\":\"pass\"}\n?   \tgithub.com/NakliTechie/vise/cmd/vise\t[no test files]\nok  \tgithub.com/NakliTechie/vise/internal/cli\t44.163s\nok  \tgithub.com/NakliTechie/vise/internal/vise\t119.966s\nVISE_VERIFY {\"feature\":\"internal-checks\",\"status\":\"pass\"}\nVISE_VERIFY {\"feature\":\"full\",\"status\":\"pass\"}\n"
+  },
+  "shellcheck": {
+    "command": "shellcheck scripts/selfgate-probe scripts/verify scripts/dogfood",
+    "exit": 0
+  },
+  "production_diff": {
+    "command": "git diff --exit-code 70e04d63bbd7910b9708f5d1480412c40b909859 -- cmd internal go.mod go.sum scripts/verify scripts/dogfood",
+    "exit": 0
+  },
+  "limits": [
+    "Only the help headline and unmet exit mutations were tested; other coverage is established by the observed scenarios, not separate mutations.",
+    "The baseline is specific to its recorded macOS/arm64, Go, and Git fingerprint.",
+    "No performance metrics are declared. This run did not add race or vulnerability scans to the full verifier.",
+    "Documentation and this evidence file are not behavioral observations."
+  ]
+}
