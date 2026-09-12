@@ -270,7 +270,7 @@ func (r Runner) runShellUnguarded(kind, id, command string, timeoutSeconds int, 
 	waitErr, timedOut := awaitProbe(cmd, time.Duration(timeoutSeconds)*time.Second)
 	pipeHeld, copyErr := awaitProbeOutput(outRead, errRead, outDone, errDone)
 
-	result := classifyProbe(kind, command, timeoutSeconds, stdout, stderr, waitErr, timedOut)
+	result := classifyProbe(kind, timeoutSeconds, stdout, stderr, waitErr, timedOut)
 	if pipeHeld {
 		result.hardHarnessError("probe exited but left a background process holding its stdout or stderr; redirect that process to /dev/null or wait for it inside the probe")
 	} else if copyErr != nil {
@@ -329,7 +329,7 @@ func startProbe(cmd *exec.Cmd) error {
 	return nil
 }
 
-func classifyProbe(kind, command string, timeoutSeconds int, stdout, stderr *captureWriter, waitErr error, timedOut bool) RunResult {
+func classifyProbe(kind string, timeoutSeconds int, stdout, stderr *captureWriter, waitErr error, timedOut bool) RunResult {
 	result := RunResult{Stdout: stdout.Capture(), Stderr: stderr.Capture(), TimedOut: timedOut}
 	if timedOut {
 		result.HarnessError = fmt.Sprintf("%s timed out after %ds", kind, timeoutSeconds)
@@ -356,11 +356,9 @@ func classifyProbe(kind, command string, timeoutSeconds int, stdout, stderr *cap
 			return result
 		}
 		if result.Exit == 127 {
-			// Name the word the shell could not resolve. "could not be
-			// launched" tells the reader something failed; the missing tool
-			// tells them what to install, and the whole point of these
-			// messages is that the remedy arrives with the failure.
-			result.HarnessError = launchFailureDetail(kind, command, result.Stderr)
+			// Exit 127 retains the contract's launch-failure classification,
+			// but the number alone cannot establish which program was absent.
+			result.HarnessError = launchFailureDetail(kind, result.Stderr)
 			result.LaunchFailed = true
 			result.Tolerated = true
 		}
@@ -468,28 +466,14 @@ func strayFilesError(kind string, paths []string) string {
 		kind, strings.Join(named, ", "), suffix, kind)
 }
 
-// launchFailureDetail explains an exit 127. The shell already says which word
-// it could not find, so that line is quoted when it is there; the first word of
-// the command is the fallback, since it is what the reader will go and look
-// for either way.
-func launchFailureDetail(kind, command string, stderr Capture) string {
-	word := command
-	if fields := strings.Fields(command); len(fields) > 0 {
-		word = fields[0]
-	}
-	// The remedy goes on both branches. It used to appear only when the shell
-	// said nothing useful, so the case where the shell *did* speak — the common
-	// one — lost the sentence telling the reader what to do about it. The
-	// README's claim that a missing tool is "exit 2 with the remedy in the
-	// message" was true of the rarer half.
-	// When the shell named the missing thing, do not name it again from the
-	// run command: the first word of `sh helper.sh` is `sh`, which is present,
-	// and the missing tool is something helper.sh reached for. Saying "install
-	// sh" there is worse than saying nothing, because it is confidently wrong.
+// launchFailureDetail quotes a captured not-found diagnostic when available.
+// Without one, neither launch failure nor a missing program's identity follows
+// from exit 127: an executable can deliberately return that status.
+func launchFailureDetail(kind string, stderr Capture) string {
 	if line := firstShellDiagnostic(stderr); line != "" {
 		return fmt.Sprintf("%s could not be launched (exit 127): %s; install what the shell named, or give it an absolute path", kind, line)
 	}
-	return fmt.Sprintf("%s could not be launched (exit 127): %q is not on its PATH; install %s, or name it by an absolute path", kind, word, word)
+	return fmt.Sprintf("%s exited 127 without a shell diagnostic; inspect the command's exit handling and dependencies", kind)
 }
 
 // firstShellDiagnostic returns the shell's own not-found line, bounded, or "".

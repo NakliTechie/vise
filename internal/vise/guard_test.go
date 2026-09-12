@@ -157,41 +157,37 @@ func TestTheLaunchFailureNamesTheToolAndNotTheNoise(t *testing.T) {
 	tests := []struct {
 		name    string
 		stderr  string
-		command string
 		wantIn  string
 		wantOut string
 	}{
 		{
 			name:    "a warning before the diagnostic",
 			stderr:  "warning: something unrelated\nsh: mytool: command not found\n",
-			command: "mytool --version",
 			wantIn:  "mytool: command not found",
 			wantOut: "warning: something unrelated",
 		},
 		{
-			name:    "the other phrasing",
-			stderr:  "sh: 1: othertool: No such file or directory\n",
-			command: "othertool run",
-			wantIn:  "othertool",
+			name:   "the other phrasing",
+			stderr: "sh: 1: othertool: No such file or directory\n",
+			wantIn: "othertool",
 		},
 		{
-			name:    "no diagnostic at all falls back to the command",
+			name:    "unrelated noise does not identify a missing program",
 			stderr:  "some unrelated noise\n",
-			command: "thirdtool --flag",
-			wantIn:  `"thirdtool" is not on its PATH`,
+			wantIn:  "exited 127 without a shell diagnostic",
 			wantOut: "some unrelated noise",
 		},
 		{
-			name:    "a compound command names its first word",
+			name:    "silent exit 127 carries no installation advice",
 			stderr:  "",
-			command: "fourthtool | grep x",
-			wantIn:  `"fourthtool"`,
+			wantIn:  "exited 127 without a shell diagnostic",
+			wantOut: "install",
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := launchFailureDetail("probe", test.command, CaptureBytes([]byte(test.stderr)))
+			got := launchFailureDetail("probe", CaptureBytes([]byte(test.stderr)))
 			if !strings.Contains(got, "127") {
 				t.Fatalf("the message does not say it was a launch failure: %q", got)
 			}
@@ -206,7 +202,7 @@ func TestTheLaunchFailureNamesTheToolAndNotTheNoise(t *testing.T) {
 
 	// And it is bounded, because a probe's stderr is not.
 	long := "sh: " + strings.Repeat("x", 4000) + ": command not found\n"
-	if got := launchFailureDetail("probe", "x", CaptureBytes([]byte(long))); len(got) > 400 {
+	if got := launchFailureDetail("probe", CaptureBytes([]byte(long))); len(got) > 400 {
 		t.Fatalf("a 4000-character diagnostic rendered %d characters", len(got))
 	}
 }
