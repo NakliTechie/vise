@@ -1,0 +1,15 @@
+$ vise record --preview
+CANDIDATE BASELINE — no baseline state written (probes ran; declared artifacts were regenerated)
++ probe added (exit 0, stdout sha256:3fc4ccfe745870e2c0d99f71f30ff0656c8dedd41cc1d7d3d376b0dbe685e2f3, stderr sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, 0 file(s), recorded at fe92b36dcf0900a8a2319d3bb8b48a9972cb69b8)
+kept definition changed since the recorded baseline (run_hash sha256:1ceabdad5a1621c33d73be431672390a731a7b5ae2f8cdb7f1af16faa0a620ac -> sha256:ba792f35f6be818ed1f3aeb117bcd9c48590ddc5224796060bc06de884d99e6a); see git diff vise.toml
+--- expected/kept/stdout
++++ got/kept/stdout
+@@ first divergence line 1 @@
+-one
+-\ No newline at end of file
++one-changed
++\ No newline at end of file
+- probe removed (exit 0, stdout sha256:283bb9deef02e6843abfb538efa1eca70801bd8a701c3f98191e123496339247, stderr sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, 0 file(s), recorded at 6dcb995544501f0bc31515bcc8e3b179970d12ae)
+candidate: sha256:9db17da721d8800d1b3cafbdfc36bbba932c2a730fb1235ec65072fd7ff5b0f8
+next: human — review the diff, then freeze it with record --accept sha256:9db17da721d8800d1b3cafbdfc36bbba932c2a730fb1235ec65072fd7ff5b0f8
+exit=0

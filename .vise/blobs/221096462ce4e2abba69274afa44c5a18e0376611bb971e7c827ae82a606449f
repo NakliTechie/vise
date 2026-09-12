@@ -1,0 +1,12 @@
+$ vise status
+VISE STATUS — READY
+manifest: valid=true · probes=1 · metrics=0
+lockfile: valid=true · probes=1 · metrics=0
+fingerprint: match=true
+recorded commits: 7b122a70ac61148ef9bc3ed4aaabef0261a26a64
+lock: sha256:7a63cfc7f3289392f730408df760363c6d206aa78cd36cb0ef78d3a4e2ecacc9
+pending proposals: 0
+journal: record · 7b122a70ac61148ef9bc3ed4aaabef0261a26a64 · 
+journal: gate · 74ab4609ad1951c5f5303bbcee40a5f3e8f640bf · green
+next: proceed — run vise gate before the next refactor step
+exit=0

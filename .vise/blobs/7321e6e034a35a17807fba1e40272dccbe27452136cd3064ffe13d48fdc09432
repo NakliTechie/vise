@@ -1,0 +1,4 @@
+$ vise doctor
+DOCTOR READY — nothing to fix before an agent works here
+next: proceed — the repository is ready to hand to an agent
+exit=0

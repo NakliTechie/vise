@@ -1,0 +1,58 @@
+$ vise record
+RECORDED — 1 probe(s) · 0 metric(s) · pins: 0 accepted, 1 unmet (greet)
+lock: sha256:2c849444ca5b4cdc50b52980b62ee65020119bf71e29f7344ce63f26d729b346
+next: proceed — baseline frozen with 1 pin(s) unmet (greet) — an agent builds to them, and an operator records again to accept
+exit=0
+$ vise gate --json
+{"classes":["unmet"],"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":0,"metric":0,"pass":0,"skipped":0,"unmet":1},"exit":6,"failures":{"greet":{"class":"unmet","detail":"not built yet: probe could not be launched (exit 127): /bin/sh: ./greet.sh: No such file or directory; install what the shell named, or give it an absolute path","diff":"exit: expected 0, got 127","expect":{"exit":0,"stderr":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout":"sha256:3087df6ef350a06faf4227c0514adcdad923b63f6c90e6e48756e7e0306cc6b6"},"got":{"exit":127,"stderr":"sha256:89e2c1e25cf5b9bf8d879e31a829be5caa5871e71d1084805c2096307f552864","stdout":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}}},"lock":"sha256:2c849444ca5b4cdc50b52980b62ee65020119bf71e29f7344ce63f26d729b346","next":{"action":"build","detail":"1 pin(s) unmet (greet) — keep building toward the spec, do not revert; vise verify --probe \u003cid\u003e shows the diff"},"pins":{"evaluated":1,"passing_unaccepted":[],"passing_unaccepted_count":0,"unmet":["greet"],"unmet_count":1},"v":1,"verdict":"red"}
+exit=6
+$ vise status
+VISE STATUS — READY
+manifest: valid=true · probes=1 · metrics=0
+lockfile: valid=true · probes=1 · metrics=0
+fingerprint: match=true
+recorded commits: adf7fd861f7f46e181e838b7db28568deb94ac2b
+pins: 1 (accepted 0 · unaccepted 1: greet)
+lock: sha256:2c849444ca5b4cdc50b52980b62ee65020119bf71e29f7344ce63f26d729b346
+pending proposals: 0
+journal: record · adf7fd861f7f46e181e838b7db28568deb94ac2b · 
+journal: gate · adf7fd861f7f46e181e838b7db28568deb94ac2b · red
+next: proceed — run vise gate before the next refactor step
+exit=0
+$ vise gate --json
+{"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":0,"metric":0,"pass":1,"skipped":0,"unmet":0},"exit":0,"lock":"sha256:2c849444ca5b4cdc50b52980b62ee65020119bf71e29f7344ce63f26d729b346","next":{"action":"proceed","detail":"all declared checks matched; 1 pin(s) passing, not yet accepted (greet) — an operator records to accept"},"pins":{"evaluated":1,"passing_unaccepted":["greet"],"passing_unaccepted_count":1,"unmet":[],"unmet_count":0},"v":1,"verdict":"green"}
+exit=0
+$ vise record --preview
+CANDIDATE BASELINE — no baseline state written (probes ran; declared artifacts were regenerated)
+greet pin: unaccepted -> accepted at 5fcfe219b118fdde67ed28d9f6f3d8775e637282
+candidate: sha256:e6f64ba5a99dcef1a516062f79a491db3dcfb699196da32a11c2c24cbbc89ddd
+next: human — review the diff, then freeze it with record --accept sha256:e6f64ba5a99dcef1a516062f79a491db3dcfb699196da32a11c2c24cbbc89ddd
+exit=0
+$ vise record --i-reviewed-the-diff
+BEHAVIOR DIFF UNDER REVIEW
+greet pin: unaccepted -> accepted at 5fcfe219b118fdde67ed28d9f6f3d8775e637282
+RECORDED — 1 probe(s) · 0 metric(s) · pins: 1 accepted, 0 unmet
+lock: sha256:47860f66a9e25eb214a1b838f773a00243de3c036eb4f58a07faec25973953b1
+exit=0
+$ vise gate --json
+{"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":0,"metric":0,"pass":1,"skipped":0,"unmet":0},"exit":0,"lock":"sha256:47860f66a9e25eb214a1b838f773a00243de3c036eb4f58a07faec25973953b1","next":{"action":"proceed","detail":"all declared checks matched"},"pins":{"evaluated":1,"passing_unaccepted":[],"passing_unaccepted_count":0,"unmet":[],"unmet_count":0},"v":1,"verdict":"green"}
+exit=0
+$ vise status
+VISE STATUS — READY
+manifest: valid=true · probes=1 · metrics=0
+lockfile: valid=true · probes=1 · metrics=0
+fingerprint: match=true
+recorded commits: adf7fd861f7f46e181e838b7db28568deb94ac2b
+pins: 1 (accepted 1 · unaccepted 0)
+lock: sha256:47860f66a9e25eb214a1b838f773a00243de3c036eb4f58a07faec25973953b1
+pending proposals: 0
+journal: record · adf7fd861f7f46e181e838b7db28568deb94ac2b · 
+journal: gate · adf7fd861f7f46e181e838b7db28568deb94ac2b · red
+journal: gate · 5fcfe219b118fdde67ed28d9f6f3d8775e637282 · green
+journal: record · 5fcfe219b118fdde67ed28d9f6f3d8775e637282 · 
+journal: gate · b9bddaf4f6c8a926369c931b34a688f3c3cbb4c3 · green
+next: proceed — run vise gate before the next refactor step
+exit=0
+$ vise gate --json
+{"classes":["harness"],"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":1,"metric":0,"pass":0,"skipped":0,"unmet":0},"exit":2,"failures":{"greet":{"class":"harness","detail":"spec changed after recording, not behavior; restore the spec file, or an operator re-records to re-accept","operator":true}},"lock":"sha256:47860f66a9e25eb214a1b838f773a00243de3c036eb4f58a07faec25973953b1","next":{"action":"human","detail":"an operator must restore the harness; the repair is in a file an agent may not write"},"v":1,"verdict":"indeterminate"}
+exit=2

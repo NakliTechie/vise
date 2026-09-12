@@ -1,0 +1,3 @@
+VISE INDETERMINATE [harness] — 0/1
+vise [harness] — unknown command "no-such-command"; run 'vise --help'
+next: fix_invocation — the command was rejected; correct the command line and rerun — the repository is untouched

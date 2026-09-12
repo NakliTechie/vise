@@ -1,0 +1,5 @@
+$ vise no-such-command
+exit=2
+$ vise no-such-command --json
+{"classes":["harness"],"cmd":"vise","counts":{"behavior":0,"declared":1,"flaky":0,"harness":1,"metric":0,"pass":0,"skipped":0,"unmet":0},"exit":2,"failures":{"vise":{"class":"harness","detail":"unknown command \"no-such-command\"; run 'vise --help'","usage":true}},"next":{"action":"fix_invocation","detail":"the command was rejected; correct the command line and rerun — the repository is untouched"},"v":1,"verdict":"indeterminate"}
+exit=2

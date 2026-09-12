@@ -1,0 +1,20 @@
+vise — deterministic behavior locks for agent-led refactoring
+
+Usage:
+  vise <command> [options]
+
+Commands:
+  init                 Write a stub vise.toml and local-state ignores
+  record               Freeze deterministic behavior into vise.lock
+  verify [--probe ID]  Replay and diagnose behavior
+  gate [--probe ID]    Emit the bounded refactor-loop verdict
+  run <probe-id>       Run one probe and report it, without judging it
+  status               Render the complete bounded situation
+  doctor               Check the repository is fit to hand to an agent
+  version              Print the vise version
+
+Global options:
+  --json               Replace human output with one JSON object
+  --help               Show help without requiring a Git repository
+
+Run 'vise <command> --help' for command-specific help.
