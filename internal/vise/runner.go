@@ -236,28 +236,79 @@ func (r Runner) runShellUnguarded(kind, id, command string, timeoutSeconds int, 
 	cmd.Dir = r.Root
 	cmd.Env = r.assembleProbeEnv(tmp, extra)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	// Wait blocks until every holder of the stdout/stderr pipes exits. A probe
-	// that leaves a detached process (setsid, a daemon, a preloader) holding
-	// them would otherwise hang vise past its timeout. WaitDelay closes the
-	// pipes shortly after the shell exits or the timeout kill lands. It is set
-	// here, with the rest of the process configuration and before Start,
-	// because Start also consults it to arm the context watchdog: that path is
-	// dormant only for as long as this command carries no context, and a field
-	// whose correctness depends on an unstated invariant is a trap for whoever
-	// switches to exec.CommandContext.
-	cmd.WaitDelay = pipeCloseDelay
+	// Own the output pipes so cmd.Wait reports process exit, not pipe drain.
+	// exec.Cmd's internal copy wait otherwise consumes the execution timeout
+	// after the parent has exited, and hides ErrWaitDelay behind nonzero exits.
+	outRead, outWrite, err := os.Pipe()
+	if err != nil {
+		return RunResult{HarnessError: fmt.Sprintf("create stdout pipe: %v", err)}
+	}
+	defer outRead.Close()
+	defer outWrite.Close()
+	errRead, errWrite, err := os.Pipe()
+	if err != nil {
+		return RunResult{HarnessError: fmt.Sprintf("create stderr pipe: %v", err)}
+	}
+	defer errRead.Close()
+	defer errWrite.Close()
 	stdout := newCaptureWriter(r.MirrorStdout)
 	stderr := newCaptureWriter(r.MirrorStderr)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
+	cmd.Stdout = outWrite
+	cmd.Stderr = errWrite
 	if err := startProbe(cmd); err != nil {
 		return RunResult{HarnessError: err.Error()}
 	}
 	defer setActiveProbeGroup(0)
+	// Sweep even redirected children, but only after the independent drain
+	// check: killing pipe holders first would conceal the harness failure.
+	defer syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	_ = outWrite.Close()
+	_ = errWrite.Close()
+	outDone := copyProbeOutput(stdout, outRead)
+	errDone := copyProbeOutput(stderr, errRead)
 
 	waitErr, timedOut := awaitProbe(cmd, time.Duration(timeoutSeconds)*time.Second)
+	pipeHeld, copyErr := awaitProbeOutput(outRead, errRead, outDone, errDone)
 
-	return classifyProbe(kind, command, timeoutSeconds, cmd, stdout, stderr, waitErr, timedOut)
+	result := classifyProbe(kind, command, timeoutSeconds, stdout, stderr, waitErr, timedOut)
+	if pipeHeld {
+		result.hardHarnessError("probe exited but left a background process holding its stdout or stderr; redirect that process to /dev/null or wait for it inside the probe")
+	} else if copyErr != nil {
+		result.hardHarnessError(fmt.Sprintf("capture probe output: %v", copyErr))
+	}
+	return result
+}
+
+func copyProbeOutput(dst io.Writer, src *os.File) <-chan error {
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(dst, src)
+		done <- err
+	}()
+	return done
+}
+
+// Drain both streams under one deadline, then join the readers before their
+// captures are inspected. Closing our read ends bounds detached pipe holders.
+func awaitProbeOutput(stdout, stderr *os.File, outDone, errDone <-chan error) (held bool, err error) {
+	timer := time.NewTimer(pipeCloseDelay)
+	defer timer.Stop()
+	deadline := timer.C
+	var outErr, errErr error
+	for outDone != nil || errDone != nil {
+		select {
+		case outErr = <-outDone:
+			outDone = nil
+		case errErr = <-errDone:
+			errDone = nil
+		case <-deadline:
+			held = true
+			_ = stdout.Close()
+			_ = stderr.Close()
+			deadline = nil
+		}
+	}
+	return held, errors.Join(outErr, errErr)
 }
 
 func startProbe(cmd *exec.Cmd) error {
@@ -278,16 +329,11 @@ func startProbe(cmd *exec.Cmd) error {
 	return nil
 }
 
-func classifyProbe(kind, command string, timeoutSeconds int, cmd *exec.Cmd, stdout, stderr *captureWriter, waitErr error, timedOut bool) RunResult {
+func classifyProbe(kind, command string, timeoutSeconds int, stdout, stderr *captureWriter, waitErr error, timedOut bool) RunResult {
 	result := RunResult{Stdout: stdout.Capture(), Stderr: stderr.Capture(), TimedOut: timedOut}
 	if timedOut {
 		result.HarnessError = fmt.Sprintf("%s timed out after %ds", kind, timeoutSeconds)
 		result.Tolerated = true
-		return result
-	}
-	if errors.Is(waitErr, exec.ErrWaitDelay) {
-		result.Exit = cmd.ProcessState.ExitCode()
-		result.HarnessError = "probe exited but left a background process holding its stdout or stderr; redirect that process to /dev/null or wait for it inside the probe"
 		return result
 	}
 	if waitErr == nil {
@@ -339,8 +385,8 @@ func prepareProbeScratch(root, id string) (string, error) {
 	return tmp, nil
 }
 
-// awaitProbe waits for a started probe, kills its process group when the
-// timeout lands, and sweeps the group again once the shell is gone.
+// awaitProbe waits only for the process; the caller owns output copying and
+// the final group sweep. The execution deadline cannot be spent draining pipes.
 func awaitProbe(cmd *exec.Cmd, timeout time.Duration) (waitErr error, timedOut bool) {
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -353,12 +399,6 @@ func awaitProbe(cmd *exec.Cmd, timeout time.Duration) (waitErr error, timedOut b
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		waitErr = <-done
 	}
-	// The shell has exited (or been killed). Anything it left behind in the
-	// process group — a redirected background child, a pipe holder — must not
-	// outlive the run: it could keep writing artifacts or tracked files after
-	// the tracked-tree check, or hold the next run's state.
-	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-
 	return waitErr, timedOut
 }
 
