@@ -94,7 +94,10 @@ func validateLockfileSchema(lock Lockfile) error {
 			}
 		}
 		if probe.Pin != nil {
-			if len(probe.Pin.Spec) == 0 {
+			// An exit-only pin has no spec files. With no spec hashes, only
+			// empty streams and no artifacts can be legitimate expectations;
+			// the manifest-aware preflight checks the exact spec set later.
+			if len(probe.Pin.Spec) == 0 && (probe.Stdout != HashBytes(nil) || probe.Stderr != HashBytes(nil) || len(probe.Files) != 0) {
 				return fmt.Errorf("probe %s is a pin with no spec hashes", id)
 			}
 			for path := range probe.Pin.Spec {
