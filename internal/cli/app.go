@@ -424,6 +424,13 @@ func runVerify(args []string, root string, jsonMode, gate bool, stdout, stderr i
 	if err != nil {
 		return renderOperatorError(name, err.Error(), jsonMode, stdout, stderr)
 	}
+	// A mistyped selector is an invocation error even without a baseline,
+	// not an instruction to repair the probe or record the repository.
+	if *probeID != "" {
+		if _, ok := manifest.Probe(*probeID); !ok {
+			return renderUsageError(name, fmt.Sprintf("unknown probe %q; %s", *probeID, vise.DeclaredProbeList(manifest)), jsonMode, stdout, stderr)
+		}
+	}
 	result := vise.Verify(root, manifest, manifestBytes, vise.VerifyOptions{ProbeID: *probeID, EnforceRerunLimit: true})
 	result.Outcome.Cmd = name
 	// Every judged run is journaled, verify and gate alike, so a green verify
