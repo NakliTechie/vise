@@ -1,0 +1,24 @@
+$ vise gate --probe unknown --json
+{"classes":["harness"],"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":1,"metric":0,"pass":0,"skipped":0,"unmet":0},"exit":2,"failures":{"gate":{"class":"harness","detail":"unknown probe \"unknown\"; declared probes are known","usage":true}},"next":{"action":"fix_invocation","detail":"the command was rejected; correct the command line and rerun — the repository is untouched"},"v":1,"verdict":"indeterminate"}
+exit=2
+$ vise verify --probe unknown --json
+{"classes":["harness"],"cmd":"verify","counts":{"behavior":0,"declared":1,"flaky":0,"harness":1,"metric":0,"pass":0,"skipped":0,"unmet":0},"exit":2,"failures":{"verify":{"class":"harness","detail":"unknown probe \"unknown\"; declared probes are known","usage":true}},"next":{"action":"fix_invocation","detail":"the command was rejected; correct the command line and rerun — the repository is untouched"},"v":1,"verdict":"indeterminate"}
+exit=2
+unknown selection without baseline wrote no journal
+$ vise gate --probe known --json
+{"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":0,"metric":0,"pass":1,"skipped":0,"unmet":0},"exit":4,"next":{"action":"record_first","detail":"initialize the repository and record a behavior baseline"},"v":1,"verdict":"indeterminate"}
+exit=4
+$ vise record
+RECORDED — 1 probe(s) · 0 metric(s)
+lock: sha256:e11d10ce1812f36a5bdfcdfec7e3df457692f59d060baabc87630e1b6447fc99
+exit=0
+$ vise gate --probe unknown --json
+{"classes":["harness"],"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":1,"metric":0,"pass":0,"skipped":0,"unmet":0},"exit":2,"failures":{"gate":{"class":"harness","detail":"unknown probe \"unknown\"; declared probes are known","usage":true}},"next":{"action":"fix_invocation","detail":"the command was rejected; correct the command line and rerun — the repository is untouched"},"v":1,"verdict":"indeterminate"}
+exit=2
+$ vise verify --probe unknown --json
+{"classes":["harness"],"cmd":"verify","counts":{"behavior":0,"declared":1,"flaky":0,"harness":1,"metric":0,"pass":0,"skipped":0,"unmet":0},"exit":2,"failures":{"verify":{"class":"harness","detail":"unknown probe \"unknown\"; declared probes are known","usage":true}},"next":{"action":"fix_invocation","detail":"the command was rejected; correct the command line and rerun — the repository is untouched"},"v":1,"verdict":"indeterminate"}
+exit=2
+unknown selection preserved journal bytes
+$ vise gate --probe known --json
+{"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":0,"metric":0,"pass":1,"skipped":0,"unmet":0},"exit":0,"lock":"sha256:e11d10ce1812f36a5bdfcdfec7e3df457692f59d060baabc87630e1b6447fc99","next":{"action":"proceed","detail":"all declared checks matched"},"v":1,"verdict":"green"}
+exit=0

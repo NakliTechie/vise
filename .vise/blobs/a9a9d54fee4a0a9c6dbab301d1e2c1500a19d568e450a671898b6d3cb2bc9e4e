@@ -1,0 +1,40 @@
+$ vise record
+RECORDED — 3 probe(s) · 0 metric(s) · pins: 0 accepted, 3 unmet (maximum, nonzero, zero)
+lock: sha256:76f929d8947930c0cd1329481adff6fbf4f86139a7d0dd33fdecb48cacb6a1d7
+next: proceed — baseline frozen with 3 pin(s) unmet (maximum, nonzero, zero) — an agent builds to them, and an operator records again to accept
+exit=0
+$ vise gate --json
+{"classes":["unmet"],"cmd":"gate","counts":{"behavior":0,"declared":3,"flaky":0,"harness":0,"metric":0,"pass":0,"skipped":0,"unmet":3},"exit":6,"failures":{"maximum":{"class":"unmet","detail":"not built yet: stdout does not match the spec","diff":"--- expected/stdout\n+++ got/stdout\n@@ first divergence line 1 @@\n+unexpected\n+\\ No newline at end of file","expect":{"exit":255,"stderr":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},"got":{"exit":255,"stderr":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout":"sha256:bcf7690127d5b0c019c22e0472b2bb4e8d98784c6e7414f29436513a1c60853f"}},"nonzero":{"class":"unmet","detail":"not built yet: stdout does not match the spec","diff":"--- expected/stdout\n+++ got/stdout\n@@ first divergence line 1 @@\n+unexpected\n+\\ No newline at end of file","expect":{"exit":42,"stderr":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},"got":{"exit":42,"stderr":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout":"sha256:bcf7690127d5b0c019c22e0472b2bb4e8d98784c6e7414f29436513a1c60853f"}},"zero":{"class":"unmet","detail":"not built yet: stdout does not match the spec","diff":"--- expected/stdout\n+++ got/stdout\n@@ first divergence line 1 @@\n+unexpected\n+\\ No newline at end of file","expect":{"exit":0,"stderr":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},"got":{"exit":0,"stderr":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout":"sha256:bcf7690127d5b0c019c22e0472b2bb4e8d98784c6e7414f29436513a1c60853f"}}},"lock":"sha256:76f929d8947930c0cd1329481adff6fbf4f86139a7d0dd33fdecb48cacb6a1d7","next":{"action":"build","detail":"3 pin(s) unmet (zero, nonzero, maximum) — keep building toward the spec, do not revert; vise verify --probe \u003cid\u003e shows the diff"},"pins":{"evaluated":3,"passing_unaccepted":[],"passing_unaccepted_count":0,"unmet":["zero","nonzero","maximum"],"unmet_count":3},"v":1,"verdict":"red"}
+exit=6
+$ vise gate --json
+{"cmd":"gate","counts":{"behavior":0,"declared":3,"flaky":0,"harness":0,"metric":0,"pass":3,"skipped":0,"unmet":0},"exit":0,"lock":"sha256:76f929d8947930c0cd1329481adff6fbf4f86139a7d0dd33fdecb48cacb6a1d7","next":{"action":"proceed","detail":"all declared checks matched; 3 pin(s) passing, not yet accepted (zero, nonzero, maximum) — an operator records to accept"},"pins":{"evaluated":3,"passing_unaccepted":["zero","nonzero","maximum"],"passing_unaccepted_count":3,"unmet":[],"unmet_count":0},"v":1,"verdict":"green"}
+exit=0
+$ vise record --preview
+CANDIDATE BASELINE — no baseline state written (probes ran; declared artifacts were regenerated)
+maximum pin: unaccepted -> accepted at cda545d8c91fc7a9adfda7a041046e281d075337
+nonzero pin: unaccepted -> accepted at cda545d8c91fc7a9adfda7a041046e281d075337
+zero pin: unaccepted -> accepted at cda545d8c91fc7a9adfda7a041046e281d075337
+candidate: sha256:0adbb3e85da5097a9c911839ef872b40266ef967fb21b399d0790cb1f11fa4b2
+next: human — review the diff, then freeze it with record --accept sha256:0adbb3e85da5097a9c911839ef872b40266ef967fb21b399d0790cb1f11fa4b2
+exit=0
+$ vise record --i-reviewed-the-diff
+BEHAVIOR DIFF UNDER REVIEW
+maximum pin: unaccepted -> accepted at cda545d8c91fc7a9adfda7a041046e281d075337
+nonzero pin: unaccepted -> accepted at cda545d8c91fc7a9adfda7a041046e281d075337
+zero pin: unaccepted -> accepted at cda545d8c91fc7a9adfda7a041046e281d075337
+RECORDED — 3 probe(s) · 0 metric(s) · pins: 3 accepted, 0 unmet
+lock: sha256:c18ff2c22a1b7a676aa7ce755bca35507d3f746b6e215b83901fdf014bc1a91f
+exit=0
+$ vise gate --json
+{"cmd":"gate","counts":{"behavior":0,"declared":3,"flaky":0,"harness":0,"metric":0,"pass":3,"skipped":0,"unmet":0},"exit":0,"lock":"sha256:c18ff2c22a1b7a676aa7ce755bca35507d3f746b6e215b83901fdf014bc1a91f","next":{"action":"proceed","detail":"all declared checks matched"},"pins":{"evaluated":3,"passing_unaccepted":[],"passing_unaccepted_count":0,"unmet":[],"unmet_count":0},"v":1,"verdict":"green"}
+exit=0
+$ vise record --i-reviewed-the-diff
+BEHAVIOR DIFF UNDER REVIEW
+No recorded behavior changed.
+RECORDED — 3 probe(s) · 0 metric(s) · pins: 3 accepted, 0 unmet
+lock: sha256:c18ff2c22a1b7a676aa7ce755bca35507d3f746b6e215b83901fdf014bc1a91f
+exit=0
+repeat acceptance preserved lock bytes
+$ vise gate --json
+{"classes":["behavior"],"cmd":"gate","counts":{"behavior":3,"declared":3,"flaky":0,"harness":0,"metric":0,"pass":0,"skipped":0,"unmet":0},"exit":1,"failures":{"maximum":{"class":"behavior","detail":"observed behavior differs consistently from the lockfile","diff":"--- expected/stderr\n+++ got/stderr\n@@ first divergence line 1 @@\n+unexpected\n+\\ No newline at end of file","expect":{"exit":255,"stderr":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},"got":{"exit":255,"stderr":"sha256:bcf7690127d5b0c019c22e0472b2bb4e8d98784c6e7414f29436513a1c60853f","stdout":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},"nonzero":{"class":"behavior","detail":"observed behavior differs consistently from the lockfile","diff":"--- expected/stderr\n+++ got/stderr\n@@ first divergence line 1 @@\n+unexpected\n+\\ No newline at end of file","expect":{"exit":42,"stderr":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},"got":{"exit":42,"stderr":"sha256:bcf7690127d5b0c019c22e0472b2bb4e8d98784c6e7414f29436513a1c60853f","stdout":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}},"zero":{"class":"behavior","detail":"observed behavior differs consistently from the lockfile","diff":"--- expected/stderr\n+++ got/stderr\n@@ first divergence line 1 @@\n+unexpected\n+\\ No newline at end of file","expect":{"exit":0,"stderr":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},"got":{"exit":0,"stderr":"sha256:bcf7690127d5b0c019c22e0472b2bb4e8d98784c6e7414f29436513a1c60853f","stdout":"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}}},"lock":"sha256:c18ff2c22a1b7a676aa7ce755bca35507d3f746b6e215b83901fdf014bc1a91f","next":{"action":"revert","detail":"revert the unintended behavior change or ask an operator to accept a new baseline"},"pins":{"evaluated":3,"passing_unaccepted":[],"passing_unaccepted_count":0,"unmet":[],"unmet_count":0},"v":1,"verdict":"red"}
+exit=1

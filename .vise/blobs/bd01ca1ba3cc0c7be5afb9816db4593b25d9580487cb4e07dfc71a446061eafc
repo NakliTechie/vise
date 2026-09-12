@@ -1,0 +1,81 @@
+$ vise record
+RECORDED — 1 probe(s) · 0 metric(s) · pins: 1 accepted, 0 unmet
+lock: sha256:3fe85b2398ed868f7e63e0c4cc28bdcd7cdd37ab9cd0dffc95498af43d46920b
+exit=0
+$ vise gate --json
+{"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":0,"metric":0,"pass":1,"skipped":0,"unmet":0},"exit":0,"lock":"sha256:3fe85b2398ed868f7e63e0c4cc28bdcd7cdd37ab9cd0dffc95498af43d46920b","next":{"action":"proceed","detail":"all declared checks matched"},"pins":{"evaluated":1,"passing_unaccepted":[],"passing_unaccepted_count":0,"unmet":[],"unmet_count":0},"v":1,"verdict":"green"}
+exit=0
+$ vise gate --json
+{"classes":["harness"],"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":1,"metric":0,"pass":0,"skipped":0,"unmet":0},"exit":2,"failures":{"pin":{"class":"harness","detail":"spec changed after recording, not behavior; restore the spec file, or an operator re-records to re-accept","operator":true}},"lock":"sha256:3fe85b2398ed868f7e63e0c4cc28bdcd7cdd37ab9cd0dffc95498af43d46920b","next":{"action":"human","detail":"an operator must restore the harness; the repair is in a file an agent may not write"},"v":1,"verdict":"indeterminate"}
+exit=2
+$ vise status
+VISE STATUS — BASELINE-DRIFT
+manifest: valid=true · probes=1 · metrics=0
+lockfile: valid=true · probes=1 · metrics=0
+fingerprint: match=true
+recorded commits: 1bddc069bbdf724d4c5ee9a77d255b32d421ba3b
+pins: 1 (accepted 1 · unaccepted 0)
+lock: sha256:3fe85b2398ed868f7e63e0c4cc28bdcd7cdd37ab9cd0dffc95498af43d46920b
+drift: pin: spec changed after recording, not behavior; restore the spec file, or an operator re-records to re-accept
+pending proposals: 0
+journal: record · 1bddc069bbdf724d4c5ee9a77d255b32d421ba3b · 
+journal: gate · 7f9b4144b0045e4cab7d95bb10f59ace017ab0bd · green
+journal: gate · 7f9b4144b0045e4cab7d95bb10f59ace017ab0bd · indeterminate
+next: human — vise.toml and vise.lock disagree (pin: spec changed after recording, not behavior; restore the spec file, or an operator re-records to re-accept); restore the manifest or ask an operator to re-record
+exit=0
+$ vise gate --json
+{"classes":["harness"],"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":1,"metric":0,"pass":0,"skipped":0,"unmet":0},"exit":2,"failures":{"pin":{"class":"harness","detail":"spec \"spec/shared\" does not exist; the expectation names a file that is not there; restore the spec, or an operator re-records","operator":true}},"lock":"sha256:3fe85b2398ed868f7e63e0c4cc28bdcd7cdd37ab9cd0dffc95498af43d46920b","next":{"action":"human","detail":"an operator must restore the harness; the repair is in a file an agent may not write"},"v":1,"verdict":"indeterminate"}
+exit=2
+$ vise status
+VISE STATUS — BASELINE-DRIFT
+manifest: valid=true · probes=1 · metrics=0
+lockfile: valid=true · probes=1 · metrics=0
+fingerprint: match=true
+recorded commits: 1bddc069bbdf724d4c5ee9a77d255b32d421ba3b
+pins: 1 (accepted 1 · unaccepted 0)
+lock: sha256:3fe85b2398ed868f7e63e0c4cc28bdcd7cdd37ab9cd0dffc95498af43d46920b
+drift: pin: spec "spec/shared" does not exist; the expectation names a file that is not there; restore the spec, or an operator re-records
+pending proposals: 0
+journal: record · 1bddc069bbdf724d4c5ee9a77d255b32d421ba3b · 
+journal: gate · 7f9b4144b0045e4cab7d95bb10f59ace017ab0bd · green
+journal: gate · 7f9b4144b0045e4cab7d95bb10f59ace017ab0bd · indeterminate
+journal: gate · 7f9b4144b0045e4cab7d95bb10f59ace017ab0bd · indeterminate
+next: human — vise.toml and vise.lock disagree (pin: spec "spec/shared" does not exist; the expectation names a file that is not there; restore the spec, or an operator re-records); restore the manifest or ask an operator to re-record
+exit=0
+$ vise gate --json
+{"classes":["harness"],"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":1,"metric":0,"pass":0,"skipped":0,"unmet":0},"exit":2,"failures":{"gate":{"class":"harness","detail":"probe[0] path \"spec/shared\": symlink components are not allowed","operator":true}},"next":{"action":"human","detail":"an operator must restore the harness; the repair is in a file an agent may not write"},"v":1,"verdict":"indeterminate"}
+exit=2
+$ vise status
+VISE STATUS — HARNESS-ERROR
+manifest: valid=false · probes=0 · metrics=0
+manifest error: probe[0] path "spec/shared": symlink components are not allowed
+lockfile: valid=false · probes=0 · metrics=0
+lock error: vise.lock: probe pin dependency "spec/shared": symlink components are not allowed
+pending proposals: 0
+journal: record · 1bddc069bbdf724d4c5ee9a77d255b32d421ba3b · 
+journal: gate · 7f9b4144b0045e4cab7d95bb10f59ace017ab0bd · green
+journal: gate · 7f9b4144b0045e4cab7d95bb10f59ace017ab0bd · indeterminate
+journal: gate · 7f9b4144b0045e4cab7d95bb10f59ace017ab0bd · indeterminate
+next: human — restore a valid vise.lock; an agent may not write it
+exit=0
+$ vise gate --json
+{"classes":["harness"],"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":1,"metric":0,"pass":0,"skipped":0,"unmet":0},"exit":2,"failures":{"pin":{"class":"harness","detail":"declared probe input changed after recording"}},"lock":"sha256:3fe85b2398ed868f7e63e0c4cc28bdcd7cdd37ab9cd0dffc95498af43d46920b","next":{"action":"fix_probe","detail":"repair the harness or restore its declared inputs, then rerun"},"v":1,"verdict":"indeterminate"}
+exit=2
+$ vise status
+VISE STATUS — BASELINE-DRIFT
+manifest: valid=true · probes=1 · metrics=0
+lockfile: valid=true · probes=1 · metrics=0
+fingerprint: match=true
+recorded commits: 1bddc069bbdf724d4c5ee9a77d255b32d421ba3b
+pins: 1 (accepted 1 · unaccepted 0)
+lock: sha256:3fe85b2398ed868f7e63e0c4cc28bdcd7cdd37ab9cd0dffc95498af43d46920b
+drift: pin: declared probe input changed after recording
+pending proposals: 0
+journal: record · 1bddc069bbdf724d4c5ee9a77d255b32d421ba3b · 
+journal: gate · 7f9b4144b0045e4cab7d95bb10f59ace017ab0bd · green
+journal: gate · 7f9b4144b0045e4cab7d95bb10f59ace017ab0bd · indeterminate
+journal: gate · 7f9b4144b0045e4cab7d95bb10f59ace017ab0bd · indeterminate
+journal: gate · 7f9b4144b0045e4cab7d95bb10f59ace017ab0bd · indeterminate
+next: fix_probe — the baseline no longer matches what a probe reads (pin: declared probe input changed after recording); restore what your change moved, then rerun
+exit=0
+all four preflight failures prevented probe execution

@@ -20,7 +20,7 @@
       "deps": {
         "go.mod": "sha256:edc46f493ddf4532e33c0e1bb3320b4a36c97f27652d6a140c8e7b4d8abb8bc1",
         "go.sum": "sha256:cb87513b91fcdbac6ede622b50f5361682d43875ccf76afc45a3331b511e95fd",
-        "scripts/selfgate-probe": "sha256:8c5ff819053383a0161dd183b9017ad18f33b218bc0205e4892d6b300d6f7a6f",
+        "scripts/selfgate-probe": "sha256:59db6b190f27ffde2cc2eaa4214daf571794d4d09a84b7c3f1e64b2c2d93a34d",
         "vendor/github.com/BurntSushi/toml/.gitignore": "sha256:7485e0737ae3b3099daa83d5f7a22202a5b888eda0348e35616f997ff5126d47",
         "vendor/github.com/BurntSushi/toml/COPYING": "sha256:d21cb1c60785d6d3a84a7059323ccafc45c645b1bbda281c76a62d66ad2d7dc3",
         "vendor/github.com/BurntSushi/toml/README.md": "sha256:b66fbf83514bc1868517a58f89a4375e694c58fed7c5bc0537c11f953c7e054e",
@@ -37,9 +37,63 @@
         "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
         "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
       },
-      "recorded_commit": "704cd64381798e6d158c9951b3b8b4b7241cd338",
+      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
       "exit": 0,
       "stdout": "sha256:7321e6e034a35a17807fba1e40272dccbe27452136cd3064ffe13d48fdc09432",
+      "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "cli-exit-only": {
+      "run_hash": "sha256:d64a02d5240e54da0d73c3923619f96ff34d957e6cf86a0704fa70e247ab310f",
+      "deps": {
+        "go.mod": "sha256:edc46f493ddf4532e33c0e1bb3320b4a36c97f27652d6a140c8e7b4d8abb8bc1",
+        "go.sum": "sha256:cb87513b91fcdbac6ede622b50f5361682d43875ccf76afc45a3331b511e95fd",
+        "scripts/selfgate-probe": "sha256:59db6b190f27ffde2cc2eaa4214daf571794d4d09a84b7c3f1e64b2c2d93a34d",
+        "vendor/github.com/BurntSushi/toml/.gitignore": "sha256:7485e0737ae3b3099daa83d5f7a22202a5b888eda0348e35616f997ff5126d47",
+        "vendor/github.com/BurntSushi/toml/COPYING": "sha256:d21cb1c60785d6d3a84a7059323ccafc45c645b1bbda281c76a62d66ad2d7dc3",
+        "vendor/github.com/BurntSushi/toml/README.md": "sha256:b66fbf83514bc1868517a58f89a4375e694c58fed7c5bc0537c11f953c7e054e",
+        "vendor/github.com/BurntSushi/toml/decode.go": "sha256:57884c1fd09451e0c2361b740f7ea6f444ce9926c8cffec11631ba0dff4d1c88",
+        "vendor/github.com/BurntSushi/toml/deprecated.go": "sha256:ee4c75313fabce09bf33996e5d35a35fe8a3ac5c334658c143225286ae93cdf8",
+        "vendor/github.com/BurntSushi/toml/doc.go": "sha256:a180bddf47208d81d4b4fb5caa83413bc2be484e14ad91af1b40ff63365317d9",
+        "vendor/github.com/BurntSushi/toml/encode.go": "sha256:4a971efb7954b623263ea990e73f208effd9743a2315331bb30c8b7817d931de",
+        "vendor/github.com/BurntSushi/toml/error.go": "sha256:835a972410ff7f84d459657132957db5258deba5de1c4d704ecff306d190f907",
+        "vendor/github.com/BurntSushi/toml/internal/tz.go": "sha256:9d644e853a886015b23adc65a7dcb4eb954087fb906d9200ed984435739de075",
+        "vendor/github.com/BurntSushi/toml/lex.go": "sha256:c4fa961a9a149ea530e9129dd8e43d5745c35248b175faef6d1667937792cd63",
+        "vendor/github.com/BurntSushi/toml/meta.go": "sha256:bf34d5646c76175b6bebc01239ccfd8a7b0456ce0d2b425a909d88cca48d5cb2",
+        "vendor/github.com/BurntSushi/toml/parse.go": "sha256:9c733ee12106c6c37edae274a459a2c1928682630922473283a63321b1cebeb0",
+        "vendor/github.com/BurntSushi/toml/type_fields.go": "sha256:b557f6362f1ffee1f5e07dda1b7be72c7579be465d0916e70e7a327129c86000",
+        "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
+        "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
+      },
+      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
+      "exit": 0,
+      "stdout": "sha256:a9a9d54fee4a0a9c6dbab301d1e2c1500a19d568e450a671898b6d3cb2bc9e4e",
+      "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "cli-exit127": {
+      "run_hash": "sha256:30abb3faf4b05a859a5c1eef608a1eddd5af8b8736e185346a4c74c354e48f87",
+      "deps": {
+        "go.mod": "sha256:edc46f493ddf4532e33c0e1bb3320b4a36c97f27652d6a140c8e7b4d8abb8bc1",
+        "go.sum": "sha256:cb87513b91fcdbac6ede622b50f5361682d43875ccf76afc45a3331b511e95fd",
+        "scripts/selfgate-probe": "sha256:59db6b190f27ffde2cc2eaa4214daf571794d4d09a84b7c3f1e64b2c2d93a34d",
+        "vendor/github.com/BurntSushi/toml/.gitignore": "sha256:7485e0737ae3b3099daa83d5f7a22202a5b888eda0348e35616f997ff5126d47",
+        "vendor/github.com/BurntSushi/toml/COPYING": "sha256:d21cb1c60785d6d3a84a7059323ccafc45c645b1bbda281c76a62d66ad2d7dc3",
+        "vendor/github.com/BurntSushi/toml/README.md": "sha256:b66fbf83514bc1868517a58f89a4375e694c58fed7c5bc0537c11f953c7e054e",
+        "vendor/github.com/BurntSushi/toml/decode.go": "sha256:57884c1fd09451e0c2361b740f7ea6f444ce9926c8cffec11631ba0dff4d1c88",
+        "vendor/github.com/BurntSushi/toml/deprecated.go": "sha256:ee4c75313fabce09bf33996e5d35a35fe8a3ac5c334658c143225286ae93cdf8",
+        "vendor/github.com/BurntSushi/toml/doc.go": "sha256:a180bddf47208d81d4b4fb5caa83413bc2be484e14ad91af1b40ff63365317d9",
+        "vendor/github.com/BurntSushi/toml/encode.go": "sha256:4a971efb7954b623263ea990e73f208effd9743a2315331bb30c8b7817d931de",
+        "vendor/github.com/BurntSushi/toml/error.go": "sha256:835a972410ff7f84d459657132957db5258deba5de1c4d704ecff306d190f907",
+        "vendor/github.com/BurntSushi/toml/internal/tz.go": "sha256:9d644e853a886015b23adc65a7dcb4eb954087fb906d9200ed984435739de075",
+        "vendor/github.com/BurntSushi/toml/lex.go": "sha256:c4fa961a9a149ea530e9129dd8e43d5745c35248b175faef6d1667937792cd63",
+        "vendor/github.com/BurntSushi/toml/meta.go": "sha256:bf34d5646c76175b6bebc01239ccfd8a7b0456ce0d2b425a909d88cca48d5cb2",
+        "vendor/github.com/BurntSushi/toml/parse.go": "sha256:9c733ee12106c6c37edae274a459a2c1928682630922473283a63321b1cebeb0",
+        "vendor/github.com/BurntSushi/toml/type_fields.go": "sha256:b557f6362f1ffee1f5e07dda1b7be72c7579be465d0916e70e7a327129c86000",
+        "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
+        "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
+      },
+      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
+      "exit": 0,
+      "stdout": "sha256:686d77b82e3f8e4e11774ddb7f66e704b8e6f5f21d5a01790a9fa8e5f0ff8e6e",
       "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "cli-help": {
@@ -47,7 +101,7 @@
       "deps": {
         "go.mod": "sha256:edc46f493ddf4532e33c0e1bb3320b4a36c97f27652d6a140c8e7b4d8abb8bc1",
         "go.sum": "sha256:cb87513b91fcdbac6ede622b50f5361682d43875ccf76afc45a3331b511e95fd",
-        "scripts/selfgate-probe": "sha256:8c5ff819053383a0161dd183b9017ad18f33b218bc0205e4892d6b300d6f7a6f",
+        "scripts/selfgate-probe": "sha256:59db6b190f27ffde2cc2eaa4214daf571794d4d09a84b7c3f1e64b2c2d93a34d",
         "vendor/github.com/BurntSushi/toml/.gitignore": "sha256:7485e0737ae3b3099daa83d5f7a22202a5b888eda0348e35616f997ff5126d47",
         "vendor/github.com/BurntSushi/toml/COPYING": "sha256:d21cb1c60785d6d3a84a7059323ccafc45c645b1bbda281c76a62d66ad2d7dc3",
         "vendor/github.com/BurntSushi/toml/README.md": "sha256:b66fbf83514bc1868517a58f89a4375e694c58fed7c5bc0537c11f953c7e054e",
@@ -64,7 +118,7 @@
         "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
         "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
       },
-      "recorded_commit": "704cd64381798e6d158c9951b3b8b4b7241cd338",
+      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
       "exit": 0,
       "stdout": "sha256:7d345bb6b80a669ad8e8e3fa2fdee586c4e7fec0f982c8e31de28221209cd30a",
       "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -74,7 +128,7 @@
       "deps": {
         "go.mod": "sha256:edc46f493ddf4532e33c0e1bb3320b4a36c97f27652d6a140c8e7b4d8abb8bc1",
         "go.sum": "sha256:cb87513b91fcdbac6ede622b50f5361682d43875ccf76afc45a3331b511e95fd",
-        "scripts/selfgate-probe": "sha256:8c5ff819053383a0161dd183b9017ad18f33b218bc0205e4892d6b300d6f7a6f",
+        "scripts/selfgate-probe": "sha256:59db6b190f27ffde2cc2eaa4214daf571794d4d09a84b7c3f1e64b2c2d93a34d",
         "vendor/github.com/BurntSushi/toml/.gitignore": "sha256:7485e0737ae3b3099daa83d5f7a22202a5b888eda0348e35616f997ff5126d47",
         "vendor/github.com/BurntSushi/toml/COPYING": "sha256:d21cb1c60785d6d3a84a7059323ccafc45c645b1bbda281c76a62d66ad2d7dc3",
         "vendor/github.com/BurntSushi/toml/README.md": "sha256:b66fbf83514bc1868517a58f89a4375e694c58fed7c5bc0537c11f953c7e054e",
@@ -91,7 +145,7 @@
         "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
         "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
       },
-      "recorded_commit": "704cd64381798e6d158c9951b3b8b4b7241cd338",
+      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
       "exit": 0,
       "stdout": "sha256:31180b63dee7a6545acb1619b7d69b8101e71105f720f5c66baf0da86c7eda2e",
       "stderr": "sha256:18c28aa494aa15d9449d3cce36803f63f2f5a36e977f504379a936838e4d07d3"
@@ -101,7 +155,7 @@
       "deps": {
         "go.mod": "sha256:edc46f493ddf4532e33c0e1bb3320b4a36c97f27652d6a140c8e7b4d8abb8bc1",
         "go.sum": "sha256:cb87513b91fcdbac6ede622b50f5361682d43875ccf76afc45a3331b511e95fd",
-        "scripts/selfgate-probe": "sha256:8c5ff819053383a0161dd183b9017ad18f33b218bc0205e4892d6b300d6f7a6f",
+        "scripts/selfgate-probe": "sha256:59db6b190f27ffde2cc2eaa4214daf571794d4d09a84b7c3f1e64b2c2d93a34d",
         "vendor/github.com/BurntSushi/toml/.gitignore": "sha256:7485e0737ae3b3099daa83d5f7a22202a5b888eda0348e35616f997ff5126d47",
         "vendor/github.com/BurntSushi/toml/COPYING": "sha256:d21cb1c60785d6d3a84a7059323ccafc45c645b1bbda281c76a62d66ad2d7dc3",
         "vendor/github.com/BurntSushi/toml/README.md": "sha256:b66fbf83514bc1868517a58f89a4375e694c58fed7c5bc0537c11f953c7e054e",
@@ -118,9 +172,36 @@
         "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
         "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
       },
-      "recorded_commit": "704cd64381798e6d158c9951b3b8b4b7241cd338",
+      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
       "exit": 0,
       "stdout": "sha256:4fb81b1e856f4a6e3dc9792679bbbf59b35f981d1267744e10c16b1a58acccf2",
+      "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "cli-pipe-holder": {
+      "run_hash": "sha256:33a9d6b485d11f8964aad8a42a60228fb7615b1cb1a7a9fe1950f21556451139",
+      "deps": {
+        "go.mod": "sha256:edc46f493ddf4532e33c0e1bb3320b4a36c97f27652d6a140c8e7b4d8abb8bc1",
+        "go.sum": "sha256:cb87513b91fcdbac6ede622b50f5361682d43875ccf76afc45a3331b511e95fd",
+        "scripts/selfgate-probe": "sha256:59db6b190f27ffde2cc2eaa4214daf571794d4d09a84b7c3f1e64b2c2d93a34d",
+        "vendor/github.com/BurntSushi/toml/.gitignore": "sha256:7485e0737ae3b3099daa83d5f7a22202a5b888eda0348e35616f997ff5126d47",
+        "vendor/github.com/BurntSushi/toml/COPYING": "sha256:d21cb1c60785d6d3a84a7059323ccafc45c645b1bbda281c76a62d66ad2d7dc3",
+        "vendor/github.com/BurntSushi/toml/README.md": "sha256:b66fbf83514bc1868517a58f89a4375e694c58fed7c5bc0537c11f953c7e054e",
+        "vendor/github.com/BurntSushi/toml/decode.go": "sha256:57884c1fd09451e0c2361b740f7ea6f444ce9926c8cffec11631ba0dff4d1c88",
+        "vendor/github.com/BurntSushi/toml/deprecated.go": "sha256:ee4c75313fabce09bf33996e5d35a35fe8a3ac5c334658c143225286ae93cdf8",
+        "vendor/github.com/BurntSushi/toml/doc.go": "sha256:a180bddf47208d81d4b4fb5caa83413bc2be484e14ad91af1b40ff63365317d9",
+        "vendor/github.com/BurntSushi/toml/encode.go": "sha256:4a971efb7954b623263ea990e73f208effd9743a2315331bb30c8b7817d931de",
+        "vendor/github.com/BurntSushi/toml/error.go": "sha256:835a972410ff7f84d459657132957db5258deba5de1c4d704ecff306d190f907",
+        "vendor/github.com/BurntSushi/toml/internal/tz.go": "sha256:9d644e853a886015b23adc65a7dcb4eb954087fb906d9200ed984435739de075",
+        "vendor/github.com/BurntSushi/toml/lex.go": "sha256:c4fa961a9a149ea530e9129dd8e43d5745c35248b175faef6d1667937792cd63",
+        "vendor/github.com/BurntSushi/toml/meta.go": "sha256:bf34d5646c76175b6bebc01239ccfd8a7b0456ce0d2b425a909d88cca48d5cb2",
+        "vendor/github.com/BurntSushi/toml/parse.go": "sha256:9c733ee12106c6c37edae274a459a2c1928682630922473283a63321b1cebeb0",
+        "vendor/github.com/BurntSushi/toml/type_fields.go": "sha256:b557f6362f1ffee1f5e07dda1b7be72c7579be465d0916e70e7a327129c86000",
+        "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
+        "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
+      },
+      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
+      "exit": 0,
+      "stdout": "sha256:7c00900b81ea90c7a1c6cdf5583faad0c0ed554e560df413c314c51833988759",
       "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "cli-review": {
@@ -128,7 +209,7 @@
       "deps": {
         "go.mod": "sha256:edc46f493ddf4532e33c0e1bb3320b4a36c97f27652d6a140c8e7b4d8abb8bc1",
         "go.sum": "sha256:cb87513b91fcdbac6ede622b50f5361682d43875ccf76afc45a3331b511e95fd",
-        "scripts/selfgate-probe": "sha256:8c5ff819053383a0161dd183b9017ad18f33b218bc0205e4892d6b300d6f7a6f",
+        "scripts/selfgate-probe": "sha256:59db6b190f27ffde2cc2eaa4214daf571794d4d09a84b7c3f1e64b2c2d93a34d",
         "vendor/github.com/BurntSushi/toml/.gitignore": "sha256:7485e0737ae3b3099daa83d5f7a22202a5b888eda0348e35616f997ff5126d47",
         "vendor/github.com/BurntSushi/toml/COPYING": "sha256:d21cb1c60785d6d3a84a7059323ccafc45c645b1bbda281c76a62d66ad2d7dc3",
         "vendor/github.com/BurntSushi/toml/README.md": "sha256:b66fbf83514bc1868517a58f89a4375e694c58fed7c5bc0537c11f953c7e054e",
@@ -145,9 +226,36 @@
         "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
         "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
       },
-      "recorded_commit": "704cd64381798e6d158c9951b3b8b4b7241cd338",
+      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
       "exit": 0,
       "stdout": "sha256:96cc55d53e4ef11c7179684ca0146bdc2f8fa21c0fdaa756b13242e46312cbcb",
+      "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "cli-spec-dependency": {
+      "run_hash": "sha256:66a43306ed5cf92e7c0c046711d3363a86fd4b663b09146e2e3e3fd39828f028",
+      "deps": {
+        "go.mod": "sha256:edc46f493ddf4532e33c0e1bb3320b4a36c97f27652d6a140c8e7b4d8abb8bc1",
+        "go.sum": "sha256:cb87513b91fcdbac6ede622b50f5361682d43875ccf76afc45a3331b511e95fd",
+        "scripts/selfgate-probe": "sha256:59db6b190f27ffde2cc2eaa4214daf571794d4d09a84b7c3f1e64b2c2d93a34d",
+        "vendor/github.com/BurntSushi/toml/.gitignore": "sha256:7485e0737ae3b3099daa83d5f7a22202a5b888eda0348e35616f997ff5126d47",
+        "vendor/github.com/BurntSushi/toml/COPYING": "sha256:d21cb1c60785d6d3a84a7059323ccafc45c645b1bbda281c76a62d66ad2d7dc3",
+        "vendor/github.com/BurntSushi/toml/README.md": "sha256:b66fbf83514bc1868517a58f89a4375e694c58fed7c5bc0537c11f953c7e054e",
+        "vendor/github.com/BurntSushi/toml/decode.go": "sha256:57884c1fd09451e0c2361b740f7ea6f444ce9926c8cffec11631ba0dff4d1c88",
+        "vendor/github.com/BurntSushi/toml/deprecated.go": "sha256:ee4c75313fabce09bf33996e5d35a35fe8a3ac5c334658c143225286ae93cdf8",
+        "vendor/github.com/BurntSushi/toml/doc.go": "sha256:a180bddf47208d81d4b4fb5caa83413bc2be484e14ad91af1b40ff63365317d9",
+        "vendor/github.com/BurntSushi/toml/encode.go": "sha256:4a971efb7954b623263ea990e73f208effd9743a2315331bb30c8b7817d931de",
+        "vendor/github.com/BurntSushi/toml/error.go": "sha256:835a972410ff7f84d459657132957db5258deba5de1c4d704ecff306d190f907",
+        "vendor/github.com/BurntSushi/toml/internal/tz.go": "sha256:9d644e853a886015b23adc65a7dcb4eb954087fb906d9200ed984435739de075",
+        "vendor/github.com/BurntSushi/toml/lex.go": "sha256:c4fa961a9a149ea530e9129dd8e43d5745c35248b175faef6d1667937792cd63",
+        "vendor/github.com/BurntSushi/toml/meta.go": "sha256:bf34d5646c76175b6bebc01239ccfd8a7b0456ce0d2b425a909d88cca48d5cb2",
+        "vendor/github.com/BurntSushi/toml/parse.go": "sha256:9c733ee12106c6c37edae274a459a2c1928682630922473283a63321b1cebeb0",
+        "vendor/github.com/BurntSushi/toml/type_fields.go": "sha256:b557f6362f1ffee1f5e07dda1b7be72c7579be465d0916e70e7a327129c86000",
+        "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
+        "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
+      },
+      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
+      "exit": 0,
+      "stdout": "sha256:bd01ca1ba3cc0c7be5afb9816db4593b25d9580487cb4e07dfc71a446061eafc",
       "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "cli-status": {
@@ -155,7 +263,7 @@
       "deps": {
         "go.mod": "sha256:edc46f493ddf4532e33c0e1bb3320b4a36c97f27652d6a140c8e7b4d8abb8bc1",
         "go.sum": "sha256:cb87513b91fcdbac6ede622b50f5361682d43875ccf76afc45a3331b511e95fd",
-        "scripts/selfgate-probe": "sha256:8c5ff819053383a0161dd183b9017ad18f33b218bc0205e4892d6b300d6f7a6f",
+        "scripts/selfgate-probe": "sha256:59db6b190f27ffde2cc2eaa4214daf571794d4d09a84b7c3f1e64b2c2d93a34d",
         "vendor/github.com/BurntSushi/toml/.gitignore": "sha256:7485e0737ae3b3099daa83d5f7a22202a5b888eda0348e35616f997ff5126d47",
         "vendor/github.com/BurntSushi/toml/COPYING": "sha256:d21cb1c60785d6d3a84a7059323ccafc45c645b1bbda281c76a62d66ad2d7dc3",
         "vendor/github.com/BurntSushi/toml/README.md": "sha256:b66fbf83514bc1868517a58f89a4375e694c58fed7c5bc0537c11f953c7e054e",
@@ -172,9 +280,36 @@
         "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
         "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
       },
-      "recorded_commit": "704cd64381798e6d158c9951b3b8b4b7241cd338",
+      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
       "exit": 0,
       "stdout": "sha256:221096462ce4e2abba69274afa44c5a18e0376611bb971e7c827ae82a606449f",
+      "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "cli-unknown-probe": {
+      "run_hash": "sha256:aaa16990963976f0e5daf76a21926e142ca4e7def2168bd97026dafa2f8a2fd7",
+      "deps": {
+        "go.mod": "sha256:edc46f493ddf4532e33c0e1bb3320b4a36c97f27652d6a140c8e7b4d8abb8bc1",
+        "go.sum": "sha256:cb87513b91fcdbac6ede622b50f5361682d43875ccf76afc45a3331b511e95fd",
+        "scripts/selfgate-probe": "sha256:59db6b190f27ffde2cc2eaa4214daf571794d4d09a84b7c3f1e64b2c2d93a34d",
+        "vendor/github.com/BurntSushi/toml/.gitignore": "sha256:7485e0737ae3b3099daa83d5f7a22202a5b888eda0348e35616f997ff5126d47",
+        "vendor/github.com/BurntSushi/toml/COPYING": "sha256:d21cb1c60785d6d3a84a7059323ccafc45c645b1bbda281c76a62d66ad2d7dc3",
+        "vendor/github.com/BurntSushi/toml/README.md": "sha256:b66fbf83514bc1868517a58f89a4375e694c58fed7c5bc0537c11f953c7e054e",
+        "vendor/github.com/BurntSushi/toml/decode.go": "sha256:57884c1fd09451e0c2361b740f7ea6f444ce9926c8cffec11631ba0dff4d1c88",
+        "vendor/github.com/BurntSushi/toml/deprecated.go": "sha256:ee4c75313fabce09bf33996e5d35a35fe8a3ac5c334658c143225286ae93cdf8",
+        "vendor/github.com/BurntSushi/toml/doc.go": "sha256:a180bddf47208d81d4b4fb5caa83413bc2be484e14ad91af1b40ff63365317d9",
+        "vendor/github.com/BurntSushi/toml/encode.go": "sha256:4a971efb7954b623263ea990e73f208effd9743a2315331bb30c8b7817d931de",
+        "vendor/github.com/BurntSushi/toml/error.go": "sha256:835a972410ff7f84d459657132957db5258deba5de1c4d704ecff306d190f907",
+        "vendor/github.com/BurntSushi/toml/internal/tz.go": "sha256:9d644e853a886015b23adc65a7dcb4eb954087fb906d9200ed984435739de075",
+        "vendor/github.com/BurntSushi/toml/lex.go": "sha256:c4fa961a9a149ea530e9129dd8e43d5745c35248b175faef6d1667937792cd63",
+        "vendor/github.com/BurntSushi/toml/meta.go": "sha256:bf34d5646c76175b6bebc01239ccfd8a7b0456ce0d2b425a909d88cca48d5cb2",
+        "vendor/github.com/BurntSushi/toml/parse.go": "sha256:9c733ee12106c6c37edae274a459a2c1928682630922473283a63321b1cebeb0",
+        "vendor/github.com/BurntSushi/toml/type_fields.go": "sha256:b557f6362f1ffee1f5e07dda1b7be72c7579be465d0916e70e7a327129c86000",
+        "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
+        "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
+      },
+      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
+      "exit": 0,
+      "stdout": "sha256:9656eb6b179389d7a400b516ecda0eb5c9b440e95f8d7e6d9030d127d4d6dff0",
       "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "cli-version": {
@@ -182,7 +317,7 @@
       "deps": {
         "go.mod": "sha256:edc46f493ddf4532e33c0e1bb3320b4a36c97f27652d6a140c8e7b4d8abb8bc1",
         "go.sum": "sha256:cb87513b91fcdbac6ede622b50f5361682d43875ccf76afc45a3331b511e95fd",
-        "scripts/selfgate-probe": "sha256:8c5ff819053383a0161dd183b9017ad18f33b218bc0205e4892d6b300d6f7a6f",
+        "scripts/selfgate-probe": "sha256:59db6b190f27ffde2cc2eaa4214daf571794d4d09a84b7c3f1e64b2c2d93a34d",
         "vendor/github.com/BurntSushi/toml/.gitignore": "sha256:7485e0737ae3b3099daa83d5f7a22202a5b888eda0348e35616f997ff5126d47",
         "vendor/github.com/BurntSushi/toml/COPYING": "sha256:d21cb1c60785d6d3a84a7059323ccafc45c645b1bbda281c76a62d66ad2d7dc3",
         "vendor/github.com/BurntSushi/toml/README.md": "sha256:b66fbf83514bc1868517a58f89a4375e694c58fed7c5bc0537c11f953c7e054e",
@@ -199,7 +334,7 @@
         "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
         "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
       },
-      "recorded_commit": "704cd64381798e6d158c9951b3b8b4b7241cd338",
+      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
       "exit": 0,
       "stdout": "sha256:a68b8dee7a2992ce2792477fdb0928a22bdd1bd101329f537aee5744b288ed5b",
       "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
