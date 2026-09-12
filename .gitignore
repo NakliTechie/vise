@@ -4,3 +4,4 @@ plan/
 .vise/run.lock
 .vise/tmp/
 .worktrees/
+.gocache/

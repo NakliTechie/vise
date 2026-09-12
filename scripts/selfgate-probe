@@ -1,0 +1,144 @@
+#!/bin/sh
+# Operator-owned observations for the root baseline. Each invocation builds the
+# current work tree; the installed vise judging it is a separate, fixed binary.
+set -eu
+
+: "${VISE_TMP:?run this wrapper through vise}"
+SELF_ROOT=$(pwd)
+SELF_BIN="$VISE_TMP/vise-under-test"
+export GOCACHE="$SELF_ROOT/.gocache"
+export GOENV=off GOWORK=off GOFLAGS=-mod=vendor GOPROXY=off
+export GOTOOLCHAIN=go1.25.13 CGO_ENABLED=0
+
+# Build identity is tested by scripts/verify. Omitting VCS stamps only in the
+# subject binary keeps commits and dirty-state changes out of these observations.
+if ! go build -trimpath -buildvcs=false -o "$SELF_BIN" ./cmd/vise 2>"$VISE_TMP/build.err"; then
+    cat "$VISE_TMP/build.err" >&2
+    exit 1
+fi
+
+# Do not inherit signing, hooks, templates, identity, or wall-clock commit dates.
+# Fixed fixture inputs make commit and lock hashes reproducible without masking
+# any part of the program's output. The outer baseline still fingerprints the
+# actual platform and toolchain.
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+export GIT_AUTHOR_NAME=selfgate GIT_COMMITTER_NAME=selfgate
+export GIT_AUTHOR_EMAIL=selfgate@vise.invalid GIT_COMMITTER_EMAIL=selfgate@vise.invalid
+export GIT_AUTHOR_DATE='2000-01-01T00:00:00Z' GIT_COMMITTER_DATE='2000-01-01T00:00:00Z'
+
+fixture() {
+    mkdir -p "$VISE_TMP/fixture" "$VISE_TMP/empty-template"
+    cd "$VISE_TMP/fixture"
+    git init -q --initial-branch=main --object-format=sha1 --template="$VISE_TMP/empty-template"
+    git config core.autocrlf false
+    git config commit.gpgsign false
+    printf '.vise/journal.jsonl\n.vise/run.lock\n.vise/tmp/\n' > .gitignore
+    printf 'Disposable self-gate fixture.\n' > AGENTS.md
+}
+
+commit_fixture() {
+    git add -A
+    git commit -qm "$1"
+}
+
+# Record the real exit beside the complete stdout/stderr, and reject an
+# unexpected exit even during initial recording. Never pipe vise into a command
+# that could conceal its failure.
+observe() {
+    expected_exit=$1
+    shift
+    printf '$ vise'
+    for arg do printf ' %s' "$arg"; done
+    printf '\n'
+    actual_exit=0
+    "$SELF_BIN" "$@" || actual_exit=$?
+    printf 'exit=%s\n' "$actual_exit"
+    test "$actual_exit" -eq "$expected_exit"
+}
+
+case "${1:-}" in
+    help) exec "$SELF_BIN" --help ;;
+    version) exec "$SELF_BIN" version ;;
+    invalid-command)
+        # Use a fixture so this command never needs the parent's held run lock,
+        # even if a future dispatch regression tries to acquire one.
+        fixture
+        observe 2 no-such-command
+        observe 2 no-such-command --json
+        ;;
+    status|doctor)
+        fixture
+        cat > vise.toml <<'MANIFEST'
+[vise]
+version = 1
+[env]
+fingerprint = ["git --version"]
+[[probe]]
+id = "only"
+run = "printf one"
+MANIFEST
+        commit_fixture base
+        "$SELF_BIN" record > /dev/null
+        commit_fixture baseline
+        "$SELF_BIN" gate --quiet > /dev/null
+        observe 0 "$1"
+        ;;
+    review)
+        fixture
+        cat > vise.toml <<'MANIFEST'
+[vise]
+version = 1
+[[probe]]
+id = "kept"
+run = "printf one"
+[[probe]]
+id = "removed"
+run = "printf gone"
+MANIFEST
+        commit_fixture base
+        "$SELF_BIN" record > /dev/null
+        cat > vise.toml <<'MANIFEST'
+[vise]
+version = 1
+[[probe]]
+id = "kept"
+run = "printf one-changed"
+[[probe]]
+id = "added"
+run = "printf two"
+MANIFEST
+        commit_fixture change
+        observe 0 record --preview
+        ;;
+    pin)
+        fixture
+        mkdir spec
+        printf 'hello Ada\n' > spec/greet.stdout
+        cat > vise.toml <<'MANIFEST'
+[vise]
+version = 1
+[[probe]]
+id = "greet"
+run = "./greet.sh"
+expect.stdout = "spec/greet.stdout"
+MANIFEST
+        commit_fixture spec-first
+        observe 0 record
+        observe 6 gate --json
+        observe 0 status
+        printf '#!/bin/sh\nprintf "hello Ada\\n"\n' > greet.sh
+        chmod +x greet.sh
+        commit_fixture build
+        observe 0 gate --json
+        observe 0 record --preview
+        # This operator-shaped command acts only on the disposable fixture.
+        # The root's acceptance remains an explicit operator action.
+        observe 0 record --i-reviewed-the-diff
+        commit_fixture accepted
+        observe 0 gate --json
+        observe 0 status
+        printf 'changed spec\n' > spec/greet.stdout
+        observe 2 gate --json
+        ;;
+    *) printf 'unknown self-gate scenario: %s\n' "${1:-}" >&2; exit 2 ;;
+esac

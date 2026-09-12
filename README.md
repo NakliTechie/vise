@@ -221,6 +221,13 @@ vise carries no model and edits no code. Pull the AI out and it is a plain golde
 
 ## Development
 
+This checkout carries its own behavioral baseline. Start each session with
+`vise version --json`, `vise status --json`, and `vise gate --json`; gate again
+after each focused edit. The seven root probes build the current source and
+exercise it in disposable fixtures. The installed vise is the separate judge.
+See [the self-gating setup](verify/selfgate.md) for prerequisites, coverage,
+baseline ownership, and the distinction from the full verifier below.
+
 ```sh
 scripts/verify verify          # the committed harness: 11 features, from any directory
 scripts/verify verify baseline # one feature

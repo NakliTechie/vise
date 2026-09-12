@@ -1,0 +1,188 @@
+# Root behavioral baseline. Operator-owned: review wrapper, deps, and outputs
+# before recording. Program sources deliberately stay out of deps.
+[vise]
+version = 1
+
+[stubs]
+tz = "UTC"
+lang = "C"
+seed = "1729"
+network = "declared-off"
+
+[env]
+fingerprint = ["GOENV=off GOTOOLCHAIN=go1.25.13 GOPROXY=off go version", "git --version"]
+
+[[probe]]
+id = "cli-help"
+run = "sh scripts/selfgate-probe help"
+timeout = 300
+deps = [
+  "scripts/selfgate-probe",
+  "go.mod",
+  "go.sum",
+  "vendor/modules.txt",
+  "vendor/github.com/BurntSushi/toml/.gitignore",
+  "vendor/github.com/BurntSushi/toml/COPYING",
+  "vendor/github.com/BurntSushi/toml/README.md",
+  "vendor/github.com/BurntSushi/toml/decode.go",
+  "vendor/github.com/BurntSushi/toml/deprecated.go",
+  "vendor/github.com/BurntSushi/toml/doc.go",
+  "vendor/github.com/BurntSushi/toml/encode.go",
+  "vendor/github.com/BurntSushi/toml/error.go",
+  "vendor/github.com/BurntSushi/toml/internal/tz.go",
+  "vendor/github.com/BurntSushi/toml/lex.go",
+  "vendor/github.com/BurntSushi/toml/meta.go",
+  "vendor/github.com/BurntSushi/toml/parse.go",
+  "vendor/github.com/BurntSushi/toml/type_fields.go",
+  "vendor/github.com/BurntSushi/toml/type_toml.go",
+]
+
+[[probe]]
+id = "cli-version"
+run = "sh scripts/selfgate-probe version"
+timeout = 300
+deps = [
+  "scripts/selfgate-probe",
+  "go.mod",
+  "go.sum",
+  "vendor/modules.txt",
+  "vendor/github.com/BurntSushi/toml/.gitignore",
+  "vendor/github.com/BurntSushi/toml/COPYING",
+  "vendor/github.com/BurntSushi/toml/README.md",
+  "vendor/github.com/BurntSushi/toml/decode.go",
+  "vendor/github.com/BurntSushi/toml/deprecated.go",
+  "vendor/github.com/BurntSushi/toml/doc.go",
+  "vendor/github.com/BurntSushi/toml/encode.go",
+  "vendor/github.com/BurntSushi/toml/error.go",
+  "vendor/github.com/BurntSushi/toml/internal/tz.go",
+  "vendor/github.com/BurntSushi/toml/lex.go",
+  "vendor/github.com/BurntSushi/toml/meta.go",
+  "vendor/github.com/BurntSushi/toml/parse.go",
+  "vendor/github.com/BurntSushi/toml/type_fields.go",
+  "vendor/github.com/BurntSushi/toml/type_toml.go",
+]
+
+[[probe]]
+id = "cli-invalid-command"
+run = "sh scripts/selfgate-probe invalid-command"
+timeout = 300
+deps = [
+  "scripts/selfgate-probe",
+  "go.mod",
+  "go.sum",
+  "vendor/modules.txt",
+  "vendor/github.com/BurntSushi/toml/.gitignore",
+  "vendor/github.com/BurntSushi/toml/COPYING",
+  "vendor/github.com/BurntSushi/toml/README.md",
+  "vendor/github.com/BurntSushi/toml/decode.go",
+  "vendor/github.com/BurntSushi/toml/deprecated.go",
+  "vendor/github.com/BurntSushi/toml/doc.go",
+  "vendor/github.com/BurntSushi/toml/encode.go",
+  "vendor/github.com/BurntSushi/toml/error.go",
+  "vendor/github.com/BurntSushi/toml/internal/tz.go",
+  "vendor/github.com/BurntSushi/toml/lex.go",
+  "vendor/github.com/BurntSushi/toml/meta.go",
+  "vendor/github.com/BurntSushi/toml/parse.go",
+  "vendor/github.com/BurntSushi/toml/type_fields.go",
+  "vendor/github.com/BurntSushi/toml/type_toml.go",
+]
+
+[[probe]]
+id = "cli-status"
+run = "sh scripts/selfgate-probe status"
+timeout = 300
+deps = [
+  "scripts/selfgate-probe",
+  "go.mod",
+  "go.sum",
+  "vendor/modules.txt",
+  "vendor/github.com/BurntSushi/toml/.gitignore",
+  "vendor/github.com/BurntSushi/toml/COPYING",
+  "vendor/github.com/BurntSushi/toml/README.md",
+  "vendor/github.com/BurntSushi/toml/decode.go",
+  "vendor/github.com/BurntSushi/toml/deprecated.go",
+  "vendor/github.com/BurntSushi/toml/doc.go",
+  "vendor/github.com/BurntSushi/toml/encode.go",
+  "vendor/github.com/BurntSushi/toml/error.go",
+  "vendor/github.com/BurntSushi/toml/internal/tz.go",
+  "vendor/github.com/BurntSushi/toml/lex.go",
+  "vendor/github.com/BurntSushi/toml/meta.go",
+  "vendor/github.com/BurntSushi/toml/parse.go",
+  "vendor/github.com/BurntSushi/toml/type_fields.go",
+  "vendor/github.com/BurntSushi/toml/type_toml.go",
+]
+
+[[probe]]
+id = "cli-doctor"
+run = "sh scripts/selfgate-probe doctor"
+timeout = 300
+deps = [
+  "scripts/selfgate-probe",
+  "go.mod",
+  "go.sum",
+  "vendor/modules.txt",
+  "vendor/github.com/BurntSushi/toml/.gitignore",
+  "vendor/github.com/BurntSushi/toml/COPYING",
+  "vendor/github.com/BurntSushi/toml/README.md",
+  "vendor/github.com/BurntSushi/toml/decode.go",
+  "vendor/github.com/BurntSushi/toml/deprecated.go",
+  "vendor/github.com/BurntSushi/toml/doc.go",
+  "vendor/github.com/BurntSushi/toml/encode.go",
+  "vendor/github.com/BurntSushi/toml/error.go",
+  "vendor/github.com/BurntSushi/toml/internal/tz.go",
+  "vendor/github.com/BurntSushi/toml/lex.go",
+  "vendor/github.com/BurntSushi/toml/meta.go",
+  "vendor/github.com/BurntSushi/toml/parse.go",
+  "vendor/github.com/BurntSushi/toml/type_fields.go",
+  "vendor/github.com/BurntSushi/toml/type_toml.go",
+]
+
+[[probe]]
+id = "cli-review"
+run = "sh scripts/selfgate-probe review"
+timeout = 300
+deps = [
+  "scripts/selfgate-probe",
+  "go.mod",
+  "go.sum",
+  "vendor/modules.txt",
+  "vendor/github.com/BurntSushi/toml/.gitignore",
+  "vendor/github.com/BurntSushi/toml/COPYING",
+  "vendor/github.com/BurntSushi/toml/README.md",
+  "vendor/github.com/BurntSushi/toml/decode.go",
+  "vendor/github.com/BurntSushi/toml/deprecated.go",
+  "vendor/github.com/BurntSushi/toml/doc.go",
+  "vendor/github.com/BurntSushi/toml/encode.go",
+  "vendor/github.com/BurntSushi/toml/error.go",
+  "vendor/github.com/BurntSushi/toml/internal/tz.go",
+  "vendor/github.com/BurntSushi/toml/lex.go",
+  "vendor/github.com/BurntSushi/toml/meta.go",
+  "vendor/github.com/BurntSushi/toml/parse.go",
+  "vendor/github.com/BurntSushi/toml/type_fields.go",
+  "vendor/github.com/BurntSushi/toml/type_toml.go",
+]
+
+[[probe]]
+id = "cli-pin"
+run = "sh scripts/selfgate-probe pin"
+timeout = 300
+deps = [
+  "scripts/selfgate-probe",
+  "go.mod",
+  "go.sum",
+  "vendor/modules.txt",
+  "vendor/github.com/BurntSushi/toml/.gitignore",
+  "vendor/github.com/BurntSushi/toml/COPYING",
+  "vendor/github.com/BurntSushi/toml/README.md",
+  "vendor/github.com/BurntSushi/toml/decode.go",
+  "vendor/github.com/BurntSushi/toml/deprecated.go",
+  "vendor/github.com/BurntSushi/toml/doc.go",
+  "vendor/github.com/BurntSushi/toml/encode.go",
+  "vendor/github.com/BurntSushi/toml/error.go",
+  "vendor/github.com/BurntSushi/toml/internal/tz.go",
+  "vendor/github.com/BurntSushi/toml/lex.go",
+  "vendor/github.com/BurntSushi/toml/meta.go",
+  "vendor/github.com/BurntSushi/toml/parse.go",
+  "vendor/github.com/BurntSushi/toml/type_fields.go",
+  "vendor/github.com/BurntSushi/toml/type_toml.go",
+]
