@@ -462,6 +462,14 @@ func validateProbeEntry(root string, outcome *Outcome, probe Probe, lock Lockfil
 		outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: "probe definition changed after recording", Operator: true})
 		return
 	}
+	// A spec may also be this probe's dependency. Its protected spec role
+	// wins for drift and read failures, before dependency repair can claim it.
+	if probe.IsPin() || expected.Pin != nil {
+		if failure, ok := validatePinEntry(root, probe, expected); ok {
+			outcome.AddFailure(probe.ID, failure)
+			return
+		}
+	}
 	deps, err := HashDependencies(root, probe.Deps)
 	if err != nil {
 		outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: err.Error()})
@@ -470,12 +478,6 @@ func validateProbeEntry(root string, outcome *Outcome, probe Probe, lock Lockfil
 	if !stringMapEqual(deps, expected.Deps) {
 		outcome.AddFailure(probe.ID, Failure{Class: "harness", Detail: "declared probe input changed after recording"})
 		return
-	}
-	if probe.IsPin() || expected.Pin != nil {
-		if failure, ok := validatePinEntry(root, probe, expected); ok {
-			outcome.AddFailure(probe.ID, failure)
-			return
-		}
 	}
 	checks := []struct {
 		hash  string
