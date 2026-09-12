@@ -140,5 +140,177 @@ MANIFEST
         printf 'changed spec\n' > spec/greet.stdout
         observe 2 gate --json
         ;;
+    exit-only)
+        fixture
+        cat > vise.toml <<'MANIFEST'
+[vise]
+version = 1
+[[probe]]
+id = "zero"
+run = "sh program.sh 0"
+expect.exit = 0
+[[probe]]
+id = "nonzero"
+run = "sh program.sh 42"
+expect.exit = 42
+[[probe]]
+id = "maximum"
+run = "sh program.sh 255"
+expect.exit = 255
+MANIFEST
+        cat > program.sh <<'PROGRAM'
+printf unexpected
+exit "$1"
+PROGRAM
+        commit_fixture exit-only-spec
+        observe 0 record
+        observe 6 gate --json
+        cat > program.sh <<'PROGRAM'
+exit "$1"
+PROGRAM
+        commit_fixture meet-exit-only-spec
+        observe 0 gate --json
+        observe 0 record --preview
+        observe 0 record --i-reviewed-the-diff
+        commit_fixture accept-exit-only-spec
+        observe 0 gate --json
+        cp vise.lock "$VISE_TMP/accepted.lock"
+        observe 0 record --i-reviewed-the-diff
+        cmp vise.lock "$VISE_TMP/accepted.lock"
+        printf 'repeat acceptance preserved lock bytes\n'
+        cat > program.sh <<'PROGRAM'
+printf unexpected >&2
+exit "$1"
+PROGRAM
+        observe 1 gate --json
+        ;;
+    unknown-probe)
+        fixture
+        cat > vise.toml <<'MANIFEST'
+[vise]
+version = 1
+[[probe]]
+id = "known"
+run = "printf known"
+MANIFEST
+        commit_fixture known-probe
+        for command in gate verify; do
+            observe 2 "$command" --probe unknown --json
+        done
+        test ! -e .vise/journal.jsonl
+        printf 'unknown selection without baseline wrote no journal\n'
+        observe 4 gate --probe known --json
+        observe 0 record
+        commit_fixture recorded-known-probe
+        cp .vise/journal.jsonl "$VISE_TMP/before.journal"
+        for command in gate verify; do
+            observe 2 "$command" --probe unknown --json
+        done
+        cmp .vise/journal.jsonl "$VISE_TMP/before.journal"
+        printf 'unknown selection preserved journal bytes\n'
+        observe 0 gate --probe known --json
+        ;;
+    spec-dependency)
+        fixture
+        printf '.calls\n' >> .gitignore
+        mkdir spec fixtures
+        printf 'hello\n' > spec/shared
+        printf 'hello\n' > spec/other
+        printf 'input\n' > fixtures/input
+        cat > vise.toml <<'MANIFEST'
+[vise]
+version = 1
+[[probe]]
+id = "pin"
+run = "printf ran >> .calls; cat fixtures/input > /dev/null; cat spec/shared"
+deps = ["spec/shared", "fixtures/input"]
+expect.stdout = "spec/shared"
+MANIFEST
+        commit_fixture shared-spec-and-dependency
+        observe 0 record
+        commit_fixture recorded-shared-role
+        observe 0 gate --json
+        rm .calls
+        printf 'changed\n' > spec/shared
+        observe 2 gate --json
+        observe 0 status
+        test ! -e .calls
+        rm spec/shared
+        observe 2 gate --json
+        observe 0 status
+        test ! -e .calls
+        ln -s other spec/shared
+        observe 2 gate --json
+        observe 0 status
+        test ! -e .calls
+        rm spec/shared
+        printf 'hello\n' > spec/shared
+        printf 'changed\n' > fixtures/input
+        observe 2 gate --json
+        observe 0 status
+        test ! -e .calls
+        printf 'all four preflight failures prevented probe execution\n'
+        ;;
+    pipe-holder)
+        fixture
+        printf '.mode\n' >> .gitignore
+        mkdir spec
+        printf 'wanted\n' > spec/out
+        cat > vise.toml <<'MANIFEST'
+[vise]
+version = 1
+[[probe]]
+id = "holder-short"
+run = "if test -f .mode; then sleep 20 & printf ran; exit 127; else exit 127; fi"
+timeout = 1
+expect.stdout = "spec/out"
+[[probe]]
+id = "holder-long"
+run = "if test -f .mode; then sleep 20 & printf ran; exit 42; else exit 127; fi"
+timeout = 5
+expect.stdout = "spec/out"
+[[probe]]
+id = "live-timeout"
+run = "if test -f .mode; then sleep 20 & wait; else exit 127; fi"
+timeout = 1
+expect.stdout = "spec/out"
+MANIFEST
+        commit_fixture pipe-and-timeout-spec
+        observe 0 record
+        commit_fixture recorded-pipe-and-timeout-spec
+        printf 'run\n' > .mode
+        observe 2 gate --probe holder-short --json
+        observe 2 gate --probe holder-long --json
+        observe 6 gate --probe live-timeout --json
+        ;;
+    exit127)
+        fixture
+        mkdir spec
+        printf 'wanted\n' > spec/out
+        printf '#!/bin/sh\nprintf ran\nexit 127\n' > program.sh
+        chmod +x program.sh
+        cat > vise.toml <<'MANIFEST'
+[vise]
+version = 1
+[[probe]]
+id = "executed-direct"
+run = "./program.sh"
+expect.stdout = "spec/out"
+[[probe]]
+id = "executed-shell"
+run = "sh program.sh"
+expect.stdout = "spec/out"
+[[probe]]
+id = "missing-program"
+run = "./does-not-exist"
+expect.stdout = "spec/out"
+MANIFEST
+        commit_fixture exit127-spec
+        observe 0 record
+        commit_fixture recorded-exit127-spec
+        observe 6 gate --json
+        observe 127 run executed-direct
+        observe 127 run executed-shell
+        ;;
     *) printf 'unknown self-gate scenario: %s\n' "${1:-}" >&2; exit 2 ;;
 esac

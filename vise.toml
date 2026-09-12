@@ -163,6 +163,131 @@ deps = [
 ]
 
 [[probe]]
+id = "cli-exit-only"
+run = "sh scripts/selfgate-probe exit-only"
+timeout = 300
+deps = [
+  "scripts/selfgate-probe",
+  "go.mod",
+  "go.sum",
+  "vendor/modules.txt",
+  "vendor/github.com/BurntSushi/toml/.gitignore",
+  "vendor/github.com/BurntSushi/toml/COPYING",
+  "vendor/github.com/BurntSushi/toml/README.md",
+  "vendor/github.com/BurntSushi/toml/decode.go",
+  "vendor/github.com/BurntSushi/toml/deprecated.go",
+  "vendor/github.com/BurntSushi/toml/doc.go",
+  "vendor/github.com/BurntSushi/toml/encode.go",
+  "vendor/github.com/BurntSushi/toml/error.go",
+  "vendor/github.com/BurntSushi/toml/internal/tz.go",
+  "vendor/github.com/BurntSushi/toml/lex.go",
+  "vendor/github.com/BurntSushi/toml/meta.go",
+  "vendor/github.com/BurntSushi/toml/parse.go",
+  "vendor/github.com/BurntSushi/toml/type_fields.go",
+  "vendor/github.com/BurntSushi/toml/type_toml.go",
+]
+
+[[probe]]
+id = "cli-unknown-probe"
+run = "sh scripts/selfgate-probe unknown-probe"
+timeout = 300
+deps = [
+  "scripts/selfgate-probe",
+  "go.mod",
+  "go.sum",
+  "vendor/modules.txt",
+  "vendor/github.com/BurntSushi/toml/.gitignore",
+  "vendor/github.com/BurntSushi/toml/COPYING",
+  "vendor/github.com/BurntSushi/toml/README.md",
+  "vendor/github.com/BurntSushi/toml/decode.go",
+  "vendor/github.com/BurntSushi/toml/deprecated.go",
+  "vendor/github.com/BurntSushi/toml/doc.go",
+  "vendor/github.com/BurntSushi/toml/encode.go",
+  "vendor/github.com/BurntSushi/toml/error.go",
+  "vendor/github.com/BurntSushi/toml/internal/tz.go",
+  "vendor/github.com/BurntSushi/toml/lex.go",
+  "vendor/github.com/BurntSushi/toml/meta.go",
+  "vendor/github.com/BurntSushi/toml/parse.go",
+  "vendor/github.com/BurntSushi/toml/type_fields.go",
+  "vendor/github.com/BurntSushi/toml/type_toml.go",
+]
+
+[[probe]]
+id = "cli-spec-dependency"
+run = "sh scripts/selfgate-probe spec-dependency"
+timeout = 300
+deps = [
+  "scripts/selfgate-probe",
+  "go.mod",
+  "go.sum",
+  "vendor/modules.txt",
+  "vendor/github.com/BurntSushi/toml/.gitignore",
+  "vendor/github.com/BurntSushi/toml/COPYING",
+  "vendor/github.com/BurntSushi/toml/README.md",
+  "vendor/github.com/BurntSushi/toml/decode.go",
+  "vendor/github.com/BurntSushi/toml/deprecated.go",
+  "vendor/github.com/BurntSushi/toml/doc.go",
+  "vendor/github.com/BurntSushi/toml/encode.go",
+  "vendor/github.com/BurntSushi/toml/error.go",
+  "vendor/github.com/BurntSushi/toml/internal/tz.go",
+  "vendor/github.com/BurntSushi/toml/lex.go",
+  "vendor/github.com/BurntSushi/toml/meta.go",
+  "vendor/github.com/BurntSushi/toml/parse.go",
+  "vendor/github.com/BurntSushi/toml/type_fields.go",
+  "vendor/github.com/BurntSushi/toml/type_toml.go",
+]
+
+[[probe]]
+id = "cli-pipe-holder"
+run = "sh scripts/selfgate-probe pipe-holder"
+timeout = 300
+deps = [
+  "scripts/selfgate-probe",
+  "go.mod",
+  "go.sum",
+  "vendor/modules.txt",
+  "vendor/github.com/BurntSushi/toml/.gitignore",
+  "vendor/github.com/BurntSushi/toml/COPYING",
+  "vendor/github.com/BurntSushi/toml/README.md",
+  "vendor/github.com/BurntSushi/toml/decode.go",
+  "vendor/github.com/BurntSushi/toml/deprecated.go",
+  "vendor/github.com/BurntSushi/toml/doc.go",
+  "vendor/github.com/BurntSushi/toml/encode.go",
+  "vendor/github.com/BurntSushi/toml/error.go",
+  "vendor/github.com/BurntSushi/toml/internal/tz.go",
+  "vendor/github.com/BurntSushi/toml/lex.go",
+  "vendor/github.com/BurntSushi/toml/meta.go",
+  "vendor/github.com/BurntSushi/toml/parse.go",
+  "vendor/github.com/BurntSushi/toml/type_fields.go",
+  "vendor/github.com/BurntSushi/toml/type_toml.go",
+]
+
+[[probe]]
+id = "cli-exit127"
+run = "sh scripts/selfgate-probe exit127"
+timeout = 300
+deps = [
+  "scripts/selfgate-probe",
+  "go.mod",
+  "go.sum",
+  "vendor/modules.txt",
+  "vendor/github.com/BurntSushi/toml/.gitignore",
+  "vendor/github.com/BurntSushi/toml/COPYING",
+  "vendor/github.com/BurntSushi/toml/README.md",
+  "vendor/github.com/BurntSushi/toml/decode.go",
+  "vendor/github.com/BurntSushi/toml/deprecated.go",
+  "vendor/github.com/BurntSushi/toml/doc.go",
+  "vendor/github.com/BurntSushi/toml/encode.go",
+  "vendor/github.com/BurntSushi/toml/error.go",
+  "vendor/github.com/BurntSushi/toml/internal/tz.go",
+  "vendor/github.com/BurntSushi/toml/lex.go",
+  "vendor/github.com/BurntSushi/toml/meta.go",
+  "vendor/github.com/BurntSushi/toml/parse.go",
+  "vendor/github.com/BurntSushi/toml/type_fields.go",
+  "vendor/github.com/BurntSushi/toml/type_toml.go",
+]
+
+[[probe]]
 id = "cli-pin"
 run = "sh scripts/selfgate-probe pin"
 timeout = 300
