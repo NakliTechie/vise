@@ -17,7 +17,7 @@ set -eu
 #   pin             an edited spec gated green; the unmet exit became 1
 #   example         the capture bound shrank to 64 bytes
 #   dogfood         doctor changed its ready headline
-#   internal-checks any Go test failing, since it runs the suite
+#   internal-checks Go tests/vet and the explicit Python host-bundle test suite
 #
 # Repeat it after adding a feature. The method is in GUIDE.md section 11.6.
 
@@ -62,7 +62,7 @@ Features:
   pin               A spec written before the code: unmet, build, accept, drift
   example           The shipped agent-ready template, instantiated and gated
   dogfood           Use vise to gate a source change in a clone of vise
-  internal-checks   Go unit/integration tests and vet
+  internal-checks   Go tests/vet and Python host-bundle unit tests
 EOF
 }
 
@@ -659,6 +659,15 @@ verify_internal_checks() {
   fi
   if ! env GOTOOLCHAIN="$VERIFY_TOOLCHAIN" GOCACHE="$VERIFY_GOCACHE" GOMODCACHE="$VERIFY_GOMODCACHE" go vet ./...; then
     fail internal-checks "go vet failed"
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    fail internal-checks "Python 3.11 or newer is required for host-bundle checks"
+  fi
+  if ! python3 -B -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
+    fail internal-checks "Python 3.11 or newer is required for host-bundle checks"
+  fi
+  if ! python3 -B -m unittest -v host.test_bundle; then
+    fail internal-checks "Python host-bundle tests failed"
   fi
   summary internal-checks pass
 }
