@@ -307,9 +307,9 @@
         "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
         "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
       },
-      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
+      "recorded_commit": "4a8ff9a2c5f2f3f725fe27825bf08435769fd840",
       "exit": 0,
-      "stdout": "sha256:9656eb6b179389d7a400b516ecda0eb5c9b440e95f8d7e6d9030d127d4d6dff0",
+      "stdout": "sha256:4b904f2ed46169ae756a5f0967a8114780309aff6c6bc3b178645a5186e715a6",
       "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "cli-version": {

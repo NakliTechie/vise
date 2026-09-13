@@ -213,11 +213,17 @@ absent fields mean not supplied, not zero exit or empty bytes.
 On completed replay, skipped metrics remain in `declared`, not in `pass`.
 Full-suite metrics run only if every behavior probe/pin passes; a selected
 probe invocation excludes all metrics. There is no per-passing-probe map.
-Preflight outcomes do not attest execution: in particular, the current
-missing-baseline result can report `pass == declared` despite running nothing.
-Synthetic infrastructure failures can also distort the denominator. Never
-infer that checks ran from counts alone, especially on exits 2 or 4. These are
-known reporting gaps, not exemptions allowing delivery.
+Missing-baseline preflight reports `pass: 0`, `skipped == declared`, zero failure
+counts, and no lock, failures, classes, metrics or pins. Declared scope is all
+probes plus metrics for a full call, or the single requested probe for a subset.
+No probe or metric command ran. Other preflight failures also report zero passes:
+unaffected requested checks are skipped, while a check with its own validation
+failure is failed, not also skipped. Infrastructure failures are outside this
+declared-check denominator but remain in the harness count; consequently its
+failure-plus-skip sum can exceed declared. This is not executed-check evidence.
+Diagnostic-only replies without a valid requested set (invocation, unreadable
+manifest, encoding) count their diagnostic, not a probe suite. Customers must
+use the exit/action and failure identities as well as the counts.
 
 `pins` requires `evaluated`, `unmet`, `unmet_count`, `passing_unaccepted`, and
 `passing_unaccepted_count`. Counts are integers; the ID lists are arrays with
@@ -375,8 +381,6 @@ separates actual producer replies, synthetic caller bindings, and live
 before/after identity checks. These examples do not establish a trusted host
 boundary or cross-platform support.
 
-The preflight counts limitation above requires separate release-critical
-disposition; documenting it does not repair it. The
-known exit-127 stderr-attribution issue likewise remains a diagnostic finding:
+The known exit-127 stderr-attribution issue remains a diagnostic finding:
 prose can mistake an application message for a shell message, so customers
 must never extract authority or an install command from that text.

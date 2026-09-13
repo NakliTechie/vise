@@ -399,6 +399,10 @@ def interpret(capture, expected_binding, trusted, max_elapsed, max_stream):
                 counts["harness"] + counts["metric"] + counts["unmet"] +
                 counts["skipped"] == counts["declared"],
                 "completed judgment counts do not account for declared checks")
+    if reply_exit in {0, 1, 3, 4, 5, 6}:
+        require(counts["declared"] == len(binding["scope"]["probes"]) +
+                len(binding["scope"]["metrics"]),
+                "declared count does not match bound scope")
     passing, passing_count = [], 0
     if "pins" in reply:
         passing, passing_count = validate_pins(reply["pins"], binding["scope"]["probes"])
@@ -414,9 +418,14 @@ def interpret(capture, expected_binding, trusted, max_elapsed, max_stream):
         require(all(counts[key] == 0 for key in COUNT_KEYS[2:]),
                 "green reply contains failures or skips")
         require(counts["pass"] == counts["declared"], "green pass count mismatch")
-        if binding["scope"]["kind"] == "full":
-            require(counts["declared"] == len(binding["scope"]["probes"]) +
-                    len(binding["scope"]["metrics"]), "full green scope mismatch")
+    if reply_exit == 4:
+        require(counts["pass"] == 0 and counts["skipped"] == counts["declared"] and
+                all(counts[key] == 0 for key in ("behavior", "flaky", "harness",
+                                                  "metric", "unmet")),
+                "missing-baseline counts imply executed checks")
+        require(all(key not in reply for key in
+                    ("lock", "failures", "classes", "metrics", "pins")),
+                "missing-baseline reply contains judgment fields")
     if reply_exit == 6:
         require(set(classes) == {"unmet"}, "build result is not unmet-only")
     if reply_exit == 2:
@@ -437,6 +446,14 @@ def interpret(capture, expected_binding, trusted, max_elapsed, max_stream):
                 "exit 2 action disagrees with harness routing markers")
     disposition = ({0: "proceed", 1: "revert", 5: "revert", 6: "build"}
                    .get(reply_exit, "escalate"))
+    if binding["scope"]["kind"] == "probe":
+        metrics_skipped = 0
+    elif reply_exit == 4:
+        metrics_skipped = len(binding["scope"]["metrics"])
+    elif reply_exit == 2:
+        metrics_skipped = None
+    else:
+        metrics_skipped = counts["skipped"]
     return {
         "v": 1,
         "disposition": disposition,
@@ -445,7 +462,8 @@ def interpret(capture, expected_binding, trusted, max_elapsed, max_stream):
         "next_action": next_value["action"],
         "classes": classes,
         "unmet_ids": unmet_ids,
-        "metrics_skipped": counts["skipped"],
+        "checks_skipped": counts["skipped"],
+        "metrics_skipped": metrics_skipped,
         "metrics_checked": (binding["scope"]["kind"] == "full" and
                             reply_exit in {0, 5} and counts["skipped"] == 0),
         "passing_unaccepted_ids": passing,

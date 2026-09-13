@@ -99,10 +99,10 @@ func TestProtocolPreflightCountsAreNotExecutionEvidence(t *testing.T) {
 	root := cliRepo(t, basicManifest(""), "#!/bin/sh\nexit 0\n")
 	reply := protocolReply(t, root, 4, "gate", "record_first", "gate")
 	counts := reply["counts"].(map[string]any)
-	// Deliberately records the current anomaly, not the desired future rule.
-	// A consumer must branch on exit/action before interpreting these counts.
-	if counts["declared"] != float64(1) || counts["pass"] != float64(1) {
-		t.Fatalf("update PROTOCOL.md's observed preflight exception: %#v", counts)
+	// C11 replaces the formerly documented false-pass anomaly. These are
+	// unexecuted declarations, not successful observations.
+	if counts["declared"] != float64(1) || counts["pass"] != float64(0) || counts["skipped"] != float64(1) {
+		t.Fatalf("preflight implied execution instead of skipping: %#v", counts)
 	}
 	protocolAbsent(t, reply, "lock", "failures", "classes", "pins")
 	if _, err := os.Stat(filepath.Join(root, ".vise", "journal.jsonl")); !os.IsNotExist(err) {

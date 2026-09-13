@@ -6,7 +6,7 @@ $ vise verify --probe unknown --json
 exit=2
 unknown selection without baseline wrote no journal
 $ vise gate --probe known --json
-{"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":0,"metric":0,"pass":1,"skipped":0,"unmet":0},"exit":4,"next":{"action":"record_first","detail":"initialize the repository and record a behavior baseline"},"v":1,"verdict":"indeterminate"}
+{"cmd":"gate","counts":{"behavior":0,"declared":1,"flaky":0,"harness":0,"metric":0,"pass":0,"skipped":1,"unmet":0},"exit":4,"next":{"action":"record_first","detail":"initialize the repository and record a behavior baseline"},"v":1,"verdict":"indeterminate"}
 exit=4
 $ vise record
 RECORDED — 1 probe(s) · 0 metric(s)

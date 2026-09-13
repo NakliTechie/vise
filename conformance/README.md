@@ -47,7 +47,8 @@ The fixtures cover:
 | --- | --- |
 | `public-routes` | global and command help, version/init/status/doctor reply shapes, repeated init, status/run error-outcome routes, raw-run streams and an empty files map |
 | `raw-captures` | short binary stderr and stdout whose retained prefix splits a UTF-8 character at 262144 bytes; exact retained bytes, full-stream hash and truncation metadata |
-| `missing-baseline` | gate exit 4, `record_first`; also records that current producers may report `pass == declared` although no probe ran |
+| `missing-baseline` | gate exit 4, `record_first`, zero passes and all requested checks skipped; command/baseline/journal noncreation witnesses |
+| `missing-baseline-multi` | two probes plus one metric; full gate declares/skips three, subset gate and verify declare/skip one; no commands execute |
 | `unknown-selector` | gate exit 2, `fix_invocation`, `usage: true`, with a known selector control |
 | `green-behavior` | green/proceed, then stable behavior divergence exit 1/revert |
 | `hard-harness` | ordinary candidate-created untracked file produces exit 2/fix_probe |
@@ -61,8 +62,8 @@ The fixtures cover:
 
 The lifecycle fixture deliberately observes the current transaction anomaly:
 initial `record` can exit 0 while the newly recorded pin remains unmet. This is
-not normalized into a gate success. Likewise, missing-baseline counts are
-stored but never treated as execution evidence.
+not normalized into a gate success. Missing-baseline replies must satisfy the
+corrected C11 nonexecution counts; the historical false-pass anomaly is rejected.
 
 Synthetic negative controls never alter producer output or fixture state. They
 copy a known-good reply in memory, then independently change the reply exit,

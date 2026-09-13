@@ -60,6 +60,38 @@ Test pointers are relative to `internal/vise/` unless prefixed `../cli/`.
 
 ## Campaign order and boundaries
 
+### C11 preflight and scope contract
+
+For a valid requested probe set, gate/verify preflight retains its scope even
+when the lock, Git state or retry journal cannot be used: full means every
+declared probe and metric; `--probe` means only that probe, with no metrics.
+No-baseline exit 4 reports pass 0, skipped equal to declared, zero failure
+counts, and no failure/class/lock/metric/pin fields. No probe, metric or metric
+version command runs and no judgment is journaled. Preserve missing-baseline
+precedence and existing invocation/repair actions.
+
+An early infrastructure refusal reports pass 0 and all requested checks skipped.
+An input-validation failure attached to a declared check counts that check as
+failed, not also skipped; unaffected requested checks are skipped. Out-of-band
+infrastructure failures still count as harness failures, but are not declared
+probes/metrics, so the failure-plus-skip sum can exceed the declared denominator.
+Do not invent passes to balance it. Invocation, unreadable-manifest and encoding
+diagnostics that lack a valid requested set retain their diagnostic-only counts.
+Preserve normal replay counts and the rule that metrics run only after behavior
+holds; full/subset, empty-metric, behavior/unmet/flake and metric results require
+positive controls, not only preflight refusals.
+
+The producer kit must assert the corrected exit-4 contract, including actual
+full/subset invocations and nonexecution witnesses. Both reference consumers
+must reject false passes, wrong scope/skips or attached judgment fields on
+exit 4; bind declared scope for exits 0/1/3/4/5/6. The existing diagnostic-only
+exit-2 exception stays distinct. Their normalized `checks_skipped` copies the
+total count; `metrics_skipped` is zero for a subset, all scoped metrics for
+exit 4, and null for a full exit 2 whose metric attribution is unknown. On
+completed replay it retains the metric-only skipped count. This is an explicit
+correction to the reference profile: consumers of its normalized output must
+handle null instead of mistaking skipped probes for skipped metrics.
+
 ### C21 delivery contract
 
 Detected result-stream errors (including short writes without an error) take

@@ -34,8 +34,15 @@ type verifyState struct {
 func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOptions) VerifyResult {
 	outcome := NewOutcome("verify")
 	result := VerifyResult{Outcome: outcome}
+	// Selection here is read-only accounting, not a new refusal point. Keep
+	// the existing state-preflight precedence, but retain the requested scope
+	// when a missing/broken baseline prevents reaching prepareVerifyChecks.
+	_, requested, selectionErr := selectVerifyChecks(manifest, opts.ProbeID)
 	state, loadFailure := loadVerifyState(root, manifest, manifestBytes, &outcome)
 	if loadFailure != nil {
+		if selectionErr == nil {
+			setVerifyPreflightCounts(loadFailure, requested)
+		}
 		result.Outcome = *loadFailure
 		return result
 	}
@@ -51,13 +58,14 @@ func Verify(root string, manifest Manifest, manifestBytes []byte, opts VerifyOpt
 
 	if opts.EnforceRerunLimit {
 		if rerunFailure, refused := checkVerifyRerunLimit(root, state, checkSet); rerunFailure != nil {
+			setVerifyPreflightCounts(rerunFailure, checkSet)
 			result.Outcome = *rerunFailure
 			result.RerunRefused = refused
 			return result
 		}
 	}
 
-	if !validateVerifyInputs(root, &outcome, manifest, state.lock, selected, opts.ProbeID == "") {
+	if !validateVerifyInputs(root, &outcome, manifest, state.lock, selected, checkSet, opts.ProbeID == "") {
 		result.Outcome = outcome
 		return result
 	}
@@ -154,7 +162,7 @@ func checkVerifyRerunLimit(root string, state verifyState, checkSet []string) (*
 	return &blocked, true
 }
 
-func validateVerifyInputs(root string, outcome *Outcome, manifest Manifest, lock Lockfile, probes []Probe, validateSets bool) bool {
+func validateVerifyInputs(root string, outcome *Outcome, manifest Manifest, lock Lockfile, probes []Probe, checkSet []string, validateSets bool) bool {
 	fingerprint, err := CaptureFingerprint(root, manifest)
 	if err != nil {
 		outcome.AddFailure("fingerprint", Failure{Class: "harness", Detail: err.Error(), Operator: true})
@@ -177,26 +185,24 @@ func validateVerifyInputs(root string, outcome *Outcome, manifest Manifest, lock
 	if _, ok := outcome.Failures["fingerprint"]; ok {
 		outcome.Next.Detail = "restore the recorded toolchain or ask an operator to re-record on this machine"
 	}
-	// No probe ran, so nothing passed; the count must not imply otherwise,
-	// and every declared check without a failure of its own was skipped,
-	// not silently absent. Counted by id, because a fingerprint or journal
-	// failure is a harness count that names no declared check.
-	outcome.Counts.Pass = 0
-	skipped := 0
-	for _, probe := range probes {
-		if _, failed := outcome.Failures[probe.ID]; !failed {
-			skipped++
-		}
-	}
-	if validateSets {
-		for _, metric := range manifest.Metrics {
-			if _, failed := outcome.Failures[metric.ID]; !failed {
-				skipped++
-			}
-		}
-	}
-	outcome.Counts.Skipped = skipped
+	setVerifyPreflightCounts(outcome, checkSet)
 	return false
+}
+
+// setVerifyPreflightCounts accounts for a known requested set when no probe
+// or metric was evaluated. Infrastructure failures remain in the harness count
+// but outside the declared-check denominator; they never manufacture a pass.
+// The caller has already finalized the refusal: preserve its exit and specific
+// repair action/detail instead of finalizing again from diagnostic arithmetic.
+func setVerifyPreflightCounts(outcome *Outcome, checkSet []string) {
+	outcome.Counts.Declared = len(checkSet)
+	outcome.Counts.Pass = 0
+	outcome.Counts.Skipped = 0
+	for _, id := range checkSet {
+		if _, failed := outcome.Failures[id]; !failed {
+			outcome.Counts.Skipped++
+		}
+	}
 }
 
 func selectVerifyChecks(manifest Manifest, probeID string) ([]Probe, []string, error) {

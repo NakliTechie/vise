@@ -246,8 +246,19 @@ def interpret($cap;$exp):
        .counts.behavior==0 and .counts.flaky==0 and .counts.harness==0 and
        .counts.metric==0 and .counts.unmet==0 and .counts.skipped==0 and
        .counts.pass==.counts.declared) else true end) and
-    (if $cap.binding.scope.kind=="full" and .exit==0 then
+    (if (.exit|IN(0,1,3,4,5,6)) then
        .counts.declared==(($cap.binding.scope.probes|length)+($cap.binding.scope.metrics|length))
+     else true end) and
+    (if (.exit|IN(0,1,3,5,6)) then
+       (.counts.pass + .counts.behavior + .counts.flaky + .counts.harness +
+        .counts.metric + .counts.unmet + .counts.skipped)==.counts.declared
+     else true end) and
+    (if .exit==4 then
+       .counts.pass==0 and .counts.skipped==.counts.declared and
+       .counts.behavior==0 and .counts.flaky==0 and .counts.harness==0 and
+       .counts.metric==0 and .counts.unmet==0 and
+       (has("lock")|not) and (has("failures")|not) and (has("classes")|not) and
+       (has("metrics")|not) and (has("pins")|not)
      else true end) and
     (if has("pins") then $pins.unmet_count==($unmet|length) and
        $pins.evaluated<=($cap.binding.scope.probes|length) and
@@ -264,7 +275,10 @@ def interpret($cap;$exp):
   {reply:$r, unmet:$unmet, pins:$pins,
    decision:{v:1, disposition:disposition($r.exit), vise_exit:$r.exit,
      verdict:$r.verdict, next_action:$r.next.action, classes:($classes|sort),
-     unmet_ids:$unmet, metrics_skipped:$r.counts.skipped,
+     unmet_ids:$unmet, checks_skipped:$r.counts.skipped,
+     metrics_skipped:(if $cap.binding.scope.kind=="probe" then 0
+       elif $r.exit==4 then ($cap.binding.scope.metrics|length)
+       elif $r.exit==2 then null else $r.counts.skipped end),
      metrics_checked:($cap.binding.scope.kind=="full" and ($r.exit==0 or $r.exit==5) and
        $r.counts.skipped==0),
      passing_unaccepted_ids:$pins.passing_unaccepted,

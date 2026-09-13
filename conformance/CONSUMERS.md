@@ -117,8 +117,12 @@ operator markers require human; otherwise the action is fix_probe. No other
 failure class can carry a true authority marker. Require reported failure
 classes and counts to agree; do not let contradictory routing reach callers.
 Reject green with failures/classes, nonzero failure/skipped counts, or
-pass != declared. A full green must also account for all declared scope IDs.
-Do not infer executed checks from non-green preflight counts.
+pass != declared. Exits 0/1/3/4/5/6 must account for the bound full or selected
+declared scope. Exit 4 requires zero passes/failure counts, skipped == declared,
+and absence of lock, failures, classes, metrics and pins. Legacy exit-4 replies
+that claimed passes without execution are refused by this corrected profile.
+Do not infer executed checks from non-green preflight counts. Exit-2 diagnostic
+counts may describe infrastructure rather than the bound suite.
 
 Extract the complete sorted unmet set from all failure entries of class unmet,
 never from the capped pin summary. Summary IDs must be unique/sorted, at most
@@ -133,7 +137,10 @@ Successful interpretation exits 0 and writes one JSON object plus LF with:
 
 - `v: 1`, `disposition`: proceed (0), revert (1/5), build (6), escalate (2/3/4);
 - `vise_exit`, `verdict`, `next_action`, sorted `classes`, full `unmet_ids`;
-- `metrics_skipped` (count), `metrics_checked` (true for a full exit 0 or 5 with
+- `checks_skipped` (total reported skipped count, including probes in preflight);
+- `metrics_skipped` (count, or null when a full exit 2 cannot attribute skips to
+  metrics; zero for a subset, all bound metrics on exit 4, and the reported
+  metric-only skip count on completed replay), `metrics_checked` (true for a full exit 0 or 5 with
   zero skipped metrics; exit 5 evaluated metrics and found a regression);
 - `passing_unaccepted_ids` (bounded summary), `passing_unaccepted_count`,
   `operator_acceptance_required` (whether that count is nonzero);

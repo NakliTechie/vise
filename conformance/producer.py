@@ -408,13 +408,48 @@ BASE = """[vise]\nversion = 1\n[stubs]\nseed = \"1729\"\n"""
 
 
 def missing_baseline(run: Run, root: Path) -> None:
-    init_repo(root, BASE + '\n[[probe]]\nid="p"\nrun="printf ok"\ntimeout=2\n')
+    init_repo(root, BASE + '\n[[probe]]\nid="p"\nrun="printf p >> .executions; printf ok"\ntimeout=2\n')
     item = run.invoke("missing-baseline", "gate", root, "gate")
+    missing_baseline_assertions(item, root, 1)
+
+
+def missing_baseline_assertions(item: dict[str, Any], root: Path, declared: int) -> None:
     reply = outcome(item, 4, "record_first", "indeterminate")
-    counts = reply.get("counts", {})
-    item["known_anomaly"] = {"description": "counts are not execution evidence on exit 4",
-                             "observed_pass": counts.get("pass"),
-                             "observed_declared": counts.get("declared")}
+    expected = {"declared": declared, "pass": 0, "skipped": declared,
+                "behavior": 0, "flaky": 0, "harness": 0, "metric": 0, "unmet": 0}
+    check(item, "preflight-requested-scope-all-skipped", reply.get("counts") == expected,
+          str(reply.get("counts")))
+    check(item, "preflight-no-judgment-fields", not any(key in reply for key in
+          ("lock", "failures", "classes", "metrics", "pins")))
+    check(item, "preflight-no-command-execution", not (root / ".executions").exists())
+    check(item, "preflight-no-baseline-or-journal", not (root / "vise.lock").exists() and
+          not (root / ".vise/journal.jsonl").exists())
+
+
+def missing_baseline_multi(run: Run, root: Path) -> None:
+    manifest = BASE + '''
+[[probe]]
+id="p1"
+run="printf p1 >> .executions; printf one"
+timeout=2
+[[probe]]
+id="p2"
+run="printf p2 >> .executions; printf two"
+timeout=2
+[[metric]]
+id="size"
+run="printf metric >> .executions; printf 10"
+version_cmd="printf version >> .executions; printf v1"
+direction="down"
+enforce="no-regress"
+timeout=2
+'''
+    init_repo(root, manifest)
+    for name, args, declared in [("full", ("gate",), 3),
+                                  ("subset", ("gate", "--probe", "p1"), 1),
+                                  ("subset-verify", ("verify", "--probe", "p1"), 1)]:
+        item = run.invoke("missing-baseline-multi", name, root, *args)
+        missing_baseline_assertions(item, root, declared)
 
 
 def unknown_selector(run: Run, root: Path) -> None:
@@ -651,7 +686,8 @@ def hard_over_tolerated(run: Run, root: Path) -> None:
 CASES: list[tuple[str, Callable[[Run, Path], None]]] = [
     ("public-routes", public_routes),
     ("raw-captures", raw_captures),
-    ("missing-baseline", missing_baseline), ("unknown-selector", unknown_selector),
+    ("missing-baseline", missing_baseline), ("missing-baseline-multi", missing_baseline_multi),
+    ("unknown-selector", unknown_selector),
     ("green-behavior", green_behavior), ("hard-harness", hard_harness),
     ("operator-spec-drift", operator_spec_drift), ("flake-budget", flake_budget),
     ("metric-regression", metric_regression), ("pin-lifecycle", pin_lifecycle),

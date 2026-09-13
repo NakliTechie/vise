@@ -93,10 +93,19 @@ def capture(bound: dict, reply: dict, code: int | None = None) -> dict:
 
 def decision(bound: dict, code: int, action: str, classes: list[str], unmet: list[str] | None = None,
              skipped: int = 0, passing: list[str] | None = None, passing_count: int = 0) -> dict:
+    if bound["scope"]["kind"] == "probe":
+        metrics_skipped = 0
+    elif code == 4:
+        metrics_skipped = len(bound["scope"]["metrics"])
+    elif code == 2:
+        metrics_skipped = None
+    else:
+        metrics_skipped = skipped
     return {"v": 1, "disposition": {0: "proceed", 1: "revert", 2: "escalate", 3: "escalate", 4: "escalate", 5: "revert", 6: "build"}[code],
             "vise_exit": code, "verdict": {0: "green", 1: "red", 2: "indeterminate", 3: "indeterminate", 4: "indeterminate", 5: "red", 6: "red"}[code],
             "next_action": action, "classes": sorted(classes), "unmet_ids": unmet or [],
-            "metrics_skipped": skipped, "metrics_checked": code in (0, 5) and skipped == 0 and bound["scope"]["kind"] == "full",
+            "checks_skipped": skipped, "metrics_skipped": metrics_skipped,
+            "metrics_checked": code in (0, 5) and skipped == 0 and bound["scope"]["kind"] == "full",
             "passing_unaccepted_ids": passing or [], "passing_unaccepted_count": passing_count,
             "operator_acceptance_required": passing_count > 0, "binding": copy.deepcopy(bound)}
 
@@ -104,6 +113,9 @@ def decision(bound: dict, code: int, action: str, classes: list[str], unmet: lis
 # Expected interpretations are authored independently of driver code and producer replies.
 REAL = [
     ("missing-baseline", "gate", 4, "record_first", []),
+    ("missing-baseline-multi", "full", 4, "record_first", []),
+    ("missing-baseline-multi", "subset", 4, "record_first", []),
+    ("missing-baseline-multi", "subset-verify", 4, "record_first", []),
     ("unknown-selector", "unknown", 2, "fix_invocation", ["harness"]),
     ("unknown-selector", "known", 0, "proceed", []),
     ("unknown-selector", "known-verify", 0, "proceed", []),
@@ -126,6 +138,15 @@ REAL = [
     ("hard-over-tolerated", "hard-wins", 2, "fix_probe", ["harness"]),
 ]
 
+EXPECTED_SKIPPED = {
+    ("missing-baseline", "gate"): 1,
+    ("missing-baseline-multi", "full"): 3,
+    ("missing-baseline-multi", "subset"): 1,
+    ("missing-baseline-multi", "subset-verify"): 1,
+    ("flake-budget", "third-rerun-refused"): 1,
+    ("four-pins", "four-unmet"): 1,
+}
+
 
 def make_cases(producer: dict) -> list[dict]:
     cases = []
@@ -146,6 +167,8 @@ def make_cases(producer: dict) -> list[dict]:
             metrics = ["size"]
         if fixture == "strict-streams":
             probes = ["exit-only"]
+        if fixture == "missing-baseline-multi":
+            probes, metrics = ["p1", "p2"], ["size"]
         bound = binding("real-" + name, probes, metrics, producer["subject"])
         bound["root"] = actual["cwd"]
         bound["cmd"] = actual["reply"]["cmd"]
@@ -154,12 +177,17 @@ def make_cases(producer: dict) -> list[dict]:
             selector = "absent" if name == "unknown" else "known"
             bound["scope"] = {"kind": "probe", "probes": [selector], "metrics": []}
             bound["argv"] += ["--probe", selector]
+        if fixture == "missing-baseline-multi" and name in {"subset", "subset-verify"}:
+            bound["cmd"] = "verify" if name == "subset-verify" else "gate"
+            bound["scope"] = {"kind": "probe", "probes": ["p1"], "metrics": []}
+            bound["argv"] = [bound["cmd"], "--json", "--probe", "p1"]
         bound["lock"] = actual["reply"].get("lock", digest("absent-lock"))
         cap = capture(bound, actual["reply"], actual["process_exit"])
         cap.update({"stdout": actual["stdout"], "stderr": actual["stderr"], "elapsed_ms": int(actual["duration_ms"])})
         unmet = probes if code == 6 else []
         passing = probes[:3] if name in {"met-unaccepted", "four-passing-unaccepted"} else []
-        expected = decision(bound, code, action, classes, unmet, 1 if name == "four-unmet" else 0,
+        expected = decision(bound, code, action, classes, unmet,
+                            EXPECTED_SKIPPED.get((fixture, name), 0),
                             passing, len(probes) if passing else 0)
         item = add("actual-" + name, cap, expected, kind="actual-producer-reply-in-synthetic-consumer-envelope")
         item["producer_source"] = {"fixture": fixture, "case": name, "argv": actual["argv"],
@@ -186,6 +214,46 @@ def make_cases(producer: dict) -> list[dict]:
     item["raw_policy"] = " \n\t" + encoded(pol).decode() + " \t"
     pretty = copy.deepcopy(cap); pretty["stdout"] = json.dumps(reply, indent=2) + "\n"
     add("pretty-producer-json", pretty, good["expected"], pol, "synthetic-positive")
+
+    missing_full_bound = binding("synthetic-missing-full", ["p1", "p2"], ["size"], producer["subject"])
+    missing_full_reply = {"v": 1, "cmd": "gate", "exit": 4, "verdict": "indeterminate",
+                          "next": {"action": "record_first", "detail": "synthetic missing baseline"},
+                          "counts": {"declared": 3, "pass": 0, "behavior": 0, "flaky": 0,
+                                     "harness": 0, "metric": 0, "unmet": 0, "skipped": 3}}
+    missing_full = capture(missing_full_bound, missing_full_reply)
+    add("exit4-full-scope", missing_full,
+        decision(missing_full_bound, 4, "record_first", [], skipped=3), kind="synthetic-positive")
+    missing_subset_bound = copy.deepcopy(missing_full_bound)
+    missing_subset_bound.update({"request_id": "synthetic-missing-subset", "scope": {"kind": "probe", "probes": ["p1"], "metrics": []},
+                                 "argv": ["gate", "--json", "--probe", "p1"]})
+    missing_subset_reply = copy.deepcopy(missing_full_reply)
+    missing_subset_reply["counts"].update({"declared": 1, "skipped": 1})
+    missing_subset = capture(missing_subset_bound, missing_subset_reply)
+    add("exit4-subset-scope", missing_subset,
+        decision(missing_subset_bound, 4, "record_first", [], skipped=1), kind="synthetic-positive")
+    for name, path, value in [
+        ("exit4-legacy-false-pass", ("counts", "pass"), 3),
+        ("exit4-wrong-declared-scope", ("counts", "declared"), 2),
+        ("exit4-wrong-skips", ("counts", "skipped"), 2),
+        ("exit4-lock-field", ("lock",), missing_full_bound["lock"]),
+        ("exit4-failures-field", ("failures",), {}),
+        ("exit4-classes-field", ("classes",), []),
+        ("exit4-metrics-field", ("metrics",), {}),
+        ("exit4-pins-field", ("pins",), {"evaluated": 0, "unmet": [], "unmet_count": 0,
+                                           "passing_unaccepted": [], "passing_unaccepted_count": 0}),
+    ]:
+        changed = copy.deepcopy(missing_full_reply); node = changed
+        for key in path[:-1]: node = node[key]
+        node[path[-1]] = value
+        add(name, capture(missing_full_bound, changed), None, policy(missing_full_bound))
+    coherent = copy.deepcopy(missing_full_reply)
+    coherent["counts"].update({"declared": 2, "skipped": 2})
+    add("exit4-coherent-arithmetic-wrong-full-scope", capture(missing_full_bound, coherent),
+        None, policy(missing_full_bound))
+    leaked = copy.deepcopy(missing_subset_reply)
+    leaked["counts"].update({"declared": 3, "skipped": 3})
+    add("exit4-subset-leaks-full-scope", capture(missing_subset_bound, leaked),
+        None, policy(missing_subset_bound))
     known = next(v for v in cases if v["name"] == "actual-known")
     alternate = copy.deepcopy(known["capture"])
     for key in ("binding", "binding_after"):
@@ -315,6 +383,23 @@ def make_cases(producer: dict) -> list[dict]:
         node[path[-1]] = value
         changed["stdout"] = encoded(data).decode()
         add(name, changed, None, source["policy"])
+
+    for source_name in ("actual-stable-divergence", "actual-flake-1", "actual-regressed", "actual-four-unmet"):
+        source = next(v for v in cases if v["name"] == source_name)
+        changed = copy.deepcopy(source["capture"])
+        data = json.loads(changed["stdout"])
+        data["counts"]["declared"] += 1
+        changed["stdout"] = encoded(data).decode()
+        add("non-green-scope-mismatch-" + source_name.removeprefix("actual-"), changed, None, source["policy"])
+    for source_name in ("actual-stable-divergence", "actual-flake-1", "actual-regressed", "actual-four-unmet"):
+        source = next(v for v in cases if v["name"] == source_name)
+        changed = copy.deepcopy(source["capture"])
+        data = json.loads(changed["stdout"])
+        data["counts"]["declared"] += 1
+        data["counts"]["pass"] += 1
+        changed["stdout"] = encoded(data).decode()
+        add("non-green-coherent-scope-mismatch-" + source_name.removeprefix("actual-"),
+            changed, None, source["policy"])
 
     probes = ["pin1", "pin2", "pin3", "pin4", "pin5"]
     old_bound = binding("previous", probes, ["score"], producer["subject"])
