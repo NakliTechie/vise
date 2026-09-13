@@ -2,6 +2,12 @@
 
 Status: DRAFT (2026-09-01), post two-family cold review (plan/_archive/2026-09-01-review-{claude,codex}.md). The contract below is the product; the implementation serves it. Changes from v0.2: fail-closed verdict model, flake decision table, journal made local, environment fingerprint, probe lifecycle pinned, crash-safety ordering, blobs committed, exit-expectation table, dependency closure, ergonomics fixes, scope trim.
 
+Approved evolution (2026-09-13): [ROADMAP.md](ROADMAP.md) locks the caller-neutral
+construction initiative and its phased delivery criteria. The v0 limits below
+describe the existing release, not a rejection of those approved later phases.
+Approval is not a capability claim: each extension needs its own detailed
+contract, implementation and executed evidence before it is supported.
+
 ## 0. Design doctrine — built for the agent in the driver's seat
 
 vise's primary user is a coding agent mid-loop: context-poor, liable to be killed mid-turn, prone to circling on long campaigns and to rationalizing its own failures. Every interface decision below serves that user. The doctrine, in order of force:
