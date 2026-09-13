@@ -120,3 +120,38 @@ func TestLockfileValidationKeepsHashBeforeSchemaPrecedence(t *testing.T) {
 		t.Fatalf("repaired lock refused: %v", err)
 	}
 }
+
+func TestLockfileValidationKeepsProbeBeforeMetricPrecedence(t *testing.T) {
+	for _, phase := range []string{"schema", "hash"} {
+		t.Run(phase, func(t *testing.T) {
+			root := t.TempDir()
+			lock := validLockfile(t)
+			probes := lock["probes"].(map[string]any)
+			probe := probes["behavior"].(map[string]any)
+			delete(probes, "behavior")
+			probes["zulu"] = probe
+			metricID := "alpha"
+			metric := map[string]any{"run_hash": "bad-hash", "value": 0}
+			if phase == "schema" {
+				metricID = "!alpha"
+				metric["run_hash"] = HashBytes(nil)
+				probe["recorded_commit"] = "bad-commit"
+			} else {
+				probe["run_hash"] = "bad-hash"
+			}
+			lock["metrics"] = map[string]any{metricID: metric}
+			for _, want := range []string{"probe zulu", "metric "} {
+				body, err := json.Marshal(lock)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeLockfile(t, root, string(body))
+				if _, _, err := LoadLockfile(root); err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("want %q failure first, got %v", want, err)
+				}
+				probe["run_hash"] = HashBytes(nil)
+				probe["recorded_commit"] = testCommit
+			}
+		})
+	}
+}
