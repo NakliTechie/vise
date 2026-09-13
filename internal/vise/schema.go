@@ -73,7 +73,10 @@ func displayPath(path string) string {
 // content hash: the identifiers name probes and metrics the manifest could
 // declare, and every recorded commit is a real Git object name.
 func validateLockfileSchema(lock Lockfile) error {
-	for id, probe := range lock.Probes {
+	// First-error selection is observable. Preserve field precedence, but
+	// never let Go's map iteration choose which invalid entry is reported.
+	for _, id := range sortedKeys(lock.Probes) {
+		probe := lock.Probes[id]
 		if !idPattern.MatchString(id) {
 			return fmt.Errorf("probe id %q must match %s", id, idPattern.String())
 		}
@@ -83,12 +86,12 @@ func validateLockfileSchema(lock Lockfile) error {
 		if !commitPattern.MatchString(probe.RecordedCommit) {
 			return fmt.Errorf("probe %s recorded_commit %q is not a Git object name", id, probe.RecordedCommit)
 		}
-		for path := range probe.Deps {
+		for _, path := range sortedKeys(probe.Deps) {
 			if err := ValidateRelativePath("", path, false); err != nil {
 				return fmt.Errorf("probe %s dependency %q: %w", id, path, err)
 			}
 		}
-		for path := range probe.Files {
+		for _, path := range sortedKeys(probe.Files) {
 			if err := ValidateArtifactPath("", path); err != nil {
 				return fmt.Errorf("probe %s artifact %q: %w", id, path, err)
 			}
@@ -100,7 +103,7 @@ func validateLockfileSchema(lock Lockfile) error {
 			if len(probe.Pin.Spec) == 0 && (probe.Stdout != HashBytes(nil) || probe.Stderr != HashBytes(nil) || len(probe.Files) != 0) {
 				return fmt.Errorf("probe %s is a pin with no spec hashes", id)
 			}
-			for path := range probe.Pin.Spec {
+			for _, path := range sortedKeys(probe.Pin.Spec) {
 				if err := ValidateSpecPath("", path); err != nil {
 					return fmt.Errorf("probe %s spec %q: %w", id, path, err)
 				}
@@ -110,7 +113,7 @@ func validateLockfileSchema(lock Lockfile) error {
 			}
 		}
 	}
-	for id := range lock.Metrics {
+	for _, id := range sortedKeys(lock.Metrics) {
 		if !idPattern.MatchString(id) {
 			return fmt.Errorf("metric id %q must match %s", id, idPattern.String())
 		}

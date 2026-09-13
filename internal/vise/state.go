@@ -302,7 +302,8 @@ func LoadLockfile(root string) (Lockfile, []byte, error) {
 }
 
 func validateLockfileHashes(lock Lockfile) error {
-	for id, probe := range lock.Probes {
+	for _, id := range sortedKeys(lock.Probes) {
+		probe := lock.Probes[id]
 		if _, err := HashName(probe.RunHash); err != nil {
 			return fmt.Errorf("probe %s run_hash: %w", id, err)
 		}
@@ -312,25 +313,26 @@ func validateLockfileHashes(lock Lockfile) error {
 		if _, err := HashName(probe.Stderr); err != nil {
 			return fmt.Errorf("probe %s stderr: %w", id, err)
 		}
-		for path, hash := range probe.Deps {
-			if _, err := HashName(hash); err != nil {
+		for _, path := range sortedKeys(probe.Deps) {
+			if _, err := HashName(probe.Deps[path]); err != nil {
 				return fmt.Errorf("probe %s dependency %s: %w", id, path, err)
 			}
 		}
-		for path, hash := range probe.Files {
-			if _, err := HashName(hash); err != nil {
+		for _, path := range sortedKeys(probe.Files) {
+			if _, err := HashName(probe.Files[path]); err != nil {
 				return fmt.Errorf("probe %s file %s: %w", id, path, err)
 			}
 		}
 		if probe.Pin != nil {
-			for path, hash := range probe.Pin.Spec {
-				if _, err := HashName(hash); err != nil {
+			for _, path := range sortedKeys(probe.Pin.Spec) {
+				if _, err := HashName(probe.Pin.Spec[path]); err != nil {
 					return fmt.Errorf("probe %s spec %s: %w", id, path, err)
 				}
 			}
 		}
 	}
-	for id, metric := range lock.Metrics {
+	for _, id := range sortedKeys(lock.Metrics) {
+		metric := lock.Metrics[id]
 		if metric.RunHash == "" {
 			continue // recorded before definitions were frozen; verify reports the drift
 		}
