@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -33,6 +34,10 @@ func TestDependencyDiagnosticRoutingAcrossCheckoutLocations(t *testing.T) {
 				}
 				if exit, out, errOut := cliRun(t, root, "gate", "--json"); exit != 0 {
 					t.Fatalf("control gate: %d %s %s", exit, out, errOut)
+				}
+				before, err := os.ReadFile(filepath.Join(root, "vise.lock"))
+				if err != nil {
+					t.Fatal(err)
 				}
 				for _, path := range []string{"fixtures/input", ".calls"} {
 					if err := os.Remove(filepath.Join(root, path)); err != nil {
@@ -69,6 +74,10 @@ func TestDependencyDiagnosticRoutingAcrossCheckoutLocations(t *testing.T) {
 					}
 					if exit != wantExit || errOut != "" || action != wantAction {
 						t.Fatalf("%s: exit=%d action=%s stdout=%s stderr=%s", command, exit, action, out, errOut)
+					}
+					after, err := os.ReadFile(filepath.Join(root, "vise.lock"))
+					if err != nil || !bytes.Equal(before, after) {
+						t.Fatalf("%s rewrote the refused baseline: %v", command, err)
 					}
 					if !strings.Contains(detail, "fixtures/input") || strings.Contains(detail, root) {
 						t.Errorf("nonportable or unhelpful detail: %s", detail)
