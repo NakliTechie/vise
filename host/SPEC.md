@@ -206,6 +206,7 @@ roadmap work remains required as detailed in [DEFERRED.md](DEFERRED.md).
 
 ## References
 
+- [Persistent session and materialization contract](SESSION.md)
 - [Walkthrough decisions](walkthroughs.md)
 - [Build status](README.md)
 - [Public Vise contract](../conformance/README.md)

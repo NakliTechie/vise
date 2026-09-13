@@ -35,6 +35,7 @@ The twelve frozen root observations do not directly cover the bundle module.
 ## Related documents
 
 - [SPEC.md](SPEC.md) — authority, exact identity, persistent lifecycle and checks
+- [SESSION.md](SESSION.md) — phase-two materialization, Git identity and recovery contract
 - [walkthroughs.md](walkthroughs.md) — accepted scope decisions
 - [DEFERRED.md](DEFERRED.md) — later required slices and revisit triggers
 - [Portable advisory examples](../examples/agent-ready/README.md)
