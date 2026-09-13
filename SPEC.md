@@ -8,6 +8,11 @@ describe the existing release, not a rejection of those approved later phases.
 Approval is not a capability claim: each extension needs its own detailed
 contract, implementation and executed evidence before it is supported.
 
+The current caller-facing command, JSON, pin-lifecycle and compatibility
+contract is [PROTOCOL.md](PROTOCOL.md). It supersedes older CLI prose here
+where noted, and explicitly separates observed reporting/transport limitations
+from guarantees. It does not advertise roadmap extensions as implemented.
+
 ## 0. Design doctrine — built for the agent in the driver's seat
 
 vise's primary user is a coding agent mid-loop: context-poor, liable to be killed mid-turn, prone to circling on long campaigns and to rationalizing its own failures. Every interface decision below serves that user. The doctrine, in order of force:
@@ -130,10 +135,16 @@ version_cmd = "oxlint --version"   # optional; captured at record — a mismatch
 
 ## 4. CLI contract
 
-Shared exit-code vocabulary, one code per distinct next action:
-`0` ok/green · `1` behavior diff (→ revert) · `2` harness error: broken probe, missing tool, env-fingerprint mismatch, no git, dirty-tree record (→ fix the harness or hand to human — never the refactor) · `3` indeterminate: flake detected (→ quarantine-ack; do NOT treat as pass or fail) · `4` not initialized (→ record first) · `5` metric regression under `no-regress` (→ the change held behavior but worsened quality).
+The authoritative command-specific schemas, exits, actions and exceptions are
+in [PROTOCOL.md](PROTOCOL.md). For **gate/verify**, the exit vocabulary is:
+`0` green · `1` behavior diff (revert) · `2` harness/invocation failure
+(fix_probe, human or fix_invocation) · `3` flake (quarantine_ack) · `4` no
+baseline (record_first) · `5` enforced metric regression (revert) · `6` unmet
+unaccepted pin (build). Report commands, raw run and record are not gate verdicts.
 
-**Failure precedence** when classes co-occur (one exit code; all classes still listed in output): `4 > 2 > 3 > 1 > 5` — no behavior verdict from a broken harness, no diff verdict from a flaky probe, quality only after behavior holds.
+**Failure precedence** when classes co-occur: `4 > 2 > 3 > 1 > 6 > 5` — no
+behavior verdict from a broken harness, no diff verdict from a flaky probe,
+and quality only after behavior and construction pins hold.
 
 **`--json`** replaces the human rendering with exactly one object, on every command including `help`:
 
@@ -157,7 +168,12 @@ in prose. An agent branches on that field, never on the message. Failure keys
 are usually probe ids; `manifest`, `journal`, `vise.lock`, `fingerprint` and
 `rerun-limit` name themselves.
 
-Passing probes appear only in `counts` (§0.4). `next.action` is a **closed vocabulary**: `proceed` · `revert` · `fix_probe` · `fix_invocation` · `rerun` · `record_first` · `quarantine_ack` · `human` (`fix_invocation` is a complaint about the command line — an unknown command, a mistyped probe id, an inapplicable flag — carried at exit 2 like the other harness answers but meaning the repository is untouched and the agent should correct what it typed) (`rerun` is reserved and not emitted in v0.3, so it has no constant in the code: a value an agent can never receive should not be declarable). The vocabulary is enforced, not merely documented — each action is a named constant, so a typo does not compile, and a test refuses any action literal that appears beside them or any declared action nothing emits. Exactly one action; alternatives (like the intended-change path) live in `detail`. Free text lives only in `detail`.
+Passing probes normally appear only in counts; passing-unaccepted pins are
+also named in the bounded pin summary. The eight emitted actions are
+`proceed`, `revert`, `fix_probe`, `fix_invocation`, `record_first`,
+`quarantine_ack`, `human`, and `build`. `rerun` is not an action. Exactly one
+action is emitted; display text is not a machine-readable alternative route.
+See PROTOCOL for optional fields and transaction/report exceptions.
 
 ### 4.1 The flake protocol (fail-closed)
 
@@ -180,7 +196,11 @@ vise itself enforces **`rerun` at most once**: the third consecutive `gate` or `
 | exit E, bytes B | different, unstable across re-run | flake → indeterminate |
 | anything | launch failure / timeout | harness |
 
-(`record` refuses to freeze launch failures and timeouts — so at verify they always mean the harness broke, not the code.)
+This table describes ordinary recorded probes and accepted pins. An
+unaccepted pin can instead report a stable launch failure, timeout, signal
+termination or missing artifact as unmet (exit 6), without excusing hard
+harness failures. Its expected bytes come from the operator, not those failed
+runs. See [pin lifecycle](PROTOCOL.md#4-pin-lifecycle-and-sanctioned-progress).
 
 ### The commands
 

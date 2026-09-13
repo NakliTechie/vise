@@ -6,6 +6,10 @@ vise freezes what your code **does** into a lockfile, then judges every later ch
 
 **Tier: Tool.** A local CLI. No server, no account, no telemetry.
 
+Integrating a caller? [PROTOCOL.md](PROTOCOL.md) is the CLI/JSON reference,
+including construction pins, compatibility, command effects and evidence
+limits. It describes this branch's executable, not every tagged `0.3.0` build.
+
 ```
 vise record          # freeze — before anything moves
 <agent refactors, one transform per commit>
