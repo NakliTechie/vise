@@ -4,6 +4,10 @@ The separate [CLI concurrency harness](CONCURRENCY.md) checks actual
 record/record and record/gate pairs, plus readers during a held writer.
 Run it explicitly; it is not included in the producer/consumer matrix below.
 
+The separate [ownership and precedence matrix](PRECEDENCE.md) exercises
+same-pin hard failures, mixed failure classes, and selected metric scheduling
+boundaries. Run it explicitly against a trusted candidate in scratch fixtures.
+
 `producer.py` is a bounded, provider-free executable check for a specifically
 selected Vise producer. It creates disposable Git repositories outside this
 checkout, invokes the selected executable as a real subprocess, and retains
