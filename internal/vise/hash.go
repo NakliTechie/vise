@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -43,16 +44,37 @@ func HashDependencies(root string, deps []string) (map[string]string, error) {
 	result := make(map[string]string, len(deps))
 	for _, rel := range deps {
 		if err := ValidateRelativePath(root, rel, true); err != nil {
-			return nil, fmt.Errorf("dependency %q: %w", rel, err)
+			return nil, &dependencyError{operation: "dependency", path: rel, cause: err}
 		}
 		hash, err := HashFile(filepath.Join(root, rel))
 		if err != nil {
-			return nil, fmt.Errorf("hash dependency %q: %w", rel, err)
+			return nil, &dependencyError{operation: "hash dependency", path: rel, cause: err}
 		}
 		result[filepath.ToSlash(filepath.Clean(rel))] = hash
 	}
 	return result, nil
 }
+
+// dependencyError keeps checkout-specific OS paths available through Unwrap,
+// but renders the declared path instead. Moving the same broken fixture into
+// a different checkout must not change the diagnostic captured by a probe.
+// Preserve the failed operation and OS cause; this is not error suppression.
+type dependencyError struct {
+	operation string
+	path      string
+	cause     error
+}
+
+func (e *dependencyError) Error() string {
+	detail := e.cause.Error()
+	var pathErr *os.PathError
+	if errors.As(e.cause, &pathErr) {
+		detail = fmt.Sprintf("%s: %v", pathErr.Op, pathErr.Err)
+	}
+	return fmt.Sprintf("%s %q: %s", e.operation, e.path, detail)
+}
+
+func (e *dependencyError) Unwrap() error { return e.cause }
 
 func TamperHash(root string, manifest, lock []byte) (string, error) {
 	h := sha256.New()
