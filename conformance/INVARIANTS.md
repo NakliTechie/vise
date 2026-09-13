@@ -60,6 +60,32 @@ Test pointers are relative to `internal/vise/` unless prefixed `../cli/`.
 
 ## Campaign order and boundaries
 
+### C21 delivery contract
+
+Detected result-stream errors (including short writes without an error) take
+precedence over the intended command exit: return harness exit 2, whether the
+intended result was success, a judgment refusal or a raw probe exit. This applies
+to JSON and human output, including raw stdout/stderr mirrors. Do not retry a
+partially delivered reply or append a replacement JSON object. A best-effort
+stderr diagnostic may identify the transport failure; no body is guaranteed on
+a broken destination. A real broken pipe may instead terminate the executable
+with SIGPIPE, which is also unusable delivery, never success.
+
+Human `record --i-reviewed-the-diff` must abort before persistence if its
+pre-overwrite diff cannot be written. Failure delivering the final receipt
+does not roll back an already completed operation; callers must inspect state
+before considering another write. A successful writer return is not proof of
+receiver consumption or an external buffer flush.
+
+Encoding failures return a valid single JSON harness diagnostic when the
+destination works. Its counts describe one failed `encoding` diagnostic, not
+executed probes, and it carries no candidate, lock or successful judgment from
+the unencodable result. Use JSON escaping even for arbitrary error text. Keep
+the existing fix_probe action; callers must not treat this diagnostic as a
+usable gate result. Test successful delivery alongside error, short, partial
+and full-length-with-error writes, nonzero raw exits, valid fallback framing,
+pre-overwrite refusal and real process broken-pipe behavior.
+
 1. Acceptance/provenance C03–C05/C13–C14: add missing persistent cases first,
    then targeted source controls and independent black-box replay.
 2. Judgment/ownership C01–C02/C06–C12/C17–C18/C22/C24: replay existing precise

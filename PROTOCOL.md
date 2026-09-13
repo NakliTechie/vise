@@ -136,7 +136,7 @@ explicit compatibility update and tests; never silently reinterpret an enum.
 Future signed receipts, hosted evaluation and shapes are proposals under the
 roadmap, not fields customers can assume this executable emits.
 
-### Cancellation and known transport limitations
+### Cancellation and result delivery
 
 SIGINT/SIGTERM make the executable interrupt active probe process groups and
 exit 130/143 respectively. No final JSON, verdict journal entry or scratch
@@ -144,16 +144,30 @@ cleanup is guaranteed on interruption; SIGKILL has no cleanup guarantee.
 The caller must await process termination and reject partial or stale output.
 The OS may report a signal separately from an ordinary numeric exit.
 
-Current implementation limitations, not success contracts:
+Detected output errors or short writes return exit 2 instead of the intended
+command exit, including raw probe exits. This applies to JSON and human result
+streams. A broken OS pipe can instead terminate the process with SIGPIPE;
+neither outcome is usable delivery. Do not retry or interpret partial JSON.
+Vise attempts no replacement JSON after a failed write. A best-effort stderr
+diagnostic is possible, not guaranteed. Successful writes do not establish
+receiver consumption or flush a caller-owned buffered writer.
+
+Human `record --i-reviewed-the-diff` refuses persistence if the pre-overwrite
+diff cannot be delivered. Failure delivering a final receipt does not undo
+an already persisted generation or journal entry. Inspect state before deciding
+whether another mutating invocation is appropriate.
+
+An encoding failure, when its destination works, emits one JSON harness
+diagnostic with an `encoding` failure, exit 2 and `next.action: fix_probe`.
+Its counts describe that single diagnostic (declared/harness 1, all others 0),
+not the original probe/metric execution. No original lock, candidate or judgment
+is carried. Generic internal serialization uses `cmd: "internal"`; outcome
+serialization retains its command. Neither is a usable gate judgment.
+
+Remaining implementation limitations, not success contracts:
 
 - Failure to determine cwd happens before JSON dispatch: stderr and exit 2,
   without a JSON object, even when `--json` was requested.
-- Destination write errors are currently ignored by JSON rendering. A process
-  exit alone does not prove that the receiver obtained a complete reply.
-- An outcome-encoding failure emits an indeterminate harness reply with an
-  `encoding` failure but without normal `counts`. Treat it as an unusable
-  judgment, not fabricated counts. The internal serializer fallback may use
-  `cmd: "internal"`. Neither fallback is gate success.
 - There is no fixed maximum total response size or total wall-clock duration.
   Bound collection and waiting in the customer; exceeding its limits fails
   closed. Time spent waiting for the state lock is not a probe timeout.
@@ -361,8 +375,8 @@ separates actual producer replies, synthetic caller bindings, and live
 before/after identity checks. These examples do not establish a trusted host
 boundary or cross-platform support.
 
-The preflight counts and output-write limitations above require separate
-release-critical disposition; documenting them does not repair them. The
+The preflight counts limitation above requires separate release-critical
+disposition; documenting it does not repair it. The
 known exit-127 stderr-attribution issue likewise remains a diagnostic finding:
 prose can mistake an application message for a shell message, so customers
 must never extract authority or an install command from that text.

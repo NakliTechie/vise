@@ -46,7 +46,20 @@ func stopProbeOnSignal() {
 	}()
 }
 
-func Run(args []string, cwd string, stdout, stderr io.Writer) int {
+func Run(args []string, cwd string, stdout, stderr io.Writer) (exit int) {
+	// Renderers may make several writes, and raw run mirrors two streams from
+	// separate goroutines. Remember the first failed delivery until dispatch
+	// finishes; a later successful write must never hide it.
+	delivery := &resultDelivery{}
+	diagnostic := stderr
+	stdout = &resultStream{delivery: delivery, writer: stdout, name: "stdout"}
+	stderr = &resultStream{delivery: delivery, writer: stderr, name: "stderr"}
+	defer func() {
+		if err := delivery.failure(); err != nil {
+			exit = vise.ExitHarness
+			fmt.Fprintf(diagnostic, "vise: output delivery failed; result is unusable: %v\n", err)
+		}
+	}()
 	args, jsonMode := removeGlobalJSON(args)
 	if exit, answered := answerHelpOrVersion(args, jsonMode, stdout, stderr); answered {
 		return exit
@@ -341,9 +354,11 @@ func wireRecordConfirmation(opts *vise.RecordOptions, jsonMode bool, stdout io.W
 		return
 	}
 	opts.BeforeOverwrite = func(diff string) error {
-		fmt.Fprintln(stdout, "BEHAVIOR DIFF UNDER REVIEW")
-		fmt.Fprintln(stdout, terminalSafe(diff, true))
-		return nil
+		if _, err := fmt.Fprintln(stdout, "BEHAVIOR DIFF UNDER REVIEW"); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintln(stdout, terminalSafe(diff, true))
+		return err
 	}
 }
 
@@ -574,18 +589,32 @@ func hasHelp(args []string) bool {
 }
 
 func writeJSON(w io.Writer, value any) int {
+	return writeCommandJSON(w, value, "internal")
+}
+
+func writeCommandJSON(w io.Writer, value any, command string) int {
 	data, err := json.Marshal(value)
+	exit := vise.ExitOK
 	if err != nil {
-		fmt.Fprintf(w, `{"v":1,"cmd":"internal","exit":2,"next":{"action":"fix_probe","detail":%q}}`, err.Error())
-		fmt.Fprintln(w)
+		exit = vise.ExitHarness
+		// The fallback has only JSON-safe fields. Marshal it too: Go's %q
+		// escapes (e.g. \x01) are not necessarily legal JSON escapes.
+		data, err = json.Marshal(encodingFailure(command, err))
+		if err != nil {
+			return vise.ExitHarness
+		}
+	}
+	data = append(data, '\n')
+	if n, err := w.Write(data); err != nil || n != len(data) {
 		return vise.ExitHarness
 	}
-	_, _ = w.Write(append(data, '\n'))
-	return vise.ExitOK
+	return exit
 }
 
 func writeJSONWithExit(w io.Writer, value any, exit int) int {
-	_ = writeJSON(w, value)
+	if deliveryExit := writeJSON(w, value); deliveryExit != vise.ExitOK {
+		return deliveryExit
+	}
 	return exit
 }
 
@@ -607,7 +636,7 @@ func writeOutcomeJSON(w io.Writer, outcome vise.Outcome, extra map[string]any) i
 	for key, value := range extra {
 		object[key] = value
 	}
-	if exit := writeJSON(w, object); exit != vise.ExitOK {
+	if exit := writeCommandJSON(w, object, outcome.Cmd); exit != vise.ExitOK {
 		return exit
 	}
 	return outcome.Exit
@@ -618,6 +647,9 @@ func writeOutcomeJSON(w io.Writer, outcome vise.Outcome, extra map[string]any) i
 func encodingFailure(command string, err error) map[string]any {
 	return map[string]any{
 		"v": 1, "cmd": command, "exit": vise.ExitHarness, "verdict": "indeterminate",
+		// These count the failed encoding diagnostic, not the checks whose
+		// outcome could not be represented. No probe pass is inferred.
+		"counts":  vise.Counts{Declared: 1, Harness: 1},
 		"classes": []string{"harness"},
 		"failures": map[string]any{
 			"encoding": map[string]any{"class": "harness", "detail": "the verdict could not be encoded as JSON: " + err.Error()},
