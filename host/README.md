@@ -1,13 +1,15 @@
-> **Lifecycle:** living — bundle, operator and storage foundations implemented; host runtime pending
+> **Lifecycle:** living — bundle, operator, storage and Git identity foundations implemented; host runtime pending
 
 # Local reference host
 
 An optional, caller-neutral trusted controller for Vise, with a fixed local
 Docker executor and independent delivery authority. The standalone CLI remains
 usable without it. This directory currently records the contract, not a usable
-host or a certified containment boundary. Source bundles, operator generations
-and owned-directory I/O have unit tests; the persistent controller lifecycle is
-not yet implemented, and these modules do not launch candidate code.
+host or a certified containment boundary. Source bundles, operator generations,
+owned-directory I/O and Git identity have tests; the persistent controller
+lifecycle is not yet implemented. Git activation publishes only index/HEAD,
+not a usable work-tree/current-state generation. These modules do not launch
+candidate code.
 
 ## Status
 
@@ -26,7 +28,7 @@ construction and refusal matrix. Unit-level bundle work cannot establish H01–H
 From the repository root, with Python 3.11 or newer:
 
 ```sh
-python3 -B -m unittest -v host.test_bundle host.test_operator host.test_storage
+python3 -B -m unittest -v host.test_bundle host.test_operator host.test_storage host.test_git_identity
 ```
 
 The full `scripts/verify verify` also runs these tests in `internal-checks`.
@@ -34,6 +36,7 @@ That development check requires Python; the standalone Go Vise CLI does not.
 The twelve frozen root observations do not directly cover these Python modules.
 Storage tests currently require POSIX descriptor-relative I/O and advisory locks;
 they are not evidence for Windows support or candidate containment.
+Git identity tests use an installed Git executable and disposable repositories.
 
 ## Related documents
 
