@@ -354,9 +354,12 @@ semantics. These in-process checks are separate from the
 [provider-free producer conformance kit](conformance/README.md), which invokes
 an explicitly selected executable in disposable repositories and retains real
 process evidence plus labelled assertion-layer controls. Its finite coverage
-and platform limits are documented alongside the command. B05 still requires
-two independent reference consumers and their fault matrix. Do not claim a
-tested host boundary or cross-platform support from this document.
+and platform limits are documented alongside the command. The
+[reference consumer profile](conformance/CONSUMERS.md) defines independent
+Python and shell/jq interpreters plus a shared executable fault matrix. It
+separates actual producer replies, synthetic caller bindings, and live
+before/after identity checks. These examples do not establish a trusted host
+boundary or cross-platform support.
 
 The preflight counts and output-write limitations above require separate
 release-critical disposition; documenting them does not repair them. The

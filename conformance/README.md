@@ -102,3 +102,58 @@ commit timestamps, locale, and timezone are fixed. The evidence says what ran
 on the recorded platform; this kit makes no portability claim for platforms on
 which it was not executed. It is not a containment boundary and its fixtures
 must not run untrusted binaries.
+
+## Independent reference consumers (B05)
+
+The [consumer contract](CONSUMERS.md) defines two separate implementations:
+`consumer.py` uses Python's standard library; `consumer-shell.sh` uses POSIX
+shell, jq and iconv. Neither imports the producer kit or the other's validator.
+Both interpret a captured gate/verify attempt against a separate expected
+request and compatibility policy:
+
+```sh
+python3 conformance/consumer.py consume CAPTURE.json EXPECTED.json
+sh conformance/consumer-shell.sh consume CAPTURE.json EXPECTED.json
+python3 conformance/consumer.py progress PREVIOUS.json CURRENT.json EXPECTED.json
+sh conformance/consumer-shell.sh progress PREVIOUS.json CURRENT.json EXPECTED.json
+```
+
+Driver exit 0 means the reply was interpreted, including a red Vise result.
+Use the normalized `disposition` field to branch. Invalid, interrupted,
+incompatible or stale evidence exits 2 without a stdout decision. Passing but
+unaccepted pins remain visible; metric regression still reports that metrics
+were evaluated. `progress` checks full unmet ID sets and common evaluator
+identity before reporting a proper-subset construction step.
+
+Run the independent matrix with Python 3.11+ (the launcher parses its live
+fixture manifest with standard-library tomllib):
+
+```sh
+python3 -B conformance/consumer_matrix.py \
+  --binary /absolute/path/to/tested/vise \
+  --evidence-dir /absolute/path/to/new-consumer-evidence
+```
+
+The matrix first runs the producer kit. It feeds real producer replies into
+explicitly **synthetic consumer envelopes**, retaining their original argv
+separately; these are interpretation checks, not freshness attestations.
+Separate live fixtures collect actual source/artifact/environment/manifest
+identities before and after a gate, obtain the evaluator tamper identity from
+status, parse declared scope from the fixture manifest, and test an actual
+post-gate artifact edit and SIGINT interruption. Current expected metadata is
+a separate input, never copied from a result by the drivers themselves.
+
+The launcher independently authors expected decisions, compares both driver
+outputs against them, and retains each command/status/output plus driver
+hashes. Synthetic malformed, additive, interrupted, identity-mismatch and
+proper-subset cases are labelled. Driver invocations have a ten-second bound;
+on timeout the launcher terminates their process group before continuing.
+This process-group cleanup is not containment against detached hostile
+descendants. Input and response bounds are part of the consumer contract.
+
+These small reference interpreters do not enforce delivery or protect the
+orchestrator's policy files. A trusted host must compute and protect current
+identities, serialize delivery with verification and refuse substitutions.
+Local metadata matching is not a signature or proof against an agent that can
+rewrite both inputs. Those requirements remain in B07/B12; local-only Vise
+does not acquire a mandatory hosted service from these examples.
