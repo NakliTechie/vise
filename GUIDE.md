@@ -427,9 +427,10 @@ summary [unmet] — not built yet: stdout does not match the spec
 ```
 
 The diff is the spec on one side and what the code did on the other. The
-detail says what the run actually did — a program that does not exist yet
-reads `not built yet: probe could not be launched (exit 127)`, a hang reads
-`timed out` — so a 127 stays visible as a 127 even though the class is
+detail reports observed conditions — exit 127 reads `not built yet: probe
+exited 127`, with a quoted not-found stderr excerpt when available; a hang reads
+`timed out`. A 127 alone does not prove the program was absent: an executable
+can deliberately return it. The 127 stays visible even though the class is
 `unmet`. Metrics are not run while a pin is unmet, and the counts say
 `skipped`, never pass.
 

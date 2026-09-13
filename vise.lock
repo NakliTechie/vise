@@ -91,9 +91,9 @@
         "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
         "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
       },
-      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
+      "recorded_commit": "6f114f2381c37dd4a215e6cf3aaf4de233e97ffb",
       "exit": 0,
-      "stdout": "sha256:686d77b82e3f8e4e11774ddb7f66e704b8e6f5f21d5a01790a9fa8e5f0ff8e6e",
+      "stdout": "sha256:4dff1cc027ed67806fcb82ab5cafe43aa1f837377f265e795c12383f8c1c9b3e",
       "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "cli-help": {
@@ -172,9 +172,9 @@
         "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
         "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
       },
-      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
+      "recorded_commit": "6f114f2381c37dd4a215e6cf3aaf4de233e97ffb",
       "exit": 0,
-      "stdout": "sha256:4fb81b1e856f4a6e3dc9792679bbbf59b35f981d1267744e10c16b1a58acccf2",
+      "stdout": "sha256:6e852c40bc17b33834e6d1d21e7a235261850a25763d1688f051122bb7105900",
       "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "cli-pipe-holder": {
@@ -199,9 +199,9 @@
         "vendor/github.com/BurntSushi/toml/type_toml.go": "sha256:55baa835e33c33796ef34be6b26f73182ebc14ca038a3de63d26298f93c10311",
         "vendor/modules.txt": "sha256:153514d269b520e01de3ba0f7c2293203e1a57a0d0e81f0a0fa8719a4075cde4"
       },
-      "recorded_commit": "7b5caa4fd98abd4fff73a5f576aade31b43400c9",
+      "recorded_commit": "6f114f2381c37dd4a215e6cf3aaf4de233e97ffb",
       "exit": 0,
-      "stdout": "sha256:7c00900b81ea90c7a1c6cdf5583faad0c0ed554e560df413c314c51833988759",
+      "stdout": "sha256:5c44cd390dd75afff4c7c43566a8f2098af4dccf656798c7d979def40eb0f50b",
       "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "cli-review": {

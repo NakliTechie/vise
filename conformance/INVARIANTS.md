@@ -60,6 +60,35 @@ Test pointers are relative to `internal/vise/` unless prefixed `../cli/`.
 
 ## Campaign order and boundaries
 
+### C23 captured diagnostic contract
+
+Exit 127 remains the existing typed launch-failure condition for gate/pin
+classification; it does not prove that a program was absent or did not run.
+The same distinction applies to probes, metrics, metric version commands and
+environment fingerprint commands. Preserve process exit, raw captures, tolerance
+and hard-failure precedence, pin acceptance state, and repair actions.
+
+A selected stderr line containing `not found` or `No such file` is an untrusted
+captured excerpt, not authenticated shell provenance. Retain that useful line
+and its mentioned path/word, but label and quote it as captured stderr; do not
+assert a missing installation or tell the reader to install what a supposed
+shell named. If no such line was captured, report exit 127 with neutral advice
+to inspect exit handling and dependencies. Do not infer a missing program from
+the command's first word. Keep the existing matching-line priority over unrelated
+warning lines; this is an excerpt selector, not a parser or completeness claim.
+Bound the selected excerpt at 200 Unicode code points plus an ellipsis when
+needed, without corrupting valid UTF-8; quote control characters in the exit-127
+detail. Do not alter the raw capture/hash to sanitize a diagnostic.
+
+Required controls pair a genuinely missing executable with executed programs
+emitting application not-found text or forged shell-shaped text, plus empty and
+unrelated stderr. Exercise direct and wrapped probes, metrics/version commands,
+fingerprint failure, unaccepted/accepted pin routing and raw execution. Check
+selected-line order and 199/200/201-code-point boundaries. Reintroduce attribution,
+excerpt loss and truncation defects separately; unrelated compilation errors do
+not count as failing controls. Root baseline changes require full-byte review
+and exact-digest acceptance under the approved transition authority.
+
 ### C11 preflight and scope contract
 
 For a valid requested probe set, gate/verify preflight retains its scope even

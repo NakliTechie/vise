@@ -148,9 +148,9 @@ func TestAProbeIsAllowedTheTimeoutItDeclares(t *testing.T) {
 	}
 }
 
-// firstShellDiagnostic picks the shell's own not-found line out of stderr, so
-// exit 127 can name the missing tool instead of merely reporting that
-// something failed. Bypassing it, or taking the first line of stderr whatever
+// firstNotFoundDiagnostic selects a captured not-found line, without claiming
+// who wrote it. This retains a useful mentioned name without authenticating
+// its provenance. Bypassing it, or taking the first line of stderr whatever
 // it says, left the suite green — because the only test went through a probe
 // whose stderr had one line in it.
 func TestTheLaunchFailureNamesTheToolAndNotTheNoise(t *testing.T) {
@@ -174,13 +174,13 @@ func TestTheLaunchFailureNamesTheToolAndNotTheNoise(t *testing.T) {
 		{
 			name:    "unrelated noise does not identify a missing program",
 			stderr:  "some unrelated noise\n",
-			wantIn:  "exited 127 without a shell diagnostic",
+			wantIn:  "exited 127; inspect the command's exit handling and dependencies",
 			wantOut: "some unrelated noise",
 		},
 		{
 			name:    "silent exit 127 carries no installation advice",
 			stderr:  "",
-			wantIn:  "exited 127 without a shell diagnostic",
+			wantIn:  "exited 127; inspect the command's exit handling and dependencies",
 			wantOut: "install",
 		},
 	}

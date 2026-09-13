@@ -24,7 +24,7 @@ func TestExit127WithoutShellEvidenceDoesNotInventAMissingProgram(t *testing.T) {
 				if got.Exit != 127 || !got.LaunchFailed || !got.Tolerated {
 					t.Fatalf("the exit-127 contract changed: %#v", got)
 				}
-				if !strings.Contains(got.HarnessError, "exited 127 without a shell diagnostic") {
+				if !strings.Contains(got.HarnessError, "exited 127; inspect the command's exit handling and dependencies") {
 					t.Errorf("missing evidence-qualified explanation: %q", got.HarnessError)
 				}
 				for _, unsupported := range []string{"install", "not on its PATH", "could not be launched"} {
@@ -44,8 +44,8 @@ func TestMissingProgramRetainsItsShellDiagnosticAndRemedy(t *testing.T) {
 	if got.Exit != 127 || !got.LaunchFailed || !got.Tolerated || len(got.Stdout.Prefix) != 0 {
 		t.Fatalf("missing-program control changed: %#v", got)
 	}
-	line := firstShellDiagnostic(got.Stderr)
-	if line == "" || !strings.Contains(got.HarnessError, line) || !strings.Contains(got.HarnessError, "install what the shell named") {
+	line := firstNotFoundDiagnostic(got.Stderr)
+	if line == "" || !strings.Contains(got.HarnessError, line) || !strings.Contains(got.HarnessError, "captured stderr:") || !strings.Contains(got.HarnessError, "inspect the command's exit handling and dependencies") {
 		t.Fatalf("lost observed shell diagnostic or remedy: %#v", got)
 	}
 }

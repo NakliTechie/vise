@@ -216,9 +216,11 @@ you.
 
 `vise verify --probe <id>` shows the diff: the spec on one side, what your
 code did on the other. Read it and build toward the spec. `failures[<id>].detail`
-says what the run actually did — `could not be launched (exit 127)` means the
-program does not exist yet; `timed out` and `was not produced` mean what they
-say — so a 127 stays visible as a 127 even though the class is `unmet`.
+reports observed conditions — `exited 127` may mean a missing executable or
+an executable deliberately returning that status. A quoted stderr excerpt is
+captured data, not proof of shell origin or an installation instruction.
+`timed out` and `was not produced` retain their meanings; a 127 stays visible
+as a 127 even though the class is `unmet`.
 
 **Precedence.** Exit 1 outranks exit 6: if any probe that already held goes
 red while you build, that is the first thing to undo, whatever the pin says.

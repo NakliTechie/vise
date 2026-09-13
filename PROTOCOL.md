@@ -381,6 +381,10 @@ separates actual producer replies, synthetic caller bindings, and live
 before/after identity checks. These examples do not establish a trusted host
 boundary or cross-platform support.
 
-The known exit-127 stderr-attribution issue remains a diagnostic finding:
-prose can mistake an application message for a shell message, so customers
-must never extract authority or an install command from that text.
+Exit 127 retains its typed launch-failure classification; it is not proof that
+the program was absent or never ran. A selected not-found stderr line is quoted
+as an untrusted captured excerpt, never authenticated as shell output or an
+installation instruction. Its text is bounded to 200 Unicode code points plus
+an ellipsis; raw captures and hashes remain unchanged. Without such an excerpt,
+the diagnostic reports the exit and asks the caller to inspect exit handling
+and dependencies. Customers must never derive authority from stderr prose.

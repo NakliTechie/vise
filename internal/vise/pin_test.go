@@ -676,8 +676,8 @@ func TestVerifyClassifiesAnUnacceptedPinPerTheUnmetTable(t *testing.T) {
 		return result
 	}
 
-	// Row: launch failure, stable — the program does not exist.
-	launch := check("launch failure", "not built yet: probe could not be launched (exit 127)")
+	// Row: stable exit 127 from a deliberately absent fixture executable.
+	launch := check("launch failure", "not built yet: probe exited 127; captured stderr:")
 	if !strings.Contains(launch.Outcome.Failures["greet"].Detail, "greet") {
 		t.Fatalf("the missing word is not named: %q", launch.Outcome.Failures["greet"].Detail)
 	}

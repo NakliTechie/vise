@@ -177,7 +177,7 @@ func (r Runner) RunMetric(metric Metric) MetricResult {
 		}
 		if vr.Exit != 0 {
 			detail := fmt.Sprintf("metric version command exited %d", vr.Exit)
-			if line := firstShellDiagnostic(vr.Stderr); line != "" {
+			if line := firstNotFoundDiagnostic(vr.Stderr); line != "" {
 				detail += ": " + line
 			}
 			return MetricResult{Value: value, HarnessError: detail}
@@ -466,18 +466,19 @@ func strayFilesError(kind string, paths []string) string {
 		kind, strings.Join(named, ", "), suffix, kind)
 }
 
-// launchFailureDetail quotes a captured not-found diagnostic when available.
-// Without one, neither launch failure nor a missing program's identity follows
-// from exit 127: an executable can deliberately return that status.
+// launchFailureDetail reports the observed status, not an inferred missing
+// installation. Even shell-shaped stderr can be printed by an executable that
+// ran and deliberately returned 127. Keep the useful excerpt as quoted data.
 func launchFailureDetail(kind string, stderr Capture) string {
-	if line := firstShellDiagnostic(stderr); line != "" {
-		return fmt.Sprintf("%s could not be launched (exit 127): %s; install what the shell named, or give it an absolute path", kind, line)
+	if line := firstNotFoundDiagnostic(stderr); line != "" {
+		return fmt.Sprintf("%s exited 127; captured stderr: %q; inspect the command's exit handling and dependencies", kind, line)
 	}
-	return fmt.Sprintf("%s exited 127 without a shell diagnostic; inspect the command's exit handling and dependencies", kind)
+	return fmt.Sprintf("%s exited 127; inspect the command's exit handling and dependencies", kind)
 }
 
-// firstShellDiagnostic returns the shell's own not-found line, bounded, or "".
-func firstShellDiagnostic(stderr Capture) string {
+// firstNotFoundDiagnostic selects a useful captured line, not its author.
+// The wording match is an excerpt heuristic, never evidence of shell origin.
+func firstNotFoundDiagnostic(stderr Capture) string {
 	for _, line := range strings.Split(string(stderr.Prefix), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -486,8 +487,8 @@ func firstShellDiagnostic(stderr Capture) string {
 		if !strings.Contains(line, "not found") && !strings.Contains(line, "No such file") {
 			continue
 		}
-		if len(line) > 200 {
-			line = line[:200] + "…"
+		if shown := []rune(line); len(shown) > 200 {
+			line = string(shown[:200]) + "…"
 		}
 		return line
 	}
@@ -516,7 +517,7 @@ func (m MetricResult) harnessFailure() Failure {
 // the line this picks out.
 func metricExitDetail(result RunResult) string {
 	detail := fmt.Sprintf("metric exited %d", result.Exit)
-	if line := firstShellDiagnostic(result.Stderr); line != "" {
+	if line := firstNotFoundDiagnostic(result.Stderr); line != "" {
 		return detail + ": " + line
 	}
 	return detail

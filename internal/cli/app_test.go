@@ -584,7 +584,7 @@ func TestRunMirrorsLaunchFailureExit(t *testing.T) {
 	if value := parseCLIJSON(t, stdout); exit != 127 || value["exit"] != 127.0 {
 		t.Fatalf("run --json: exit=%d value=%#v", exit, value)
 	}
-	if exit, _, stderr := cliRun(t, root, "record"); exit != 2 || !strings.Contains(stderr, "exit 127") {
+	if exit, _, stderr := cliRun(t, root, "record"); exit != 2 || !strings.Contains(stderr, "exited 127") || !strings.Contains(stderr, "captured stderr:") || !strings.Contains(stderr, "definitely-not-a-command-xyz") {
 		t.Fatalf("record must still refuse a launch failure: exit=%d stderr=%q", exit, stderr)
 	}
 

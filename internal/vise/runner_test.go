@@ -579,16 +579,16 @@ func TestTheRunnerKeepsThePromisesTheSpecMakes(t *testing.T) {
 		}
 	})
 
-	t.Run("a missing tool is named, not just reported", func(t *testing.T) {
+	t.Run("a missing executable fixture retains the captured tool name", func(t *testing.T) {
 		root := testGitRepo(t)
 		probe := Probe{ID: "absent", Run: "definitely-not-a-real-tool --version", Timeout: 30}
 		result := Runner{Root: root}.RunProbe(probe, false)
 
 		if !strings.Contains(result.HarnessError, "127") {
-			t.Fatalf("a missing tool was not reported as a launch failure: %q", result.HarnessError)
+			t.Fatalf("the observed exit 127 was not reported: %q", result.HarnessError)
 		}
 		if !strings.Contains(result.HarnessError, "definitely-not-a-real-tool") {
-			t.Fatalf("the message does not name the tool that is missing: %q", result.HarnessError)
+			t.Fatalf("the message lost the captured tool name: %q", result.HarnessError)
 		}
 	})
 }
