@@ -1,6 +1,6 @@
 # Self-gating this repository
 
-The root `vise.toml`, `vise.lock`, and `.vise/blobs/` freeze seven behavioral
+The root `vise.toml`, `vise.lock`, and `.vise/blobs/` freeze twelve behavioral
 observations of vise. `scripts/selfgate-probe` builds the current working tree
 for each observation. A separately installed vise judges those observations;
 do not rebuild that judge automatically during an agent's editing loop.
@@ -43,6 +43,11 @@ The network declaration is still `declared-off`, not OS-enforced isolation.
 | `cli-doctor` | Ready doctor's output and actual exit 0 on a complete fixture |
 | `cli-review` | Preview containing a changed, removed, and added probe, plus actual exit 0 |
 | `cli-pin` | Record unmet; gate exit 6; build and gate green before acceptance; preview and accept; gate green after acceptance; edited spec rejected with exit 2 |
+| `cli-exit-only` | Exit-only pins at 0, 42 and 255, empty-spec metadata and their lifecycle |
+| `cli-unknown-probe` | Known/unknown selectors before and after recording; invocation exit 2 without changing judgment history |
+| `cli-spec-dependency` | Edited, missing and symlinked shared specs route to the operator; ordinary dependency drift retains probe repair; no preflight execution |
+| `cli-pipe-holder` | Short/long timeout pipe holders remain hard failures, while a live-parent unaccepted-pin timeout remains unmet |
+| `cli-exit127` | Direct/shell execution witnesses retain raw 127 and evidence-qualified explanations; a genuinely missing command retains its diagnostic |
 
 These are preservation probes. The pin lifecycle runs inside a disposable
 fixture; the root baseline does not claim a newly specified pin was built here.
@@ -100,3 +105,27 @@ Machine-readable results are in [selfgate-evidence.json](selfgate-evidence.json)
 
 One existing cosmetic issue remains visible in the frozen status output:
 `record` journal rows have an empty verdict cell. This setup preserves it.
+
+## Twelve-probe expansion and diagnostic corrections, 2026-09-13
+
+The operator-reviewed expansion was committed in `7b5caa4` and `6a0c42d`.
+The original seven observations were preserved. The current lock hash is
+`sha256:cb68facda38986313790e70e525e10370b984225e2a24849829d74e12aa00019`.
+
+All five added scenarios have selected compilable mutation witnesses recorded
+in [m1-evidence.json](m1-evidence.json), with source revisions, exact edits,
+verdicts and restored full gates. The first two witnesses are from `6a0c42d`;
+the remaining three are from `6ac830a`. This is selected coverage, not proof
+that every defect in each subsystem would be detected.
+
+Two earlier mutation-time flakes exposed product diagnostics: invalid lock
+entries were selected in Go map order, and missing-dependency errors included
+random checkout prefixes. The separately approved B02 corrections preserve
+validation precedence, OS causes and repair authority. The broad spec/dependency
+mutation now produces stable exit 1 without normalizers or baseline changes.
+
+The twelve root observations do not directly exercise all new diagnostic
+regressions. The ordering and dependency diagnostic tests in `internal/vise`
+and `internal/cli` cover those cases; they failed before the corresponding
+fixes. The evidence file distinguishes executed tests from read-only review,
+historical witnesses and checks not run.

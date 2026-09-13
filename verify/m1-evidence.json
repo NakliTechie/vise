@@ -1,0 +1,490 @@
+{
+  "date": "2026-09-13",
+  "tested_source_revision": "6ac830a947d894ed6e6517098b1a344570c8a44c",
+  "baseline_commit": "6a0c42da9a2725ef3b00a311310ca7a8d54d1de8",
+  "judge": {
+    "revision": "70e04d63bbd7910b9708f5d1480412c40b909859",
+    "modified": false,
+    "version": "0.3.0",
+    "sha256": "24355b10aacb9f57392c5001e79141da3ef6bed564ee19a5a193dad0d12c0632"
+  },
+  "mutations": [
+    {
+      "id": "exit-only",
+      "gate": {
+        "classes": [
+          "behavior"
+        ],
+        "cmd": "gate",
+        "counts": {
+          "behavior": 1,
+          "declared": 1,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 0,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 1,
+        "failures": {
+          "cli-exit-only": {
+            "class": "behavior",
+            "detail": "observed behavior differs consistently from the lockfile",
+            "diff": "exit: expected 0, got 1",
+            "expect": {
+              "exit": 0,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:a9a9d54fee4a0a9c6dbab301d1e2c1500a19d568e450a671898b6d3cb2bc9e4e"
+            },
+            "got": {
+              "exit": 1,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:f306285fa2e6395418cdd95ee0048cde70a6ee56311dad22cb9eaf209c54e90f"
+            }
+          }
+        },
+        "lock": "sha256:cb68facda38986313790e70e525e10370b984225e2a24849829d74e12aa00019",
+        "next": {
+          "action": "revert",
+          "detail": "revert the unintended behavior change or ask an operator to accept a new baseline"
+        },
+        "v": 1,
+        "verdict": "red"
+      },
+      "restored_gate": {
+        "cmd": "gate",
+        "counts": {
+          "behavior": 0,
+          "declared": 12,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 12,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 0,
+        "lock": "sha256:cb68facda38986313790e70e525e10370b984225e2a24849829d74e12aa00019",
+        "next": {
+          "action": "proceed",
+          "detail": "all declared checks matched"
+        },
+        "v": 1,
+        "verdict": "green"
+      },
+      "file": "internal/vise/schema.go",
+      "before": "\t\t\tif len(probe.Pin.Spec) == 0 && (probe.Stdout != HashBytes(nil) || probe.Stderr != HashBytes(nil) || len(probe.Files) != 0) {",
+      "mutant": "\t\t\tif len(probe.Pin.Spec) == 0 && (probe.Exit == 42 || probe.Stdout != HashBytes(nil) || probe.Stderr != HashBytes(nil) || len(probe.Files) != 0) {",
+      "build_exit": 0,
+      "subject_revision": "6a0c42da9a2725ef3b00a311310ca7a8d54d1de8"
+    },
+    {
+      "id": "unknown-probe",
+      "gate": {
+        "classes": [
+          "behavior"
+        ],
+        "cmd": "gate",
+        "counts": {
+          "behavior": 1,
+          "declared": 1,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 0,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 1,
+        "failures": {
+          "cli-unknown-probe": {
+            "class": "behavior",
+            "detail": "observed behavior differs consistently from the lockfile",
+            "diff": "exit: expected 0, got 1",
+            "expect": {
+              "exit": 0,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:9656eb6b179389d7a400b516ecda0eb5c9b440e95f8d7e6d9030d127d4d6dff0"
+            },
+            "got": {
+              "exit": 1,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:5ad8db9d79ccdd546099f71a6f35a6bb0a78b2274943c96b1f465fab7093403f"
+            }
+          }
+        },
+        "lock": "sha256:cb68facda38986313790e70e525e10370b984225e2a24849829d74e12aa00019",
+        "next": {
+          "action": "revert",
+          "detail": "revert the unintended behavior change or ask an operator to accept a new baseline"
+        },
+        "v": 1,
+        "verdict": "red"
+      },
+      "restored_gate": {
+        "cmd": "gate",
+        "counts": {
+          "behavior": 0,
+          "declared": 12,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 12,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 0,
+        "lock": "sha256:cb68facda38986313790e70e525e10370b984225e2a24849829d74e12aa00019",
+        "next": {
+          "action": "proceed",
+          "detail": "all declared checks matched"
+        },
+        "v": 1,
+        "verdict": "green"
+      },
+      "file": "internal/cli/app.go",
+      "before": "\tif *probeID != \"\" {\n\t\tif _, ok := manifest.Probe(*probeID); !ok {",
+      "mutant": "\tif *probeID != \"\" && false {\n\t\tif _, ok := manifest.Probe(*probeID); !ok {",
+      "build_exit": 0,
+      "subject_revision": "6a0c42da9a2725ef3b00a311310ca7a8d54d1de8"
+    },
+    {
+      "id": "spec-dependency",
+      "gate": {
+        "classes": [
+          "behavior"
+        ],
+        "cmd": "gate",
+        "counts": {
+          "behavior": 1,
+          "declared": 1,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 0,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 1,
+        "failures": {
+          "cli-spec-dependency": {
+            "class": "behavior",
+            "detail": "observed behavior differs consistently from the lockfile",
+            "diff": "--- expected/stdout\n+++ got/stdout\n@@ first divergence line 9 @@\n exit=0\n $ vise gate --json\n-…113 rune(s)…,\"skipped\":0,\"unmet\":0},\"exit\":2,\"failures\":{\"pin\":{\"class\":\"harness\",\"detail\":\"spec changed after recording, not behavior; restore the spec file, or an operato…280 rune(s)… (line is 553 runes)\n-exit=2\n-$ vise status\n-VISE STATUS — BASELINE-DRIFT\n-manifest: valid=true · probes=1 · metrics=0\n-lockfile: valid=true · probes=1 · metrics=0\n-fingerprint: match=true\n-recorded commits: 1bddc069bbdf724d4c5ee9a77d255b32d421ba3b\n+…113 rune(s)…,\"skipped\":0,\"unmet\":0},\"exit\":2,\"failures\":{\"pin\":{\"class\":\"harness\",\"detail\":\"declared probe input changed after recording\"}},\"lock\":\"sha256:3fe85b2398ed868f7…184 rune(s)… (line is 457 runes)\n+exit=2\n+$ vise status\n+VISE STATUS — BASELINE-DRIFT\n+manifest: valid=true · probes=1 · metrics=0\n+lockfile: valid=true · probes=1 · metrics=0\n+fingerprint: match=true\n+recorded commits: 1bddc069bbdf724d4c5ee9a77d255b32d421ba3b\n… 65 later line(s) omitted",
+            "expect": {
+              "exit": 0,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:bd01ca1ba3cc0c7be5afb9816db4593b25d9580487cb4e07dfc71a446061eafc"
+            },
+            "got": {
+              "exit": 0,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:c3b6be0d95f72b1c1930bb490d3c1cb8e195847d474080502e5975681ec72dc2"
+            }
+          }
+        },
+        "lock": "sha256:cb68facda38986313790e70e525e10370b984225e2a24849829d74e12aa00019",
+        "next": {
+          "action": "revert",
+          "detail": "revert the unintended behavior change or ask an operator to accept a new baseline"
+        },
+        "v": 1,
+        "verdict": "red"
+      },
+      "restored_gate": {
+        "cmd": "gate",
+        "counts": {
+          "behavior": 0,
+          "declared": 12,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 12,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 0,
+        "lock": "sha256:cb68facda38986313790e70e525e10370b984225e2a24849829d74e12aa00019",
+        "next": {
+          "action": "proceed",
+          "detail": "all declared checks matched"
+        },
+        "v": 1,
+        "verdict": "green"
+      },
+      "file": "internal/vise/verify.go",
+      "before": "\t// A spec may also be this probe's dependency. Its protected spec role\n\t// wins for drift and read failures, before dependency repair can claim it.\n\tif probe.IsPin() || expected.Pin != nil {\n\t\tif failure, ok := validatePinEntry(root, probe, expected); ok {\n\t\t\toutcome.AddFailure(probe.ID, failure)\n\t\t\treturn\n\t\t}\n\t}\n\tdeps, err := HashDependencies(root, probe.Deps)\n\tif err != nil {\n\t\toutcome.AddFailure(probe.ID, Failure{Class: \"harness\", Detail: err.Error()})\n\t\treturn\n\t}\n\tif !stringMapEqual(deps, expected.Deps) {\n\t\toutcome.AddFailure(probe.ID, Failure{Class: \"harness\", Detail: \"declared probe input changed after recording\"})\n\t\treturn\n\t}",
+      "mutant": "\tdeps, err := HashDependencies(root, probe.Deps)\n\tif err != nil {\n\t\toutcome.AddFailure(probe.ID, Failure{Class: \"harness\", Detail: err.Error()})\n\t\treturn\n\t}\n\tif !stringMapEqual(deps, expected.Deps) {\n\t\toutcome.AddFailure(probe.ID, Failure{Class: \"harness\", Detail: \"declared probe input changed after recording\"})\n\t\treturn\n\t}\n\t// Deliberate mutation: dependency repair incorrectly takes precedence\n\t// over a file's protected spec role. Restore after the selected gate.\n\tif probe.IsPin() || expected.Pin != nil {\n\t\tif failure, ok := validatePinEntry(root, probe, expected); ok {\n\t\t\toutcome.AddFailure(probe.ID, failure)\n\t\t\treturn\n\t\t}\n\t}",
+      "build_exit": 0,
+      "subject_revision": "6ac830a947d894ed6e6517098b1a344570c8a44c"
+    },
+    {
+      "id": "pipe-holder",
+      "subject_revision": "6ac830a947d894ed6e6517098b1a344570c8a44c",
+      "file": "internal/vise/runner.go",
+      "before": "\t\tresult.hardHarnessError(\"probe exited but left a background process holding its stdout or stderr; redirect that process to /dev/null or wait for it inside the probe\")",
+      "mutant": "\t\tresult.HarnessError = \"probe exited but left a background process holding its stdout or stderr; redirect that process to /dev/null or wait for it inside the probe\"",
+      "build_exit": 0,
+      "gate": {
+        "classes": [
+          "behavior"
+        ],
+        "cmd": "gate",
+        "counts": {
+          "behavior": 1,
+          "declared": 1,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 0,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 1,
+        "failures": {
+          "cli-pipe-holder": {
+            "class": "behavior",
+            "detail": "observed behavior differs consistently from the lockfile",
+            "diff": "exit: expected 0, got 1",
+            "expect": {
+              "exit": 0,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:7c00900b81ea90c7a1c6cdf5583faad0c0ed554e560df413c314c51833988759"
+            },
+            "got": {
+              "exit": 1,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:323a2c8b39d6f2ea4f346241890b72289472b886102854e51685865730830617"
+            }
+          }
+        },
+        "lock": "sha256:cb68facda38986313790e70e525e10370b984225e2a24849829d74e12aa00019",
+        "next": {
+          "action": "revert",
+          "detail": "revert the unintended behavior change or ask an operator to accept a new baseline"
+        },
+        "v": 1,
+        "verdict": "red"
+      },
+      "restored_gate": {
+        "cmd": "gate",
+        "counts": {
+          "behavior": 0,
+          "declared": 12,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 12,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 0,
+        "lock": "sha256:cb68facda38986313790e70e525e10370b984225e2a24849829d74e12aa00019",
+        "next": {
+          "action": "proceed",
+          "detail": "all declared checks matched"
+        },
+        "v": 1,
+        "verdict": "green"
+      }
+    },
+    {
+      "id": "exit127",
+      "subject_revision": "6ac830a947d894ed6e6517098b1a344570c8a44c",
+      "file": "internal/vise/runner.go",
+      "before": "\treturn fmt.Sprintf(\"%s exited 127 without a shell diagnostic; inspect the command's exit handling and dependencies\", kind)",
+      "mutant": "\treturn fmt.Sprintf(\"%s could not be launched (exit 127); install the missing program\", kind)",
+      "build_exit": 0,
+      "gate": {
+        "classes": [
+          "behavior"
+        ],
+        "cmd": "gate",
+        "counts": {
+          "behavior": 1,
+          "declared": 1,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 0,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 1,
+        "failures": {
+          "cli-exit127": {
+            "class": "behavior",
+            "detail": "observed behavior differs consistently from the lockfile",
+            "diff": "--- expected/stdout\n+++ got/stdout\n@@ first divergence line 7 @@\n exit=0\n $ vise gate --json\n-…142 rune(s)…6,\"failures\":{\"executed-direct\":{\"class\":\"unmet\",\"detail\":\"not built yet: probe exited 127 without a shell diagnostic; inspect the command's exit handling and d…2065 rune(s)… (line is 2367 runes)\n-exit=6\n-$ vise run executed-direct\n-ranexit=127\n-$ vise run executed-shell\n-ranexit=127\n+…142 rune(s)…6,\"failures\":{\"executed-direct\":{\"class\":\"unmet\",\"detail\":\"not built yet: probe could not be launched (exit 127); install the missing program\",\"diff\":\"exit: exp…2005 rune(s)… (line is 2307 runes)\n+exit=6\n+$ vise run executed-direct\n+ranexit=127\n+$ vise run executed-shell\n+ranexit=127",
+            "expect": {
+              "exit": 0,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:686d77b82e3f8e4e11774ddb7f66e704b8e6f5f21d5a01790a9fa8e5f0ff8e6e"
+            },
+            "got": {
+              "exit": 0,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:8958771988e55131655301caf335bfecf89ac4b3bf647f122bfa898e52b8a37e"
+            }
+          }
+        },
+        "lock": "sha256:cb68facda38986313790e70e525e10370b984225e2a24849829d74e12aa00019",
+        "next": {
+          "action": "revert",
+          "detail": "revert the unintended behavior change or ask an operator to accept a new baseline"
+        },
+        "v": 1,
+        "verdict": "red"
+      },
+      "restored_gate": {
+        "cmd": "gate",
+        "counts": {
+          "behavior": 0,
+          "declared": 12,
+          "flaky": 0,
+          "harness": 0,
+          "metric": 0,
+          "pass": 12,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 0,
+        "lock": "sha256:cb68facda38986313790e70e525e10370b984225e2a24849829d74e12aa00019",
+        "next": {
+          "action": "proceed",
+          "detail": "all declared checks matched"
+        },
+        "v": 1,
+        "verdict": "green"
+      }
+    }
+  ],
+  "diagnostics": {
+    "ordering_commit": "65ea6fe",
+    "dependency_commit": "1e54a8d",
+    "precedence_test_commit": "6ac830a",
+    "before_fix": {
+      "ordering": "TestLockfileValidationSelectsErrorsInKeyOrder failed in all ten phase/map-layer cases; lexical zulu appeared before alpha.",
+      "dependency": "TestDependencyDiagnosticsDoNotDependOnCheckoutLocation failed for missing leaf/parent and ENOTDIR; TestDependencyDiagnosticRoutingAcrossCheckoutLocations failed for status, verify and gate of ordinary dependencies. Protected-spec controls retained human routing."
+    },
+    "after_fix": {
+      "targeted_commands": [
+        "go test ./internal/vise -run 'TestLockfile(Validation|Rejects|Accepts)' -count=1",
+        "go test ./internal/vise ./internal/cli -run 'TestDependencyDiagnostic|TestASpecThatIsAlsoItsOwnDependency|TestPathValidation' -count=1",
+        "go test ./internal/vise -run 'TestLockfileValidation' -count=1"
+      ],
+      "exit": 0
+    },
+    "independent_review": {
+      "model": "gpt-5.6-sol",
+      "scope": "read-only source/test review",
+      "result": "No correctness blocker reported; added cross-category precedence test in response. This was review, not an independently executed test run."
+    }
+  },
+  "uncached_tests": {
+    "command": "go test ./... -count=1",
+    "exit": 0,
+    "source": "1e54a8d (compiled before the additional cross-category test; that follow-up was separately run)",
+    "output": "?   \tgithub.com/NakliTechie/vise/cmd/vise\t[no test files]\nok  \tgithub.com/NakliTechie/vise/internal/cli\t61.350s\nok  \tgithub.com/NakliTechie/vise/internal/vise\t196.543s\n"
+  },
+  "vet": {
+    "command": "go vet ./...",
+    "exit": 0
+  },
+  "fresh_clone": {
+    "revision": "6ac830a947d894ed6e6517098b1a344570c8a44c",
+    "command": "git clone --local --no-hardlinks --branch codex/caller-neutral-roadmap /Users/chiragpatnaik/Code/vise /tmp/vise-b02-evidence.6mpyE8/fresh-clone; then vise status --json and vise gate --json with cwd set to that clone",
+    "environment": "normal inherited environment; empty checkout .gocache; vendored/offline subject builds; no new baseline",
+    "gate": {
+      "cmd": "gate",
+      "counts": {
+        "behavior": 0,
+        "declared": 12,
+        "flaky": 0,
+        "harness": 0,
+        "metric": 0,
+        "pass": 12,
+        "skipped": 0,
+        "unmet": 0
+      },
+      "exit": 0,
+      "lock": "sha256:cb68facda38986313790e70e525e10370b984225e2a24849829d74e12aa00019",
+      "next": {
+        "action": "proceed",
+        "detail": "all declared checks matched"
+      },
+      "v": 1,
+      "verdict": "green"
+    }
+  },
+  "full_verifier": {
+    "command": "scripts/verify verify",
+    "status": "pass",
+    "source_revision": "6ac830a947d894ed6e6517098b1a344570c8a44c",
+    "exit": 0,
+    "features_passed": ["orientation", "readiness", "initialization", "baseline", "failure-modes", "metrics", "review", "pin", "example", "dogfood", "internal-checks"],
+    "test_output": "ok  \tgithub.com/NakliTechie/vise/internal/cli\t62.792s\nok  \tgithub.com/NakliTechie/vise/internal/vise\t201.473s\n",
+    "full_summary": "VISE_VERIFY {\"feature\":\"full\",\"status\":\"pass\"}"
+  },
+  "historical_flakes": [
+    {
+      "id": "exit-only",
+      "cause": "Unordered invalid-lock first error in the original broad mutant. The accepted stable witness targets exit 42; B02 subsequently orders all lock validation maps."
+    },
+    {
+      "id": "spec-dependency",
+      "subject_revision": "6a0c42da9a2725ef3b00a311310ca7a8d54d1de8",
+      "gate": {
+        "classes": [
+          "flake"
+        ],
+        "cmd": "gate",
+        "counts": {
+          "behavior": 0,
+          "declared": 1,
+          "flaky": 1,
+          "harness": 0,
+          "metric": 0,
+          "pass": 0,
+          "skipped": 0,
+          "unmet": 0
+        },
+        "exit": 3,
+        "failures": {
+          "cli-spec-dependency": {
+            "class": "flake",
+            "detail": "mismatching observations differed across the single retry",
+            "diff": "--- expected/stdout\n+++ got/stdout\n@@ first divergence line 9 @@\n exit=0\n $ vise gate --json\n-…113 rune(s)…,\"skipped\":0,\"unmet\":0},\"exit\":2,\"failures\":{\"pin\":{\"class\":\"harness\",\"detail\":\"spec changed after recording, not behavior; restore the spec file, or an operato…280 rune(s)… (line is 553 runes)\n-exit=2\n-$ vise status\n-VISE STATUS — BASELINE-DRIFT\n-manifest: valid=true · probes=1 · metrics=0\n-lockfile: valid=true · probes=1 · metrics=0\n-fingerprint: match=true\n-recorded commits: 1bddc069bbdf724d4c5ee9a77d255b32d421ba3b\n+…113 rune(s)…,\"skipped\":0,\"unmet\":0},\"exit\":2,\"failures\":{\"pin\":{\"class\":\"harness\",\"detail\":\"declared probe input changed after recording\"}},\"lock\":\"sha256:3fe85b2398ed868f7…184 rune(s)… (line is 457 runes)\n+exit=2\n+$ vise status\n+VISE STATUS — BASELINE-DRIFT\n+manifest: valid=true · probes=1 · metrics=0\n+lockfile: valid=true · probes=1 · metrics=0\n+fingerprint: match=true\n+recorded commits: 1bddc069bbdf724d4c5ee9a77d255b32d421ba3b\n… 65 later line(s) omitted",
+            "expect": {
+              "exit": 0,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:bd01ca1ba3cc0c7be5afb9816db4593b25d9580487cb4e07dfc71a446061eafc"
+            },
+            "got": {
+              "exit": 0,
+              "stderr": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "stdout": "sha256:57f1fdd8c88ecd6fa6ac0f8a1d1416ac97c744d50dc634c911e8ae0d656fab07"
+            }
+          }
+        },
+        "lock": "sha256:cb68facda38986313790e70e525e10370b984225e2a24849829d74e12aa00019",
+        "next": {
+          "action": "quarantine_ack",
+          "detail": "the operator must resolve or explicitly tolerate the indeterminate verdict"
+        },
+        "v": 1,
+        "verdict": "indeterminate"
+      },
+      "cause": "Absolute checkout prefixes in missing-dependency errors differed between probe replays. B02 corrected diagnostic rendering; the same broad validation reorder now yields stable exit 1 without changing observations."
+    }
+  ],
+  "limits": [
+    "Five selected witnesses across the explicitly recorded source revisions, not exhaustive mutation coverage.",
+    "No root baseline, manifest, blobs, wrapper or installed judge changed in this goal leg.",
+    "The twelve existing root observations do not directly exercise the new B02 invalid-map and ordinary missing-dependency diagnostics; targeted Go/CLI tests provide that coverage.",
+    "lstat missing/non-directory cases exercised real filesystem errors; open/read cause retention was tested with constructed PathErrors, not injected live I/O races.",
+    "Real Windows/Linux execution, race/vulnerability scans, final release artifact delivery, and B03–B15 are not established by this record.",
+    "Fresh-clone and broad verification source precede the documentation/evidence follow-up; no production code changes are part of that follow-up."
+  ]
+}
