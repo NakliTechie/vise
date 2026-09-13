@@ -1,12 +1,13 @@
-> **Lifecycle:** living — bundle foundation implemented; host runtime pending
+> **Lifecycle:** living — bundle, operator and storage foundations implemented; host runtime pending
 
 # Local reference host
 
 An optional, caller-neutral trusted controller for Vise, with a fixed local
 Docker executor and independent delivery authority. The standalone CLI remains
 usable without it. This directory currently records the contract, not a usable
-host or a certified containment boundary. The pure bundle module is implemented
-with unit tests; it does not yet import a workspace or launch candidate code.
+host or a certified containment boundary. Source bundles, operator generations
+and owned-directory I/O have unit tests; the persistent controller lifecycle is
+not yet implemented, and these modules do not launch candidate code.
 
 ## Status
 
@@ -25,12 +26,14 @@ construction and refusal matrix. Unit-level bundle work cannot establish H01–H
 From the repository root, with Python 3.11 or newer:
 
 ```sh
-python3 -B -m unittest -v host.test_bundle
+python3 -B -m unittest -v host.test_bundle host.test_operator host.test_storage
 ```
 
 The full `scripts/verify verify` also runs these tests in `internal-checks`.
 That development check requires Python; the standalone Go Vise CLI does not.
-The twelve frozen root observations do not directly cover the bundle module.
+The twelve frozen root observations do not directly cover these Python modules.
+Storage tests currently require POSIX descriptor-relative I/O and advisory locks;
+they are not evidence for Windows support or candidate containment.
 
 ## Related documents
 
