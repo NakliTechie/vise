@@ -83,7 +83,7 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 		var err error
 		before, err = GitWorkspaceSnapshot(r.Root, probe.Files)
 		if err != nil {
-			return RunResult{HarnessError: err.Error()}
+			return RunResult{HarnessError: err.Error(), HarnessOperator: gitSnapshotNeedsOperator(err)}
 		}
 	}
 	artifacts := newDeclaredArtifacts(r.Root, probe.Files)
@@ -144,7 +144,7 @@ func (r Runner) RunProbe(probe Probe, checkTracked bool) RunResult {
 func (r Runner) RunMetric(metric Metric) MetricResult {
 	before, err := GitWorkspaceSnapshot(r.Root, nil)
 	if err != nil {
-		return MetricResult{HarnessError: err.Error()}
+		return MetricResult{HarnessError: err.Error(), HarnessOperator: gitSnapshotNeedsOperator(err)}
 	}
 	result := r.runShell("metric", metric.ID, metric.Run, metric.Timeout, metric.Env)
 	if result.HarnessError != "" {

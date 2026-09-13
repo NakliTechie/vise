@@ -60,6 +60,41 @@ Test pointers are relative to `internal/vise/` unless prefixed `../cli/`.
 
 ## Campaign order and boundaries
 
+### C09/C10 Git inspection and repair-authority contract
+
+Failure to locate the requested Git work tree, read HEAD, read its dirty state,
+or obtain Git's part of a pre-execution workspace snapshot is infrastructure
+the current declared command has not damaged: refuse with harness exit 2 and
+operator/human repair. Preserve the underlying diagnostic and error chain;
+do not classify it by matching error prose. A snapshot failure while hashing
+ordinary untracked worktree data remains distinct and retains probe repair.
+An error or Git-state mutation observed after a probe or metric executed
+remains attached to that check with probe repair, even if the failed operation
+would be operator-owned before execution. Fingerprint-command failures retain
+their existing operator routing: the declared fingerprint and recorded
+environment are operator territory. No automatic Git repair is allowed.
+
+The CLI must carry the runner's operator flag through raw `run` refusals,
+including existing protected-artifact refusals; raw success and solely tolerated
+exit 127 keep their existing process status and byte contracts. Root-discovery
+refusals remain diagnostic-only counts keyed by command. Once a valid requested
+scope is loaded, Git preflight keeps C11's zero passes and skipped scope.
+Missing-baseline and invocation precedence do not change.
+
+With a valid baseline, status must not advertise ready/proceed when Git's HEAD
+or dirty-state inspection fails. It remains a read-only exit-0 report with
+harness-error/human, no new probes and no new journal event. Preserve existing
+unrecorded/no-git behavior and existing higher-priority harness conditions.
+Record's no-commit wording is a separately retained diagnostic concern; this
+slice does not change its existing operator route or commit requirements.
+
+Controls require real pre-existing corrupt-index and unreadable-HEAD fixtures,
+full/subset judgments, raw execution, record refusal, status, and a healthy
+restored repository. Snapshot lock/blob/journal bytes and execution witnesses.
+Pair those cases with executed Git damage, ordinary worktree-read failures,
+protected-artifact refusals, and operator-flag propagation. Reintroduce each
+changed routing decision separately and require its check to fail.
+
 ### C23 captured diagnostic contract
 
 Exit 127 remains the existing typed launch-failure condition for gate/pin

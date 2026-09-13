@@ -186,7 +186,7 @@ func (r *recordRun) checkManifest() bool {
 func (r *recordRun) checkWorkingTree() bool {
 	dirty, err := GitDirty(r.root)
 	if err != nil {
-		r.result.Outcome = harnessOnly("record", "git", err.Error())
+		r.result.Outcome = harnessForOperator("record", "git", err.Error())
 		return false
 	}
 	r.dirty = dirty
@@ -235,7 +235,7 @@ func (r *recordRun) resolveHead() bool {
 				"commit the harness first; a baseline freezes behavior at a commit somebody can return to")
 			return false
 		}
-		r.result.Outcome = harnessOnly("record", "git", err.Error())
+		r.result.Outcome = harnessForOperator("record", "git", err.Error())
 		return false
 	}
 	r.commit = commit

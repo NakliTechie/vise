@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -35,6 +36,9 @@ func GitHead(root string) (string, error) {
 func GitDirty(root string) (bool, error) {
 	cmd := exec.Command("git", "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	cmd.Dir = root
+	// Inspection must not refresh/write the index; status is a read-only
+	// report, and this helper is also used before judging a candidate.
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -114,6 +118,19 @@ func (s WorkspaceSnapshot) ChangedUntracked(other WorkspaceSnapshot) []string {
 	return changed
 }
 
+// gitSnapshotError marks failure to obtain Git's part of the snapshot, not
+// failure to read an ordinary workspace entry. Keep the original diagnostic
+// and error chain; callers combine this origin with execution phase.
+type gitSnapshotError struct{ cause error }
+
+func (e *gitSnapshotError) Error() string { return e.cause.Error() }
+func (e *gitSnapshotError) Unwrap() error { return e.cause }
+
+func gitSnapshotNeedsOperator(err error) bool {
+	var failure *gitSnapshotError
+	return errors.As(err, &failure)
+}
+
 // GitWorkspaceSnapshot captures what a probe must leave alone.
 //
 // Tracked files are covered by their diff against HEAD. Untracked files are
@@ -135,23 +152,23 @@ func GitWorkspaceSnapshot(root string, exclude []string) (WorkspaceSnapshot, err
 	cmd.Dir = root
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
-		return WorkspaceSnapshot{}, fmt.Errorf("snapshot tracked files: %w", err)
+		return WorkspaceSnapshot{}, &gitSnapshotError{fmt.Errorf("snapshot tracked files: %w", err)}
 	}
 	if err := cmd.Start(); err != nil {
-		return WorkspaceSnapshot{}, fmt.Errorf("snapshot tracked files: %w", err)
+		return WorkspaceSnapshot{}, &gitSnapshotError{fmt.Errorf("snapshot tracked files: %w", err)}
 	}
 	digest := sha256.New()
 	if _, copyErr := io.Copy(digest, pipe); copyErr != nil {
 		_ = cmd.Wait()
-		return WorkspaceSnapshot{}, fmt.Errorf("snapshot tracked files: %w", copyErr)
+		return WorkspaceSnapshot{}, &gitSnapshotError{fmt.Errorf("snapshot tracked files: %w", copyErr)}
 	}
 	if err := cmd.Wait(); err != nil {
-		return WorkspaceSnapshot{}, fmt.Errorf("snapshot tracked files: %w", err)
+		return WorkspaceSnapshot{}, &gitSnapshotError{fmt.Errorf("snapshot tracked files: %w", err)}
 	}
 	trackedHash := "sha256:" + hex.EncodeToString(digest.Sum(nil))
 	gitState, err := gitOwnState(root)
 	if err != nil {
-		return WorkspaceSnapshot{}, err
+		return WorkspaceSnapshot{}, &gitSnapshotError{err}
 	}
 	snapshot := WorkspaceSnapshot{Tracked: trackedHash, Git: gitState}
 
@@ -161,11 +178,11 @@ func GitWorkspaceSnapshot(root string, exclude []string) (WorkspaceSnapshot, err
 	}
 	paths, err := gitUntrackedPaths(root)
 	if err != nil {
-		return WorkspaceSnapshot{}, err
+		return WorkspaceSnapshot{}, &gitSnapshotError{err}
 	}
 	hidden, err := gitIgnoredRuleFiles(root)
 	if err != nil {
-		return WorkspaceSnapshot{}, err
+		return WorkspaceSnapshot{}, &gitSnapshotError{err}
 	}
 	paths = append(paths, hidden...)
 	// An empty directory a probe leaves behind is not detected. `git ls-files
@@ -183,6 +200,12 @@ func GitWorkspaceSnapshot(root string, exclude []string) (WorkspaceSnapshot, err
 		}
 		hash, err := hashWorkspaceEntry(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil {
+			// Git consumes these rule files whether they were discovered as
+			// ignored or ordinary untracked entries. Their read authority is
+			// distinct from ordinary source data in the same directory.
+			if base := filepath.Base(rel); base == ".gitignore" || base == ".gitattributes" {
+				return WorkspaceSnapshot{}, &gitSnapshotError{err}
+			}
 			return WorkspaceSnapshot{}, err
 		}
 		if hash == "" {

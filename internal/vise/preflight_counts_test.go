@@ -293,11 +293,8 @@ func TestC11StatePreflightFailuresRetainFullAndSubsetScope(t *testing.T) {
 				tc.breakIt(t, root, manifest, bytes)
 				got := Verify(root, manifest, bytes, VerifyOptions{ProbeID: scope.probe})
 				assertC11Preflight(t, got, scope.declared, scope.declared, ExitHarness, tc.failure)
-				if got.Outcome.Next.Action != NextHuman && tc.failure != "git" {
+				if got.Outcome.Next.Action != NextHuman || !got.Outcome.Failures[tc.failure].Operator {
 					t.Errorf("repair action = %q, want human", got.Outcome.Next.Action)
-				}
-				if tc.failure == "git" && got.Outcome.Next.Action != NextFixProbe {
-					t.Errorf("repair action = %q, want fix_probe", got.Outcome.Next.Action)
 				}
 				c11AssertWitness(t, root, "")
 			})

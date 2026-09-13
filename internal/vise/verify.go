@@ -120,12 +120,12 @@ func loadVerifyState(root string, manifest Manifest, manifestBytes []byte, outco
 	outcome.Lock = lockHash
 	commit, err := GitHead(root)
 	if err != nil {
-		failure := harnessOnly("verify", "git", err.Error())
+		failure := harnessForOperator("verify", "git", err.Error())
 		return verifyState{}, &failure
 	}
 	dirty, err := GitDirty(root)
 	if err != nil {
-		failure := harnessOnly("verify", "git", err.Error())
+		failure := harnessForOperator("verify", "git", err.Error())
 		return verifyState{}, &failure
 	}
 	return verifyState{lock: lock, lockHash: lockHash, commit: commit, dirty: dirty}, nil

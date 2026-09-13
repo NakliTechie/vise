@@ -199,7 +199,7 @@ func resolveGitRoot(command, cwd string, jsonMode bool, stdout, stderr io.Writer
 		renderDoctor(stdout, report)
 		return "", vise.ExitOK, false
 	}
-	return "", renderSimpleError(command, err.Error(), jsonMode, stdout, stderr), false
+	return "", renderOperatorError(command, err.Error(), jsonMode, stdout, stderr), false
 }
 
 func answerHelpOrVersion(args []string, jsonMode bool, stdout, stderr io.Writer) (int, bool) {
@@ -517,6 +517,9 @@ func runProbe(args []string, root string, jsonMode bool, stdout, stderr io.Write
 	// whole result, so a probe that mutated the checkout on its way to a 127
 	// reported the 127 and nothing about the mutation.
 	if result.HarnessError != "" && !(result.LaunchFailed && result.Tolerated) {
+		if result.HarnessOperator {
+			return renderOperatorError("run", result.HarnessError, jsonMode, stdout, stderr)
+		}
 		return renderSimpleError("run", result.HarnessError, jsonMode, stdout, stderr)
 	}
 	if jsonMode {

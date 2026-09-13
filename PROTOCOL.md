@@ -192,6 +192,15 @@ routes to `fix_invocation`. Ordinary probe repair is `fix_probe`, never license
 to edit protected evaluator state. Stop on an unexplained pre-existing failure
 except exit 6; that is an instruction to build to the operator's spec.
 
+Git work-tree discovery and pre-execution Git-state inspection failures are
+operator-owned infrastructure refusals, not proof that a probe is broken.
+They use harness exit 2 and `operator: true` / `human`; ordinary untracked
+worktree-data read errors remain probe-owned. After a probe or metric executes,
+its Git damage or failed post-execution snapshot remains that check's
+`fix_probe` failure. Raw `run` preserves the runner's operator flag when it
+returns a harness refusal. Fingerprint-command failures retain operator routing.
+No route authorizes automatic repair of Git metadata.
+
 Normal outcome fields in addition to the common envelope:
 
 | Field | Shape and absence semantics |
@@ -339,6 +348,11 @@ events. Entries have `e` and optional `at`, `commit`, `dirty`, `verdict`,
 `counts`, `metrics` (ID → number), `flaky`, `probe_set`, `lock`, and `pins`
 (record-pin shape). Journal data is historical and locally writable state,
 not an authenticated current result or an exhaustive history API.
+
+With a valid baseline, unreadable HEAD or failed Git dirty-state inspection
+reports `harness-error` / `human`, never `ready` / `proceed`. Status executes no
+probe and writes no journal event. Earlier unavailable-baseline and
+operator-harness conditions retain their precedence.
 
 ## 6. Bounds, freshness and delivery
 

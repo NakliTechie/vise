@@ -168,6 +168,15 @@ in prose. An agent branches on that field, never on the message. Failure keys
 are usually probe ids; `manifest`, `journal`, `vise.lock`, `fingerprint` and
 `rerun-limit` name themselves.
 
+Git work-tree discovery and Git-state inspection that fail before a declared
+command executes require operator repair. Ordinary untracked worktree-data
+read errors remain distinct. A probe or metric that damages Git state, or
+leaves its post-execution snapshot unreadable, still receives probe repair
+under that check's id. Fingerprint failures retain operator repair. Raw `run`
+carries these typed ownership decisions into its harness refusal. Status with
+a valid baseline must surface unreadable HEAD or dirty state as a human-owned
+harness error without running a probe.
+
 Passing probes normally appear only in counts; passing-unaccepted pins are
 also named in the bounded pin summary. The eight emitted actions are
 `proceed`, `revert`, `fix_probe`, `fix_invocation`, `record_first`,

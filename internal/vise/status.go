@@ -318,6 +318,11 @@ func buildRerunRefusal(root string, manifest Manifest, report *StatusReport) {
 		report.Next = Next{Action: NextHuman, Detail: "git HEAD will not read, so the next gate cannot run: " + headErr.Error()}
 		return
 	}
+	if _, err := GitDirty(root); err != nil {
+		report.State = "harness-error"
+		report.Next = Next{Action: NextHuman, Detail: "git working-tree state will not read, so the next gate cannot run: " + err.Error()}
+		return
+	}
 	if refused {
 		report.State = "rerun-refused"
 		report.Next = Next{Action: NextHuman, Detail: "the next gate is refused (" + detail + "); commit, re-record, or change the manifest"}
