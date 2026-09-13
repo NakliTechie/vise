@@ -27,6 +27,7 @@ automatically in the producer or consumer matrix.
 
 The pure, met, and executed same-pin cases check the lock's null acceptance
 and unchanged hashes of the lock, specification, and declared dependency.
+Cases also check the JSON verdict against the required exit-code meaning.
 Mixed-class cases check exact class sets and selected counts. Execution
 witness files distinguish evaluated metrics from skipped ones. These checks
 do not certify atomic snapshots of every file in a generation.

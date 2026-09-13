@@ -122,6 +122,16 @@ def metric(i, cmd):
 def assert_out(r, exit_, classes, counts=None, next_=None):
     j = js(r)
     assert j["exit"] == exit_
+    expected_verdict = {
+        0: "green",
+        1: "red",
+        2: "indeterminate",
+        3: "indeterminate",
+        4: "indeterminate",
+        5: "red",
+        6: "red",
+    }[exit_]
+    assert j["verdict"] == expected_verdict, (j["verdict"], expected_verdict)
     assert set(j.get("classes", [])) == set(classes), (j.get("classes"), classes)
     if counts:
         for k, v in counts.items():
