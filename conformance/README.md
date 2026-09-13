@@ -1,5 +1,9 @@
 # Vise producer conformance kit
 
+The separate [CLI concurrency harness](CONCURRENCY.md) checks actual
+record/record and record/gate pairs, plus readers during a held writer.
+Run it explicitly; it is not included in the producer/consumer matrix below.
+
 `producer.py` is a bounded, provider-free executable check for a specifically
 selected Vise producer. It creates disposable Git repositories outside this
 checkout, invokes the selected executable as a real subprocess, and retains
