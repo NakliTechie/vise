@@ -28,7 +28,7 @@ construction and refusal matrix. Unit-level bundle work cannot establish H01–H
 From the repository root, with Python 3.11 or newer:
 
 ```sh
-python3 -B -m unittest -v host.test_bundle host.test_operator host.test_storage host.test_storage_tree_publication host.test_git_identity host.test_git_initialization_prestate host.test_git_inventory
+python3 -B -m unittest -v host.test_bundle host.test_operator host.test_storage host.test_storage_tree_publication host.test_git_identity host.test_git_initialization_prestate host.test_git_inventory host.test_pin_provenance
 ```
 
 The full `scripts/verify verify` also runs these tests in `internal-checks`.
@@ -47,6 +47,12 @@ checks the private repository's registered paths and fixed symbolic HEAD before
 Git interprets them. It is a callable foundation, not yet a Session entry-point
 guard. It does not authenticate unreachable object contents; active reachable
 objects remain the Git identity verifier's responsibility.
+
+The read-only pin-provenance helper checks that unchanged accepted pins retain
+their historical commit and newly accepted pins name the evaluated commit. It
+does not authorize acceptance, invoke `record`, or validate the complete lock,
+reviewed digest, blobs, unrelated paths, or execution receipt. Those checks and
+persistent acceptance reconciliation remain unimplemented.
 
 ## Related documents
 
