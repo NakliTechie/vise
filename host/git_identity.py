@@ -283,9 +283,9 @@ def construct_assembly(
             oid = git.run(("hash-object", "-w", "--stdin"), root=root, stdin=entry.data, write=True).strip().decode("ascii")
             _require_object_id(oid)
             mode = "100755" if entry.executable else "100644"
-            records.append(f"{mode} {oid}\t{entry.path}\n".encode("utf-8"))
+            records.append(f"{mode} {oid}\t{entry.path}\0".encode("utf-8"))
         if records:
-            git.run(("update-index", "--index-info"), root=root, stdin=b"".join(records), index_file=index, write=True)
+            git.run(("update-index", "-z", "--index-info"), root=root, stdin=b"".join(records), index_file=index, write=True)
         tree = git.run(("write-tree",), root=root, index_file=index, write=True).strip().decode("ascii")
     message = _assembly_message(candidate.identity, operator.identity, identity.message_schema)
     commit = _commit_tree(git, root, tree, bootstrap, message, identity)
