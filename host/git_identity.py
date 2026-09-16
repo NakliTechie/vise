@@ -179,9 +179,27 @@ class GitRunner:
         return result.stdout
 
 
-def initialize_repository(root: Path, *, git: GitRunner, identity: FixedGitIdentity) -> str:
-    """Initialize a new private SHA-1 repository and return its bootstrap commit."""
-    root.mkdir(mode=0o700, parents=False, exist_ok=False)
+def initialize_repository(
+    root: Path,
+    *,
+    git: GitRunner,
+    identity: FixedGitIdentity,
+    prestate: dict[str, FileBytes] | None = None,
+    caller_lock_held: bool = False,
+) -> str:
+    """Initialize a private SHA-1 repository and return its bootstrap commit.
+
+    By default the root must not exist.  The explicit ``prestate`` profile is
+    for a session that durably registered initialization before creating Git;
+    it accepts only an exact, private ``.vise-host`` inventory while the caller
+    holds its controller lock.  It never accepts or resets a partial ``.git``.
+    """
+    if prestate is None:
+        root.mkdir(mode=0o700, parents=False, exist_ok=False)
+    else:
+        if caller_lock_held is not True:
+            raise GitIdentityError("existing-root initialization requires the caller lock")
+        _verify_initialization_prestate(root, prestate)
     env = _init_env(git)
     result = subprocess.run(
         (
@@ -207,6 +225,36 @@ def initialize_repository(root: Path, *, git: GitRunner, identity: FixedGitIdent
     git.run(("update-ref", "HEAD", bootstrap, ""), root=root, write=True)
     git.run(("read-tree", empty_tree), root=root, write=True)
     return bootstrap
+
+
+def _verify_initialization_prestate(root: Path, prestate: dict[str, FileBytes]) -> None:
+    if type(prestate) is not dict or not prestate:
+        raise GitIdentityError("initialization prestate must be a nonempty exact inventory")
+    if any(
+        type(path) is not str
+        or not path.startswith(".vise-host/")
+        or type(expected) is not FileBytes
+        or type(expected.data) is not bytes
+        or type(expected.mode) is not int
+        for path, expected in prestate.items()
+    ):
+        raise GitIdentityError("initialization prestate contains an unsupported entry")
+    try:
+        with OwnedDirectory(root) as owned:
+            expected_directories = {".vise-host"}
+            for path in prestate:
+                parts = path.split("/")
+                expected_directories.update("/".join(parts[:depth]) for depth in range(1, len(parts)))
+            observed = owned.walk(max_entries=len(prestate) + len(expected_directories))
+            observed_files = {entry.path for entry in observed if not entry.directory}
+            observed_directories = {entry.path for entry in observed if entry.directory}
+            if observed_files != set(prestate) or observed_directories != expected_directories:
+                raise GitIdentityError("existing root differs from initialization prestate")
+            for path, expected in prestate.items():
+                if owned.read_file(path, max_bytes=len(expected.data)) != expected:
+                    raise GitIdentityError("existing root differs from initialization prestate")
+    except StorageError as error:
+        raise GitIdentityError("existing root is unsafe for initialization") from error
 
 
 def construct_assembly(
