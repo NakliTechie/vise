@@ -116,11 +116,15 @@ class OwnedDirectory:
             raise StorageError("owned file must have exactly one link")
 
     @contextmanager
-    def _directory(self, parts: list[str]) -> Iterator[int]:
+    def _directory(self, parts: list[str], *, exact: bool = False) -> Iterator[int]:
         self._require_open()
         fd = os.dup(self._fd)
         try:
             for part in parts:
+                if exact:
+                    with os.scandir(fd) as entries:
+                        if not any(entry.name == part for entry in entries):
+                            raise StorageError("owned directory spelling differs")
                 next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
                 os.close(fd)
                 fd = next_fd
@@ -266,6 +270,117 @@ class OwnedDirectory:
                 os.fsync(dest_fd)
             except OSError as error:
                 raise StorageMutationError("move", "renamed") from error
+
+    def move_tree_expected(
+        self, source: str, destination: str, *,
+        expected_files: dict[str, FileBytes], expected_directories: dict[str, int],
+    ) -> None:
+        """Publish one exact registered tree to an absent destination.
+
+        Inventory keys are relative to the tree; directories must include ""
+        for its root, plus every ancestor and empty directory, with exact modes.
+        The caller holds its lock and has durably registered and staged this
+        tree. No contents are deleted or rewritten. Parents are synced before
+        rename and both are attempted afterward; a post-rename sync failure
+        reports phase "renamed". This is not CAS against hostile host writers.
+        """
+        source_parts, destination_parts = self._parts(source), self._parts(destination)
+        first, second = source.casefold(), destination.casefold()
+        if first == second or first.startswith(second + "/") or second.startswith(first + "/"):
+            raise StorageError("tree source and destination overlap")
+        if type(expected_files) is not dict or type(expected_directories) is not dict:
+            raise StorageError("tree inventories must be exact dictionaries")
+        files, directories = dict(expected_files), dict(expected_directories)
+        if "" not in directories or len(files) > self._limits.max_files:
+            raise StorageError("tree inventory lacks its root or exceeds the file limit")
+        folded: set[str] = set()
+        total = 0
+        for path, value in (*files.items(), *directories.items()):
+            is_directory = path in directories
+            if path != "" or not is_directory:
+                self._parts(path)
+            if type(path) is not str or path.casefold() in folded:
+                raise StorageError("tree inventory paths collide")
+            folded.add(path.casefold())
+            for prefix in (source, destination):
+                self._parts(prefix + "/" + path if path else prefix)
+            if is_directory:
+                mode = value
+            else:
+                self._expected(value)
+                mode = value.mode
+                if len(value.data) > self._limits.max_file_bytes:
+                    raise StorageError("tree file exceeds byte limit")
+                total += len(value.data)
+            if type(mode) is not int or mode < 0 or mode > 0o777 or mode & 0o022:
+                raise StorageError("tree inventory mode is unsafe")
+            if path:
+                parent = path.rpartition("/")[0]
+                if parent not in directories:
+                    raise StorageError("tree inventory lacks an exact directory ancestor")
+        if total > self._limits.max_total_bytes:
+            raise StorageError("tree inventory exceeds total byte limit")
+
+        with self._directory(source_parts[:-1], exact=True) as source_fd, self._directory(
+            destination_parts[:-1], exact=True,
+        ) as destination_fd:
+            before = os.stat(source_parts[-1], dir_fd=source_fd, follow_symlinks=False)
+            self._check_owned(before, directory=True)
+            seen_files: set[str] = set()
+            seen_directories: set[str] = set()
+            pending = [""]
+            while pending:
+                relative = pending.pop()
+                parts = source_parts + (relative.split("/") if relative else [])
+                with self._directory(parts, exact=True) as directory_fd:
+                    info = os.fstat(directory_fd)
+                    if stat.S_IMODE(info.st_mode) != directories[relative]:
+                        raise StorageError("tree directory differs from publication inventory")
+                    seen_directories.add(relative)
+                    with os.scandir(directory_fd) as entries:
+                        for entry in entries:
+                            path = relative + "/" + entry.name if relative else entry.name
+                            if path in directories:
+                                self._check_owned(entry.stat(follow_symlinks=False), directory=True)
+                                pending.append(path)
+                            elif path in files:
+                                expected = files[path]
+                                if self.read_file(source + "/" + path, max_bytes=len(expected.data)) != expected:
+                                    raise StorageError("tree file differs from publication inventory")
+                                seen_files.add(path)
+                            else:
+                                raise StorageError("tree contains an unregistered entry")
+            if seen_files != set(files) or seen_directories != set(directories):
+                raise StorageError("tree publication inventory is incomplete")
+
+            def require_absent() -> None:
+                try:
+                    os.stat(destination_parts[-1], dir_fd=destination_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise StorageError("tree destination already exists")
+                with os.scandir(destination_fd) as entries:
+                    if any(entry.name.casefold() == destination_parts[-1].casefold() for entry in entries):
+                        raise StorageError("tree destination aliases an existing entry")
+
+            require_absent()
+            os.fsync(source_fd)
+            os.fsync(destination_fd)
+            named = os.stat(source_parts[-1], dir_fd=source_fd, follow_symlinks=False)
+            if self._stamp(before) != self._stamp(named):
+                raise StorageError("tree source changed before publication")
+            require_absent()
+            os.rename(source_parts[-1], destination_parts[-1],
+                      src_dir_fd=source_fd, dst_dir_fd=destination_fd)
+            failure = None
+            for fd in (source_fd, destination_fd):
+                try:
+                    os.fsync(fd)
+                except OSError as error:
+                    failure = failure or error
+            if failure is not None:
+                raise StorageMutationError("move-tree", "renamed") from failure
 
     def remove_empty_directory(self, path: str) -> None:
         with self._parent(path) as (parent, name):
