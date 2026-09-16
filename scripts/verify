@@ -666,7 +666,7 @@ verify_internal_checks() {
   if ! python3 -B -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
     fail internal-checks "Python 3.11 or newer is required for host-foundation checks"
   fi
-  if ! python3 -B -m unittest -v host.test_bundle host.test_operator host.test_storage host.test_git_identity host.test_git_initialization_prestate host.test_git_inventory; then
+  if ! python3 -B -m unittest -v host.test_bundle host.test_operator host.test_storage host.test_storage_tree_publication host.test_git_identity host.test_git_initialization_prestate host.test_git_inventory; then
     fail internal-checks "Python host-foundation tests failed"
   fi
   summary internal-checks pass

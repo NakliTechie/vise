@@ -28,7 +28,7 @@ construction and refusal matrix. Unit-level bundle work cannot establish H01–H
 From the repository root, with Python 3.11 or newer:
 
 ```sh
-python3 -B -m unittest -v host.test_bundle host.test_operator host.test_storage host.test_git_identity host.test_git_initialization_prestate host.test_git_inventory
+python3 -B -m unittest -v host.test_bundle host.test_operator host.test_storage host.test_storage_tree_publication host.test_git_identity host.test_git_initialization_prestate host.test_git_inventory
 ```
 
 The full `scripts/verify verify` also runs these tests in `internal-checks`.
@@ -36,6 +36,10 @@ That development check requires Python; the standalone Go Vise CLI does not.
 The twelve frozen root observations do not directly cover these Python modules.
 Storage tests currently require POSIX descriptor-relative I/O and advisory locks;
 they are not evidence for Windows support or candidate containment.
+The directory-publication helper checks an exact registered file/directory
+inventory and renames it to an absent destination. Its caller must hold the
+session lock and durably stage the tree; it does not implement initialization
+recovery or compare-and-swap against hostile concurrent host writers.
 Git identity tests use an installed Git executable and disposable repositories.
 The initialization helper accepts only exact registered controller prestate; it
 does not recover a partially initialized Git repository. The layout validator
