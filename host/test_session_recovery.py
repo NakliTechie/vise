@@ -402,13 +402,45 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(self.next, session.candidate)
 
     def test_partial_initialization_remains_explicit_refusal(self):
+        import stat
+
+        class NoCalls(GitRunner):
+            def run(self, *args, **kwargs):
+                raise AssertionError("legacy partial initialization reached Git")
+
         root = Path(self.temp_case.name) / "initial"
-        with patch.object(s, "initialize_repository", side_effect=Crash):
-            with self.assertRaises(Crash):
-                initialize_session(root, self.op, git=self.git, identity=IDENTITY)
+        root.mkdir(mode=0o700)
+        controller = root / ".vise-host"
+        controller.mkdir(mode=0o700)
+        (controller / "session.lock").write_bytes(b"")
+        (controller / "session.lock").chmod(0o600)
+        legacy = s._canonical_json({"version": 1, "operation": "initialize",
+                                    "phase": "PREPARING", "q": "a" * 32})
+        (controller / "intent.json").write_bytes(legacy)
+        (controller / "intent.json").chmod(0o600)
+        template = Path(self.temp_case.name) / "legacy-empty-template"
+        template.mkdir(mode=0o700)
+        self.git.run(("init", "--initial-branch=vise-host", "--object-format=sha1",
+                      "--template=" + str(template)), root=root, write=True)
+        self.assertTrue((root / ".git/HEAD").is_file())
+        self.assertFalse((root / ".git/refs/heads/vise-host").exists())
+
+        def captured():
+            result = []
+            for path in [root, *sorted(root.rglob("*"))]:
+                info = path.lstat()
+                data = (path.read_bytes() if stat.S_ISREG(info.st_mode) else
+                        os.readlink(path) if stat.S_ISLNK(info.st_mode) else None)
+                result.append((str(path.relative_to(root)), info.st_mode, info.st_uid,
+                               info.st_nlink, info.st_ino, info.st_size,
+                               info.st_mtime_ns, info.st_ctime_ns, data))
+            return result
+
+        before = captured()
         with self.assertRaises(SessionError):
-            open_session(root, git=self.git)
-        self.assertTrue((root / ".vise-host/intent.json").is_file())
+            open_session(root, git=NoCalls(GIT, Path(self.temp_case.name) / "legacy-guard-home"))
+        self.assertEqual(before, captured())
+        self.assertEqual(legacy, (controller / "intent.json").read_bytes())
 
     def test_retained_terminal_corruption_refuses_reopen(self):
         materialize_candidate(self.session(), self.next)

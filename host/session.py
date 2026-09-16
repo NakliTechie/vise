@@ -7,20 +7,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-import uuid
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from host.bundle import BundleError, BundleLimits, SourceBundle, SourceEntry, build_bundle, decode_bundle
+from host.bundle import BundleError, BundleLimits, SourceBundle, SourceEntry, decode_bundle
 from host.git_identity import (
     AssemblyIdentity,
     FixedGitIdentity,
     GitIdentityError,
     GitRunner,
-    activate_assembly,
-    construct_assembly,
-    initialize_repository,
     verify_active_assembly,
 )
 from host.operator import OperatorGeneration, decode_operator, validate_candidate
@@ -86,61 +82,20 @@ def initialize_session(
     identity: FixedGitIdentity,
 ) -> MaterializationResult:
     """Create and publish an empty-C/initial-O session."""
-    empty = build_bundle(())
+    from host.session_initialization import initialize
     try:
-        validate_candidate(empty, operator)
-        _validate_host_operator(operator)
-        root.mkdir(mode=0o700, parents=False, exist_ok=False)
-        (root / ".vise-host").mkdir(mode=0o700)
-        with _session_storage(root) as owned:
-            owned.write_new(".vise-host/session.lock", b"", mode=0o600)
-            with owned.exclusive_lock(".vise-host/session.lock"):
-                q = uuid.uuid4().hex
-                initial_intent = _canonical_json({
-                    "version": 1, "operation": "initialize", "phase": "PREPARING", "q": q,
-                })
-                owned.write_new(".vise-host/intent.json", initial_intent, mode=0o600)
-                bootstrap = initialize_repository(
-                    root, git=git, identity=identity,
-                    prestate={
-                        ".vise-host/session.lock": FileBytes(b"", 0o600),
-                        ".vise-host/intent.json": FileBytes(initial_intent, 0o600),
-                    },
-                    caller_lock_held=True,
-                )
-                owned.mkdirs(".vise-host/generations")
-                _store_envelope(owned, empty.identity, empty.encoded)
-                _store_envelope(owned, operator.identity, operator.encoded)
-                assembly = construct_assembly(
-                    root, git=git, identity=identity, bootstrap=bootstrap,
-                    candidate=empty, operator=operator,
-                )
-                _install_entries(owned, (), operator.files)
-                initial = _git_state(root, git)
-                activate_assembly(
-                    root, git=git, requested=assembly, identity=identity,
-                    expected_head=initial[0], expected_index_tree=initial[1], caller_lock_held=True,
-                )
-                session = Session(
-                    root, git, identity, bootstrap, empty, operator, assembly,
-                    uuid.uuid4().hex, _git_policy_identity(owned),
-                )
-                _publish_session(owned, session, destination=None)
-                _append_operation(owned, {
-                    "operation": "initialize", "phase": "complete", "q": q,
-                    "requested": _identity_dict(assembly), "outcome": "complete",
-                })
-                _remove_intent(owned)
+        return initialize(root, operator, git=git, identity=identity)
     except (BundleError, GitIdentityError, GitInventoryError, StorageError, OSError) as error:
         raise SessionError("session initialization failed") from error
-    return observe_generation(session)
 
 
 def open_session(root: Path, *, git: GitRunner) -> Session:
     """Strictly reopen persistent identity without caller-supplied identity values."""
     try:
         with _locked_storage(root) as owned:
+            from host.session_initialization import recover as recover_initialization
             from host.session_transaction import recover
+            recover_initialization(root, git, owned)
             recover(root, git, owned)
             session = _load_session(root, git, owned)
             _observe_locked(session, owned)
@@ -200,6 +155,8 @@ def _load_session(root: Path, git: GitRunner, owned: OwnedDirectory, *, pending:
         root, git, identity, value["bootstrap"], candidate, operator, assembly,
         value["session_id"], value["git_policy"],
     )
+    from host.session_initialization import validate_retained
+    validate_retained(owned, session)
     _require_inventory(value["candidate_inventory"], candidate.entries, "candidate")
     _require_inventory(value["operator_inventory"], operator.files, "operator")
     if not pending:
@@ -299,6 +256,7 @@ def _validate_observed_paths(
     exact_directories = _implied_directories((*candidate, *operator)) | {
         ".git", ".vise", ".vise-host", ".vise-host/generations",
         ".vise-host/intents", ".vise-host/recovery", ".vise-host/outcomes",
+        ".vise-host/initializations",
     }
     exact_files.update(registered_files or ())
     exact_directories.update(registered_directories or ())
@@ -307,6 +265,10 @@ def _validate_observed_paths(
             exact_directories.update(_implied_directories((entry,)))
     for observed in owned.walk(max_entries=1_000_000):
         path = observed.path
+        if path.startswith(".vise-host/initializations/") and not observed.directory:
+            name = path.removeprefix(".vise-host/initializations/")
+            if len(name) == 64 and all(char in "0123456789abcdef" for char in name):
+                continue
         if path.startswith(".git/") or path == ".git":
             continue
         if path.startswith(".vise-host/generations/") and not observed.directory:
